@@ -362,12 +362,15 @@ if [[ $PRINT_MODE -eq 1 && -f "$OUT/$NAME.pdf" ]]; then
       a3)     LP_MEDIA="A3" ;;
       *)      LP_MEDIA="$PAPER" ;;
     esac
-    if [[ $TEST_MODE -eq 1 ]]; then LP_TYPE="stationery"; else LP_TYPE="photographic-glossy"; fi
+    # Real sheets = the "4x2 Glossy" preset from the Windows driver, translated to CUPS
+    # (docs/printer-presets/README.md): rear feeder, glossy photo, High quality, RGB.
+    # Test sheet = plain paper from the main tray.
+    if [[ $TEST_MODE -eq 1 ]]; then LP_TYPE="stationery"; LP_SLOT="main"; else LP_TYPE="photographic-glossy"; LP_SLOT="rear"; fi
     # shellcheck disable=SC2206  # MTG_PROXY_LP_OPTS is a deliberate word-split list of lp options
     LP_EXTRA=(${MTG_PROXY_LP_OPTS:-})
-    echo "printing $NAME.pdf → ${PRINTER:-default printer} (media=$LP_MEDIA, type=$LP_TYPE, 100%, no scaling)"
-    lp "${LP_DEST[@]}" -o media="$LP_MEDIA" -o print-scaling=none -o fit-to-page=false \
-       -o MediaType="$LP_TYPE" -o cupsPrintQuality=High -o ColorModel=RGB \
+    echo "printing $NAME.pdf → ${PRINTER:-default printer} (media=$LP_MEDIA, type=$LP_TYPE, tray=$LP_SLOT, High, 100%, no scaling)"
+    lp ${LP_DEST[@]+"${LP_DEST[@]}"} -o media="$LP_MEDIA" -o print-scaling=none -o fit-to-page=false \
+       -o MediaType="$LP_TYPE" -o InputSlot="$LP_SLOT" -o cupsPrintQuality=High -o ColorModel=RGB \
        ${LP_EXTRA[@]+"${LP_EXTRA[@]}"} "$OUT/$NAME.pdf"
     [[ -f "$OUT/$NAME-duplex.pdf" ]] && echo "NOTE: $NAME-duplex.pdf not sent — print it by hand with manual duplex (long-edge flip)."
   fi

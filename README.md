@@ -36,8 +36,11 @@ silhouette-card-maker/  vendored PDF engine — its own git repo (fork j0nas/sil
 ```
 
 `--print` goes through CUPS with scaling forced off (media A4/letter to match the PDF;
-plain paper for the test sheet, glossy photo paper otherwise; `MTG_PROXY_LP_OPTS` adds lp
-options). On the Mac the ET-8550 is the default printer, so no name is needed.
+plain paper from the main tray for the test sheet, otherwise the **4x2 Glossy** preset
+translated from the Windows driver — rear feeder, glossy photo, High quality; see
+`docs/printer-presets/README.md` for all five presets and the CUPS mapping;
+`MTG_PROXY_LP_OPTS` adds lp options). On the Mac the ET-8550 is the default printer, so
+no name is needed.
 
 `./test-sheet/` (and the Windows mirror) gets one A4 sheet of 8 **placeholder gauge
 cards** — exact 63×88 mm standard-MTG geometry, hairline art only, near-zero ink:
