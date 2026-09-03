@@ -45,6 +45,9 @@ Other paper types on the Mac side: Epson Ultra Glossy → `photographic-high-glo
 Matte → `photographic-matte`, Photo Quality Ink Jet → `photographic` (nearest), plain →
 `stationery`. Thick paper → `com.epson-thickpaper1`/`2`.
 
-`make-proxies --print` uses exactly the 4x2 Glossy mapping for real sheets, and plain
-paper from the main tray for the `--test` sheet. Full list of what the Mac driver offers:
+On the Mac this mapping exists as the CUPS printer instance `EPSON_ET_8550_Series/4x2-glossy`
+(`~/.cups/lpoptions`, chezmoi-managed): `lp -d EPSON_ET_8550_Series/4x2-glossy file.pdf`
+from any tool. `make-proxies --print` uses it for real sheets and plain-paper defaults for
+the `--test` sheet. Recreate by hand with
+`lpoptions -p EPSON_ET_8550_Series/4x2-glossy -o media=A4 -o InputSlot=rear -o MediaType=photographic-glossy -o cupsPrintQuality=High -o ColorModel=RGB -o print-scaling=none -o fit-to-page=false`. Full list of what the Mac driver offers:
 `lpoptions -p EPSON_ET_8550_Series -l`.

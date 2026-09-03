@@ -21,9 +21,11 @@
 #   --split-faces         each DFC face as its own card (default: separate manual-duplex PDF)
 #   --plain               normal frames (default prefers showcase/extended/full art)
 #   --skip-fetch          reuse already-downloaded card images
-#   --print [PRINTER]     send the PDF straight to CUPS at 100% (default printer, e.g.
-#                         the ET-8550 on the Mac); plain paper for --test, glossy photo
-#                         otherwise. Extra lp options via MTG_PROXY_LP_OPTS.
+#   --print [PRINTER]     send the PDF straight to CUPS at 100%. Real sheets go to the
+#                         printer instance EPSON_ET_8550_Series/4x2-glossy (the Windows
+#                         "4x2 Glossy" preset; MTG_PROXY_LP_INSTANCE overrides), --test
+#                         sheets to the default printer with plain-paper defaults.
+#                         Extra lp options via MTG_PROXY_LP_OPTS.
 #   -- <args>             extra fetch.py args (e.g. -- --prefer_set sld)
 #
 # Output goes to ./<deckname>/ in the CURRENT directory (-o DIR to choose another parent;
@@ -354,24 +356,35 @@ if [[ $PRINT_MODE -eq 1 && -f "$OUT/$NAME.pdf" ]]; then
   if ! command -v lp >/dev/null 2>&1; then
     echo "warning: --print needs CUPS (lp) — not available here, print $OUT/$NAME.pdf by hand" >&2
   else
-    LP_DEST=()
-    [[ -n "$PRINTER" ]] && LP_DEST=(-d "$PRINTER")
     case "$PAPER" in
       a4)     LP_MEDIA="A4" ;;
       letter) LP_MEDIA="Letter" ;;
       a3)     LP_MEDIA="A3" ;;
       *)      LP_MEDIA="$PAPER" ;;
     esac
-    # Real sheets = the "4x2 Glossy" preset from the Windows driver, translated to CUPS
-    # (docs/printer-presets/README.md): rear feeder, glossy photo, High quality, RGB.
-    # Test sheet = plain paper from the main tray.
-    if [[ $TEST_MODE -eq 1 ]]; then LP_TYPE="stationery"; LP_SLOT="main"; else LP_TYPE="photographic-glossy"; LP_SLOT="rear"; fi
     # shellcheck disable=SC2206  # MTG_PROXY_LP_OPTS is a deliberate word-split list of lp options
     LP_EXTRA=(${MTG_PROXY_LP_OPTS:-})
-    echo "printing $NAME.pdf → ${PRINTER:-default printer} (media=$LP_MEDIA, type=$LP_TYPE, tray=$LP_SLOT, High, 100%, no scaling)"
-    lp ${LP_DEST[@]+"${LP_DEST[@]}"} -o media="$LP_MEDIA" -o print-scaling=none -o fit-to-page=false \
-       -o MediaType="$LP_TYPE" -o InputSlot="$LP_SLOT" -o cupsPrintQuality=High -o ColorModel=RGB \
-       ${LP_EXTRA[@]+"${LP_EXTRA[@]}"} "$OUT/$NAME.pdf"
+    LP_ARGS=(-o media="$LP_MEDIA" -o print-scaling=none -o fit-to-page=false)
+    if [[ $TEST_MODE -eq 1 ]]; then
+      # Test sheet: printer defaults on plain paper — only the size and "no scaling" matter.
+      LP_DEST=(); [[ -n "$PRINTER" ]] && LP_DEST=(-d "$PRINTER")
+      LP_DESC="${PRINTER:-default printer}, plain paper / driver defaults"
+    else
+      # Real sheets: the "4x2 Glossy" preset from the Windows driver, kept on the Mac as
+      # the CUPS printer instance EPSON_ET_8550_Series/4x2-glossy (~/.cups/lpoptions,
+      # chezmoi-managed; docs/printer-presets/README.md). Explicit options if the
+      # instance isn't there (other machine, or -p PRINTER given).
+      INSTANCE="${MTG_PROXY_LP_INSTANCE:-EPSON_ET_8550_Series/4x2-glossy}"
+      if [[ -z "$PRINTER" ]] && grep -qs "^Dest $INSTANCE " "$HOME/.cups/lpoptions"; then
+        LP_DEST=(-d "$INSTANCE"); LP_DESC="$INSTANCE (rear feeder, glossy photo, High)"
+      else
+        LP_DEST=(); [[ -n "$PRINTER" ]] && LP_DEST=(-d "$PRINTER")
+        LP_ARGS+=(-o MediaType=photographic-glossy -o InputSlot=rear -o cupsPrintQuality=High -o ColorModel=RGB)
+        LP_DESC="${PRINTER:-default printer}, explicit glossy options"
+      fi
+    fi
+    echo "printing $NAME.pdf → $LP_DESC (media=$LP_MEDIA, 100%, no scaling)"
+    lp ${LP_DEST[@]+"${LP_DEST[@]}"} "${LP_ARGS[@]}" ${LP_EXTRA[@]+"${LP_EXTRA[@]}"} "$OUT/$NAME.pdf"
     [[ -f "$OUT/$NAME-duplex.pdf" ]] && echo "NOTE: $NAME-duplex.pdf not sent — print it by hand with manual duplex (long-edge flip)."
   fi
 fi
