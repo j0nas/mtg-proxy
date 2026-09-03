@@ -10,6 +10,7 @@
 #
 # Options:
 #   -f, --format FMT      decklist format (default: mtga)
+#   -o, --out DIR         parent dir for <deckname>/ (default: current directory)
 #   -p, --paper SIZE      a4 (default) | letter
 #   -r, --registration N  4 (default) | 3 registration marks
 #   --board NAME          Moxfield board: main (default) | side | considering
@@ -20,12 +21,17 @@
 #   --split-faces         each DFC face as its own card (default: separate manual-duplex PDF)
 #   --plain               normal frames (default prefers showcase/extended/full art)
 #   --skip-fetch          reuse already-downloaded card images
+#   --print [PRINTER]     send the PDF straight to CUPS at 100% (default printer, e.g.
+#                         the ET-8550 on the Mac); plain paper for --test, glossy photo
+#                         otherwise. Extra lp options via MTG_PROXY_LP_OPTS.
 #   -- <args>             extra fetch.py args (e.g. -- --prefer_set sld)
 #
-# Output in output/<deckname>/, mirrored FLAT to C:\Users\jonas\Desktop\projects\mtg-proxy
-# (override: MTG_PROXY_WIN_OUT): <deckname>.pdf (print at 100%, NO borderless),
-# <deckname>-duplex.pdf (DFCs, manual duplex), <template>+y1mm.studio3 (open in Studio;
-# cut offset from data/cut_offset.json pre-applied), CUT-NOTES.md (per-run checklist).
+# Output goes to ./<deckname>/ in the CURRENT directory (-o DIR to choose another parent;
+# the repo itself is an implementation detail): <deckname>.pdf (print at 100%, NO
+# borderless), <deckname>-duplex.pdf (DFCs, manual duplex), <template>+y1mm.studio3
+# (open in Studio; cut offset from data/cut_offset.json pre-applied), CUT-NOTES.md.
+# Under WSL the files are also mirrored FLAT to C:\Users\jonas\Desktop\projects\mtg-proxy
+# (override: MTG_PROXY_WIN_OUT). Decklist paths are relative to the current directory too.
 #
 # The template base (templates/a4-standard-v5-alpha.studio3) bakes in the Studio settings:
 # Cameo 5 Alpha machine, material, A4 media (must be A4 — "Custom" media warps cuts).
@@ -41,8 +47,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCM="$ROOT/silhouette-card-maker"
 PY="$SCM/venv/bin/python"
+[[ -x "$PY" ]] || PY="$SCM/.venv/bin/python"   # uv's default venv name on the Mac clone
 
 FORMAT="mtga"
+OUT_PARENT="$PWD"
 PAPER="a4"
 BOARD="main"
 REG="4"
@@ -55,6 +63,8 @@ TOKEN_COPIES=0
 TOKENS_ONLY=0
 SKIP_FETCH=0
 TEST_MODE=0
+PRINT_MODE=0
+PRINTER=""
 NOTES_MODE=0
 NOTES_NAME=""
 FETCH_ARGS=()
@@ -65,6 +75,7 @@ usage() { awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0";
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -f|--format)      FORMAT="$2"; shift 2 ;;
+    -o|--out)         OUT_PARENT="$2"; shift 2 ;;
     -p|--paper)       PAPER="$2"; shift 2 ;;
     -r|--registration) REG="$2"; shift 2 ;;
     --board)          BOARD="$2"; shift 2 ;;
@@ -82,6 +93,9 @@ while [[ $# -gt 0 ]]; do
                       shift ;;
     --skip-fetch)     SKIP_FETCH=1; shift ;;
     --test)           TEST_MODE=1; shift ;;
+    --print)          PRINT_MODE=1
+                      if [[ -n "${2:-}" && "${2:0:1}" != "-" ]]; then PRINTER="$2"; shift; fi
+                      shift ;;
     --notes)          NOTES_MODE=1
                       if [[ -n "${2:-}" && "${2:0:1}" != "-" ]]; then NOTES_NAME="$2"; shift; fi
                       shift ;;
@@ -95,10 +109,13 @@ done
 # --notes [name]: display the CUT-NOTES for a previous run (latest run if no name)
 if [[ $NOTES_MODE -eq 1 ]]; then
   if [[ -z "$NOTES_NAME" ]]; then
-    NOTES_NAME="$(ls -1t "$ROOT/output" 2>/dev/null | head -1)"
-    [[ -n "$NOTES_NAME" ]] || { echo "error: nothing generated yet" >&2; exit 1; }
+    # newest CUT-NOTES.md in any subfolder of the output parent (default: cwd)
+    NOTES_LATEST="$(find "$OUT_PARENT" -mindepth 2 -maxdepth 2 -name CUT-NOTES.md -print0 2>/dev/null \
+      | xargs -0 ls -1t 2>/dev/null | head -1)"
+    [[ -n "$NOTES_LATEST" ]] || { echo "error: no make-proxies output under $OUT_PARENT" >&2; exit 1; }
+    NOTES_NAME="$(basename "$(dirname "$NOTES_LATEST")")"
   fi
-  NOTES_FILE="$ROOT/output/$NOTES_NAME/CUT-NOTES.md"
+  NOTES_FILE="$OUT_PARENT/$NOTES_NAME/CUT-NOTES.md"
   [[ -f "$NOTES_FILE" ]] || { echo "error: no notes for '$NOTES_NAME' ($NOTES_FILE)" >&2; exit 1; }
   if command -v glow >/dev/null 2>&1; then glow -p "$NOTES_FILE"; else cat "$NOTES_FILE"; fi
   exit 0
@@ -130,10 +147,12 @@ else
   NAME="$(basename "$DECK")"; NAME="${NAME%.*}"
   [[ $TOKENS_ONLY -eq 1 ]] && NAME="$NAME-tokens"
 fi
-# Fresh output dir per run — stale artifacts from previous generations are wiped.
-OUT="$ROOT/output/$NAME"
-rm -rf "${OUT:?}"
+# Output folder next to where you are. Only OUR artifacts from a previous run are
+# removed (never the folder itself — it's in the user's space now, not the repo's).
+OUT_PARENT="$(cd "$OUT_PARENT" 2>/dev/null && pwd)" || { echo "error: --out dir not found" >&2; exit 1; }
+OUT="$OUT_PARENT/$NAME"
 mkdir -p "$OUT"
+rm -f "$OUT/$NAME.pdf" "$OUT/$NAME-duplex.pdf" "$OUT/CUT-NOTES.md" "$OUT"/*.studio3 2>/dev/null || true
 
 if [[ "$PAPER" == "a3" ]]; then
   echo "NOTE: A3 sheets need the 12x24\" cutting mat — the standard 12x12\" mat is too short." >&2
@@ -141,7 +160,9 @@ fi
 
 cd "$SCM"
 
-# 1. Fresh image dirs (clean_up.py empties front/ and double_sided/)
+# 1. Fresh image dirs (clean_up.py empties front/ and double_sided/ — and crashes
+#    if a fresh clone/checkout is missing them, so create them first)
+mkdir -p game/front game/double_sided game/back game/output
 if [[ $TEST_MODE -eq 1 ]]; then
   # Placeholder mode: ink-light 63x88mm gauge cards, no Scryfall, light test back
   "$PY" clean_up.py
@@ -305,6 +326,9 @@ Generated: $(date +%F) | paper: $PAPER | card: $CARD_SIZE | registration: $REG-m
 - Feed the sealed edge first. Re-laminate cut cards once more at the end to seal edges.
 
 ## Cut (Cameo 5 Alpha)
+**Preferred — no Studio:** with the Cameo on USB or Bluetooth from the Mac, run
+\`cut-proxies -r $REG$( [[ "$PAPER" != a4 ]] && printf ' -p %s' "$PAPER" )\` (4-mark scan is sent explicitly; see README §5).
+Studio fallback:
 1. Open \`$(basename "${TEMPLATE:-<template>}")\` in Silhouette Studio (Studio **v5.0.402+** needed for the Alpha;
    the limited "Starter" edition of Studio v5 is incompatible — use the full edition).
 2. $( if [[ "$REG" == 4 && $TEMPLATE_BAKED -eq 1 ]]; then
@@ -319,9 +343,35 @@ fi )$( [[ "$CUT_OFF_Y" != "0" && "$CUT_OFF_Y" != "0.0" ]] && printf '\n   - Cut 
 4. Post-it trick (light-colored, remove after registration scan, before cutting):
    $( [[ "$REG" == 4 ]] && echo '4-mark pattern: cover the cards nearest BOTH bottom corners.' || echo '3-mark pattern: cover the card nearest the bottom-left L mark.' )
 5. Starting cut settings (AutoBlade, 135 gsm photo paper + 80 µm matte laminate):
-   **Force 30 · Speed 25 · Depth 7 · Passes 3**
+   **Force 25 · Speed 25 · Depth 5 · Passes 3** (cut-proxies defaults)
    Tune passes first, then force. Rippled/torn edges = force too high or blade dull.
 EOF
+
+# 5½. Optional: print via CUPS at exact size. Scaling is what breaks registration, so
+#    print-scaling=none is forced; media is A4/letter to match the PDF. The duplex PDF
+#    is deliberately NOT sent — manual duplex on photo paper is a hands-on job.
+if [[ $PRINT_MODE -eq 1 && -f "$OUT/$NAME.pdf" ]]; then
+  if ! command -v lp >/dev/null 2>&1; then
+    echo "warning: --print needs CUPS (lp) — not available here, print $OUT/$NAME.pdf by hand" >&2
+  else
+    LP_DEST=()
+    [[ -n "$PRINTER" ]] && LP_DEST=(-d "$PRINTER")
+    case "$PAPER" in
+      a4)     LP_MEDIA="A4" ;;
+      letter) LP_MEDIA="Letter" ;;
+      a3)     LP_MEDIA="A3" ;;
+      *)      LP_MEDIA="$PAPER" ;;
+    esac
+    if [[ $TEST_MODE -eq 1 ]]; then LP_TYPE="stationery"; else LP_TYPE="photographic-glossy"; fi
+    # shellcheck disable=SC2206  # MTG_PROXY_LP_OPTS is a deliberate word-split list of lp options
+    LP_EXTRA=(${MTG_PROXY_LP_OPTS:-})
+    echo "printing $NAME.pdf → ${PRINTER:-default printer} (media=$LP_MEDIA, type=$LP_TYPE, 100%, no scaling)"
+    lp "${LP_DEST[@]}" -o media="$LP_MEDIA" -o print-scaling=none -o fit-to-page=false \
+       -o MediaType="$LP_TYPE" -o cupsPrintQuality=High -o ColorModel=RGB \
+       ${LP_EXTRA[@]+"${LP_EXTRA[@]}"} "$OUT/$NAME.pdf"
+    [[ -f "$OUT/$NAME-duplex.pdf" ]] && echo "NOTE: $NAME-duplex.pdf not sent — print it by hand with manual duplex (long-edge flip)."
+  fi
+fi
 
 # 6. Mirror the output to the Windows side (real copies — symlinks don't cross
 #    the WSL/Windows boundary). Files land FLAT in the Windows proxy folder —
@@ -354,6 +404,7 @@ if [[ -f "$OUT/$NAME.pdf" ]]; then echo "  PDF:      $OUT/$NAME.pdf"; fi
 if [[ -f "$OUT/$NAME-duplex.pdf" ]]; then echo "  Duplex:   $OUT/$NAME-duplex.pdf ($DFC_COUNT double-sided cards — manual duplex, long-edge flip)"; fi
 if [[ -n "$TEMPLATE" ]]; then echo "  Cut file: $OUT/$(basename "$TEMPLATE")"; fi
 echo "  Notes:    make-proxies --notes $NAME"
+echo "  Cut:      cut-proxies -r $REG$( [[ "$PAPER" != a4 ]] && printf ' -p %s' "$PAPER" )   (direct to the Cameo, no Studio)"
 if [[ -n "$WIN_NOTE" ]]; then echo "  Windows:  $WIN_NOTE"; fi
 if [[ ${#MIRROR_FAILED[@]} -gt 0 ]]; then
   echo

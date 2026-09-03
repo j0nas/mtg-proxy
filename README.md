@@ -11,16 +11,18 @@ lamination pouches → Cameo 5 Alpha with AutoBlade. Total card thickness ≈ 0.
 very close to a real MTG card (0.305 mm).
 
 ```
-make-proxies.sh      decklist → output/<deck>/{<deck>.pdf, <deck>-duplex.pdf?, *.studio3, CUT-NOTES.md}
+make-proxies.sh      decklist → ./<deck>/{<deck>.pdf, <deck>-duplex.pdf?, *.studio3, CUT-NOTES.md}
+                     in the CURRENT directory (-o DIR for another parent); decklist paths are cwd-relative too
 save-offset.sh       store the printer's duplex offset once, auto-applied afterwards
 data/cut_offset.json machine cut offset (mm), baked into every cutting template at build time
 templates/           project cutting-template bases — Studio saves rebased offset-free, so they
                      open with the Cameo 5 Alpha profile pre-selected (see §2¾)
 tools/               placeholder/test-card + card-back generators, studio3 offset patcher + rebaser
 decks/               put your decklists here
-output/              per-deck results, wiped and regenerated on every run (PDFs + cut template
-                     also mirrored FLAT into C:\Users\jonas\Desktop\projects\mtg-proxy for
-                     printing; CUT-NOTES stay here — view with `make-proxies --notes <deck>`)
+(no output/ here)    results live where you ran the command, one folder per deck; a rerun
+                     replaces only its own files. Under WSL they are also mirrored FLAT into
+                     C:\Users\jonas\Desktop\projects\mtg-proxy. `make-proxies --notes [deck]`
+                     shows the newest CUT-NOTES.md below the current directory
 assets/back.png      default card back for --backs runs — replace with your own any time
 silhouette-card-maker/  vendored PDF engine — its own git repo (fork j0nas/silhouette-card-maker,
                      branch local-patches), excluded from this outer repo's git
@@ -29,10 +31,15 @@ silhouette-card-maker/  vendored PDF engine — its own git repo (fork j0nas/sil
 ## 1. Verify the workflow first (no wasted ink)
 
 ```sh
-./make-proxies.sh --test
+./make-proxies.sh --test            # build ./test-sheet/test-sheet.pdf (in your cwd)
+./make-proxies.sh --test --print    # ...and send it to the default CUPS printer at 100%
 ```
 
-`output/test-sheet/` (and the Windows mirror) gets one A4 sheet of 8 **placeholder gauge
+`--print` goes through CUPS with scaling forced off (media A4/letter to match the PDF;
+plain paper for the test sheet, glossy photo paper otherwise; `MTG_PROXY_LP_OPTS` adds lp
+options). On the Mac the ET-8550 is the default printer, so no name is needed.
+
+`./test-sheet/` (and the Windows mirror) gets one A4 sheet of 8 **placeholder gauge
 cards** — exact 63×88 mm standard-MTG geometry, hairline art only, near-zero ink:
 
 - **frame** sits exactly 1.0 mm inside the cut line → after cutting, the white margin
@@ -190,7 +197,8 @@ closed.
 
 | | Force | Speed | Depth | Passes |
 |---|---|---|---|---|
-| Start here (laminated photo paper, Cameo 5a, same stack class as ours) | 30 | 25 | 7 | 3 |
+| **Our default** (laminated 135 gsm photo paper, `cut-proxies` defaults) | 25 | 25 | 5 | 3 |
+| @kgclippy's Cameo 5a reference (same stack class) | 30 | 25 | 7 | 3 |
 | Author's heavier reference (250 gsm + 3 mil, Cameo 5) | 35 | 25 | 7 | 4 |
 
 Tune in this order: **passes → force → speed → depth**. Test on one sheet: run the job,
@@ -204,6 +212,52 @@ cloudy (e.g. 80 µm ≈ 3 mil pouches on a 5 mil setting); wavy cards = too hot.
 
 **A3**: the ET-8550 can print it (18 cards/sheet) but it needs the 12×24″ mat — the
 standard 12×12″ mat is too short.
+
+## 5. Cutting without Silhouette Studio (`cut-proxies.sh`)
+
+Studio on the Alpha (firmware 1.05, Studio ≥ 5.0.402) mis-identifies the machine and
+picks the registration scan on its own, which is what turns a working 4x2 sheet into a
+morning of failed registrations. `cut-proxies.sh` skips Studio entirely: it drives the
+Cameo over USB or Bluetooth LE with [inkscape-silhouette](https://github.com/fablabnbg/inkscape-silhouette)
+(pure-Python libusb driver, Cameo 5 Alpha support since its PR #348), and it chooses the
+scan command **explicitly** — `-r 4` sends the four-L-mark scan (`TB124`), `-r 3` the
+square + two-L scan (`TB123`). The Alpha accepts both; Studio only ever lets it do one.
+
+```sh
+./cut-proxies.sh                 # A4, standard cards, 4-mark, USB, F25/S25/D5/P3
+./cut-proxies.sh --ble           # Bluetooth LE — no cable, no pairing (Mac)
+./cut-proxies.sh -r 3            # sheet printed with make-proxies -r 3
+./cut-proxies.sh --passes 4      # one more pass; also --force/--speed/--depth
+./cut-proxies.sh --dry-run       # no machine: builds output/cut/a4-standard.{svg,cmds}
+./cut-proxies.sh --preview       # look at the paths in a window before sending
+```
+
+What it does, in order:
+
+1. `tools/cut_svg.py` asks silhouette-card-maker's own `generate_dxf.py` for the card
+   outlines of the paper/card combo (the same layout engine that placed the cards in the
+   PDF) and converts them to a page-sized SVG in mm, rounded corners as real arcs.
+   Registration-mark geometry (10 mm inset, 277×190 mm apart on A4 landscape) comes
+   from the same `assets/layouts.json` the PDF used. The marks themselves are not
+   drawn — the machine scans the printed ones.
+2. The machine cut bias from `data/cut_offset.json` is applied as an X/Y offset
+   (override with `--x-off`/`--y-off`, `--y-off 0` to disable). It was measured through
+   Studio, so verify it once with a `make-proxies --test` gauge sheet on this path.
+3. `sendto_silhouette.py` is invoked with force/speed/depth/passes, the regmark scan,
+   and the offsets; the run's log and the raw command transcript land in `output/cut/`.
+
+Sheet placement is unchanged: top-left of the mat grid, aligned to the paper edge, mat
+against the left notch, lid closed. If the scan fails the job stops with
+"Couldn't find registration marks" and nothing is cut.
+
+**Where to run it**: on the Mac. inkscape-silhouette talks libusb; on Windows that means
+replacing Silhouette's USB driver with WinUSB (Zadig), which breaks Studio's connection.
+The Mac needs no driver dance — plug the USB cable in, or use `--ble`
+(`--scan` lists nearby BLE devices if the default name "CAMEO 5 ALPHA" doesn't match).
+
+Setup (once): the driver clone lives in `inkscape-silhouette/` (gitignored, like the
+card-maker clone) with its own venv; `cut-proxies.sh` prints the exact clone + venv
+commands if it is missing. `libusb` comes from Homebrew via the dotfiles.
 
 ## Sources
 

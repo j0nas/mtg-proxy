@@ -26,8 +26,24 @@ W, H = round(63 * MM), round(88 * MM)  # exactly 63 x 88 mm
 BLACK = (40, 40, 40)
 GRAY = (150, 150, 150)
 
-FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-FONT_LIGHT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+# First font that exists wins: Debian/Ubuntu (WSL), then macOS system fonts.
+FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/Library/Fonts/Arial Bold.ttf",
+]
+FONT_LIGHT_CANDIDATES = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/Library/Fonts/Arial.ttf",
+]
+
+
+def load_font(candidates: list[str], size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    for path in candidates:
+        if Path(path).is_file():
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default(size=size)
 
 
 def px(mm: float) -> int:
@@ -68,8 +84,8 @@ def make_card(title: str, subtitle: str) -> Image.Image:
     img = Image.new("RGB", (W, H), "white")
     d = ImageDraw.Draw(img)
     draw_gauges(d)
-    f_big = ImageFont.truetype(FONT, px(5))
-    f_small = ImageFont.truetype(FONT_LIGHT, px(2.8))
+    f_big = load_font(FONT_CANDIDATES, px(5))
+    f_small = load_font(FONT_LIGHT_CANDIDATES, px(2.8))
     cx = W // 2
     d.text((cx, px(10)), "▲ TOP", font=f_small, fill=GRAY, anchor="mm")
     d.text((cx, px(20)), title, font=f_big, fill=BLACK, anchor="mm")
