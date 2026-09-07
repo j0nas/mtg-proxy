@@ -110,10 +110,10 @@ make-proxies /mnt/c/Users/jonas/Downloads/mydeck.txt
 make-proxies 'C:\Users\jonas\Downloads\mydeck.txt'       # C:\ paths converted via wslpath
 ```
 
-The decks folder is `\\wsl.localhost\Ubuntu\home\jonas\projects\mtg-proxy\decks` in
+The decks folder is `\\wsl.localhost\Ubuntu\home\jonas\Desktop\projects\mtg-proxy\decks` in
 Explorer — save new decklists there. Output PDFs/cut files always land in the Windows
 mirror folder (see above) for printing. From PowerShell/cmd, the equivalent one-liner is
-`wsl ~/projects/mtg-proxy/make-proxies.sh <args>`.
+`wsl ~/Desktop/projects/mtg-proxy/make-proxies.sh <args>`.
 
 ## 2¾. Machine cut offset (`data/cut_offset.json`)
 
