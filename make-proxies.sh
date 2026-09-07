@@ -32,7 +32,7 @@
 # the repo itself is an implementation detail): <deckname>.pdf (print at 100%, NO
 # borderless), <deckname>-duplex.pdf (DFCs, manual duplex), <template>+y1mm.studio3
 # (open in Studio; cut offset from data/cut_offset.json pre-applied), CUT-NOTES.md.
-# Under WSL the files are also mirrored FLAT to C:\Users\jonas\Desktop\projects\mtg-proxy
+# Under WSL the files are also mirrored FLAT to %USERPROFILE%\Desktop\projects\mtg-proxy
 # (override: MTG_PROXY_WIN_OUT). Decklist paths are relative to the current directory too.
 #
 # The template base (templates/a4-standard-v5-alpha.studio3) bakes in the Studio settings:
@@ -40,7 +40,7 @@
 # To bake changed settings: open a generated *+y1mm.studio3 in Studio, change settings
 # only (never move shapes), save, then rebase it offset-free (details: README §2¾):
 #   silhouette-card-maker/venv/bin/python tools/rebase_template.py \
-#     '/mnt/c/Users/jonas/Desktop/projects/mtg-proxy/a4-standard-v5-alpha+y1mm.studio3' \
+#     '<windows mirror folder>/a4-standard-v5-alpha+y1mm.studio3' \
 #     silhouette-card-maker/cutting_templates/a4-standard-v5.studio3 \
 #     templates/a4-standard-v5-alpha.studio3
 
@@ -222,8 +222,10 @@ echo "cards fetched: $FRONT_COUNT"
 # 4. Build the PDF(s).
 #    --extend_corners 3.5mm: Scryfall scans have rounded corners; this fills the
 #    corner bleed so cut cards don't get white corner slivers.
-#    Saved duplex offset (data/offset_data.json, from offset_pdf.py --save) is
-#    applied automatically to any double-sided output.
+#    Saved duplex offset (this repo's data/offset_data.json, written by save-offset.sh)
+#    is applied automatically to any double-sided output. create_pdf.py only reads
+#    its own data/, so the tracked file is copied there first — the printer's offset
+#    then travels with the repo instead of living in the gitignored engine clone.
 PDF_ARGS=(
   --card_size "$CARD_SIZE"
   --paper_size "$PAPER"
@@ -231,7 +233,10 @@ PDF_ARGS=(
   --extend_corners 3.5mm
 )
 OFFSET_ARGS=()
-[[ -f data/offset_data.json ]] && OFFSET_ARGS=(--load_offset)
+if [[ -f "$ROOT/data/offset_data.json" ]]; then
+  mkdir -p data && cp -f "$ROOT/data/offset_data.json" data/offset_data.json
+  OFFSET_ARGS=(--load_offset)
+fi
 
 DFC_COUNT=0
 if [[ $FRONTS_ONLY -eq 1 ]]; then
@@ -282,7 +287,7 @@ if [[ $FRONTS_ONLY -eq 1 ]]; then
 else
   # --backs: one double-sided PDF; DFCs get their real backs, the rest assets/back.png
   if [[ ${#OFFSET_ARGS[@]} -gt 0 ]]; then
-    echo "applying saved duplex offset from data/offset_data.json"
+    echo "applying saved duplex offset from $ROOT/data/offset_data.json"
   else
     echo "NOTE: no saved duplex offset — run the calibration once before double-sided decks (see README)."
   fi
@@ -391,13 +396,18 @@ fi
 
 # 6. Mirror the output to the Windows side (real copies — symlinks don't cross
 #    the WSL/Windows boundary). Files land FLAT in the Windows proxy folder —
-#    no per-deck subfolder. Override the target with MTG_PROXY_WIN_OUT. The
-#    deck-agnostic CUT-NOTES.md is mirrored as <deck>-CUT-NOTES.md so different
-#    decks don't clobber each other's notes.
-WIN_OUT="${MTG_PROXY_WIN_OUT:-/mnt/c/Users/jonas/Desktop/projects/mtg-proxy}"
+#    no per-deck subfolder. The folder is <Windows profile>\Desktop\projects\mtg-proxy,
+#    with the profile read from cmd.exe's %USERPROFILE% so no user name is baked in;
+#    MTG_PROXY_WIN_OUT overrides it outright. The deck-agnostic CUT-NOTES.md is
+#    mirrored as <deck>-CUT-NOTES.md so different decks don't clobber each other's notes.
+WIN_OUT="${MTG_PROXY_WIN_OUT:-}"
+if [[ -z "$WIN_OUT" && -d /mnt/c/Users ]] && command -v cmd.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
+  WIN_HOME="$(cd /mnt/c && cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null | tr -d '\r')"
+  [[ -n "$WIN_HOME" ]] && WIN_OUT="$(wslpath -u "$WIN_HOME")/Desktop/projects/mtg-proxy"
+fi
 WIN_NOTE=""
 MIRROR_FAILED=()
-if [[ -d "$(dirname "$WIN_OUT")" || -d /mnt/c/Users ]]; then
+if [[ -n "$WIN_OUT" ]] && [[ -d "$(dirname "$WIN_OUT")" || -d /mnt/c/Users ]]; then
   mkdir -p "$WIN_OUT"
   # remove a stale duplex PDF from a previous run; other files get overwritten
   [[ -f "$OUT/$NAME-duplex.pdf" ]] || rm -f "$WIN_OUT/$NAME-duplex.pdf"

@@ -15,13 +15,15 @@ make-proxies.sh      decklist → ./<deck>/{<deck>.pdf, <deck>-duplex.pdf?, *.st
                      in the CURRENT directory (-o DIR for another parent); decklist paths are cwd-relative too
 save-offset.sh       store the printer's duplex offset once, auto-applied afterwards
 data/cut_offset.json machine cut offset (mm), baked into every cutting template at build time
+data/offset_data.json printer duplex offset (save-offset.sh), applied to every double-sided PDF
 templates/           project cutting-template bases — Studio saves rebased offset-free, so they
                      open with the Cameo 5 Alpha profile pre-selected (see §2¾)
 tools/               placeholder/test-card + card-back generators, studio3 offset patcher + rebaser
 decks/               put your decklists here
 (no output/ here)    results live where you ran the command, one folder per deck; a rerun
                      replaces only its own files. Under WSL they are also mirrored FLAT into
-                     C:\Users\jonas\Desktop\projects\mtg-proxy. `make-proxies --notes [deck]`
+                     %USERPROFILE%\Desktop\projects\mtg-proxy (MTG_PROXY_WIN_OUT overrides).
+                     `make-proxies --notes [deck]`
                      shows the newest CUT-NOTES.md below the current directory
 assets/back.png      default card back for --backs runs — replace with your own any time
 silhouette-card-maker/  vendored PDF engine — its own git repo (fork j0nas/silhouette-card-maker,
@@ -99,21 +101,22 @@ Every output folder contains a `CUT-NOTES.md` checklist generated for that exact
 
 ## 2½. Invoking it
 
-Run the script from any WSL shell — a `make-proxies` alias is set up in the dotfiles, and
-the script resolves its own location, so the working directory only matters for relative
-decklist paths:
+Run the script from any shell (macOS, Linux or WSL) — the dotfiles define a `make-proxies`
+function that finds the clone (`$MTG_PROXY_DIR`, else `~/Desktop/projects/mtg-proxy`, else
+`~/projects/mtg-proxy`), and the script resolves its own location, so the working directory
+only matters for relative decklist paths:
 
 ```sh
 make-proxies --test
 make-proxies decks/mydeck.txt -r 3                       # relative to your cwd
-make-proxies /mnt/c/Users/jonas/Downloads/mydeck.txt
-make-proxies 'C:\Users\jonas\Downloads\mydeck.txt'       # C:\ paths converted via wslpath
+make-proxies /mnt/c/Users/<you>/Downloads/mydeck.txt     # WSL
+make-proxies 'C:\Users\<you>\Downloads\mydeck.txt'       # C:\ paths converted via wslpath
 ```
 
-The decks folder is `\\wsl.localhost\Ubuntu\home\jonas\Desktop\projects\mtg-proxy\decks` in
-Explorer — save new decklists there. Output PDFs/cut files always land in the Windows
-mirror folder (see above) for printing. From PowerShell/cmd, the equivalent one-liner is
-`wsl ~/Desktop/projects/mtg-proxy/make-proxies.sh <args>`.
+Under WSL the clone's `decks/` folder is reachable from Explorer as
+`\\wsl.localhost\<distro>\<clone path>\decks` — save new decklists there. Output PDFs/cut
+files are also mirrored into the Windows folder (see above) for printing. From
+PowerShell/cmd, the equivalent one-liner is `wsl <clone path>/make-proxies.sh <args>`.
 
 ## 2¾. Machine cut offset (`data/cut_offset.json`)
 
@@ -139,7 +142,7 @@ different Studio state: open the generated `*+y1mm.studio3` in Studio, change *s
 
 ```sh
 silhouette-card-maker/venv/bin/python tools/rebase_template.py \
-  '/mnt/c/Users/jonas/Desktop/projects/mtg-proxy/a4-standard-v5-alpha+y1mm.studio3' \
+  '<windows mirror folder>/a4-standard-v5-alpha+y1mm.studio3' \
   silhouette-card-maker/cutting_templates/a4-standard-v5.studio3 \
   templates/a4-standard-v5-alpha.studio3
 ```
@@ -159,8 +162,8 @@ baked into the base now; if Page Setup ever shows "Custom" again, re-bake with t
    `(x, y)` label. Units are 300 PPI pixels, ≈ 0.085 mm each.
 3. `./save-offset.sh -x <x> -y <y>` (add `-a <deg>` for rotational error).
 
-The offset lands in `silhouette-card-maker/data/offset_data.json` and every future PDF
-gets it automatically.
+The offset lands in `data/offset_data.json` (tracked — commit it, and it follows the
+printer to every clone) and every future double-sided PDF gets it automatically.
 
 ## 4. Cameo 5 Alpha — cutting cheat sheet
 

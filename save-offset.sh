@@ -18,4 +18,14 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT/silhouette-card-maker"
-exec ./venv/bin/python offset_pdf.py --save "$@"
+PY=./venv/bin/python
+[[ -x "$PY" ]] || PY=./.venv/bin/python   # uv's default venv name on the Mac clone
+mkdir -p data
+"$PY" offset_pdf.py --save "$@"
+# offset_pdf.py writes the engine clone's (gitignored) data/offset_data.json; keep the
+# tracked copy in this repo's data/ as the source of truth so it follows the printer
+# across machines. make-proxies.sh copies it back before every build.
+if [[ -f data/offset_data.json ]]; then
+  cp -f data/offset_data.json "$ROOT/data/offset_data.json"
+  echo "offset saved to $ROOT/data/offset_data.json — commit it."
+fi
