@@ -194,7 +194,7 @@ elif [[ $SKIP_FETCH -eq 0 ]]; then
   [[ $TOKEN_COPIES -gt 0 ]] && TOKEN_ARGS=(--tokens --token_copies "$TOKEN_COPIES")
   ART_ARGS=()
   [[ $FANCY_ART -eq 1 ]] && ART_ARGS=(--prefer_showcase --prefer_extra_art)
-  "$PY" plugins/mtg/fetch.py "$DECK" "$FORMAT" "${BASIC_ARGS[@]}" "${TOKEN_ARGS[@]}" "${ART_ARGS[@]}" "${FETCH_ARGS[@]}"
+  "$PY" plugins/mtg/fetch.py "$DECK" "$FORMAT" ${BASIC_ARGS[@]+"${BASIC_ARGS[@]}"} ${TOKEN_ARGS[@]+"${TOKEN_ARGS[@]}"} ${ART_ARGS[@]+"${ART_ARGS[@]}"} ${FETCH_ARGS[@]+"${FETCH_ARGS[@]}"}
 else
   echo "--skip-fetch: reusing images already in game/front/"
 fi
@@ -275,7 +275,7 @@ if [[ $FRONTS_ONLY -eq 1 ]]; then
     if [[ ${#OFFSET_ARGS[@]} -eq 0 ]]; then
       echo "NOTE: no saved duplex offset — run the calibration once for clean front/back alignment (see README)."
     fi
-    "$PY" create_pdf.py "${PDF_ARGS[@]}" "${OFFSET_ARGS[@]}" \
+    "$PY" create_pdf.py "${PDF_ARGS[@]}" ${OFFSET_ARGS[@]+"${OFFSET_ARGS[@]}"} \
       --front_dir_path "$VIEW/dfc_front" --output_path game/output/duplex.pdf
     cp game/output/duplex.pdf "$OUT/$NAME-duplex.pdf"
   fi
@@ -286,7 +286,7 @@ else
   else
     echo "NOTE: no saved duplex offset — run the calibration once before double-sided decks (see README)."
   fi
-  "$PY" create_pdf.py "${PDF_ARGS[@]}" "${OFFSET_ARGS[@]}"
+  "$PY" create_pdf.py "${PDF_ARGS[@]}" ${OFFSET_ARGS[@]+"${OFFSET_ARGS[@]}"}
   cp game/output/game.pdf "$OUT/$NAME.pdf"
 fi
 
