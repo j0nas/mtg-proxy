@@ -4,7 +4,8 @@
 # Usage:
 #   ./make-proxies.sh decks/mydeck.txt [options]      # mtga format; bare card name = 1 copy
 #   ./make-proxies.sh https://moxfield.com/decks/<id> # fetch from Moxfield (saved to decks/)
-#   ./make-proxies.sh <moxfield url> --board considering   # just its "Considering" board
+#   ./make-proxies.sh https://archidekt.com/decks/<id> # ...or from Archidekt
+#   ./make-proxies.sh <deck url> --board considering  # just its "Considering"/Maybeboard board
 #   ./make-proxies.sh --test                          # ink-light placeholder sheet, no Scryfall
 #   ./make-proxies.sh --notes [name]                  # CUT-NOTES of a previous run (default: latest)
 #
@@ -13,7 +14,8 @@
 #   -o, --out DIR         parent dir for <deckname>/ (default: current directory)
 #   -p, --paper SIZE      a4 (default) | letter
 #   -r, --registration N  4 (default) | 3 registration marks
-#   --board NAME          Moxfield board: main (default) | side | considering
+#   --board NAME          Moxfield/Archidekt board: main (default) | side | considering
+#                         (Archidekt: Sideboard / Maybeboard categories)
 #   --backs               double-sided cards (default: fronts only)
 #   --basics              include basic lands (skipped by default)
 #   -t, --tokens [N]      also N of each distinct token (default 2; no emblems)
@@ -131,14 +133,19 @@ if [[ $TEST_MODE -eq 1 ]]; then
   NAME="test-sheet"
 else
   [[ -n "$DECK" ]] || { echo "error: no decklist given" >&2; usage 1; }
-  # A Moxfield URL as the decklist: pull the deck (or one board of it, --board
-  # main|side|considering) from their JSON API into decks/ and continue with
-  # that file. Exists because Moxfield itself cannot export the "Considering"
-  # board. Exact printings are preserved (set + collector number per line).
-  if [[ "$DECK" == *moxfield.com/decks/* ]]; then
-    DECK="$("$PY" "$ROOT/tools/fetch_moxfield.py" "$DECK" --board "$BOARD" --to "$ROOT/decks")"
-    FORMAT="mtga"
-  fi
+  # A Moxfield or Archidekt URL as the decklist: pull the deck (or one board of
+  # it, --board main|side|considering) from their JSON API into decks/ and
+  # continue with that file. Exists because Moxfield itself cannot export the
+  # "Considering" board (Archidekt: the Maybeboard category). Exact printings
+  # are preserved (set + collector number per line).
+  case "$DECK" in
+    *moxfield.com/decks/*)
+      DECK="$("$PY" "$ROOT/tools/fetch_moxfield.py" "$DECK" --board "$BOARD" --to "$ROOT/decks")"
+      FORMAT="mtga" ;;
+    *archidekt.com/decks/*)
+      DECK="$("$PY" "$ROOT/tools/fetch_archidekt.py" "$DECK" --board "$BOARD" --to "$ROOT/decks")"
+      FORMAT="mtga" ;;
+  esac
   # Accept absolute Windows paths (C:\...) pasted from Explorer
   if [[ ! -f "$DECK" ]] && command -v wslpath >/dev/null 2>&1; then
     CONV="$(wslpath -u "$DECK" 2>/dev/null || true)"

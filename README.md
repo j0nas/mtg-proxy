@@ -65,7 +65,8 @@ laminate, cut. If the gauges read clean, switch to real cards.
 ./make-proxies.sh decks/mydeck.txt                    # MTGA format, A4, 4-mark registration
 ./make-proxies.sh decks/mydeck.txt -f moxfield        # also: mtgo, archidekt, deckstats, simple, ...
 ./make-proxies.sh https://moxfield.com/decks/<id>     # fetch straight from Moxfield
-./make-proxies.sh <moxfield-url> --board considering  # ...or just its "Considering" board
+./make-proxies.sh https://archidekt.com/decks/<id>    # ...or from Archidekt
+./make-proxies.sh <deck-url> --board considering      # ...or just its "Considering"/Maybeboard
 ./make-proxies.sh decks/mydeck.txt -r 3               # 3-mark fallback (see §4)
 ./make-proxies.sh decks/mydeck.txt --backs            # double-sided (default is fronts only)
 ./make-proxies.sh decks/mydeck.txt --basics           # include basic lands (skipped by default)
@@ -80,6 +81,13 @@ itself cannot export (or even copy) the Considering board. Each line carries the
 printing picked on Moxfield (set + collector number), which the fetch honors over the
 default fancy-art preferences. Private decks are not reachable. The saved decklist file can
 be rerun offline later like any other.
+
+**Archidekt URLs** work the same way (`tools/fetch_archidekt.py`, Archidekt's public
+`/api/decks/<id>/` JSON). Archidekt has categories instead of boards: a card is in the deck
+when its primary category is flagged "included in deck", and the stock excluded categories
+are Sideboard and Maybeboard — so `--board main` is everything counted in the deck
+(commander included), `--board side` the Sideboard category and `--board considering` the
+Maybeboard. Chosen printings are preserved here too.
 
 PDFs are **fronts only by default** — add `--backs` for double-sided output (backs come
 from `assets/back.png`). **Basic lands are skipped by default** (`--basics` includes
