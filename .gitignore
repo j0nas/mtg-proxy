@@ -4,3 +4,5 @@ silhouette-card-maker/
 __pycache__/
 inkscape-silhouette/
 .DS_Store
+decks/*
+
