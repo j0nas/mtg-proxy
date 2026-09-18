@@ -5,7 +5,7 @@ managed with `uv`) that drives [silhouette-card-maker](https://github.com/Alan-C
 in-process, from my fork `j0nas/silhouette-card-maker` (branch `local-patches`: batched and
 parallel Scryfall fetching, `--token_copies`, MTGA parser fixes).
 
-Built for one setup: Epson ET-8550, 135 gsm glossy photo paper, 80 µm matte laminate, Silhouette
+Built for one setup: Epson ET-8550, 135 gsm glossy photo paper, 80 µm laminate, Silhouette
 Cameo 5 Alpha with the AutoBlade. Finished card is ~0.32 mm; a real one is 0.305 mm. What the
 cards cost and why the stack looks like this is written up at
 [jona.no/docs/mtg-proxying](https://jona.no/docs/mtg-proxying).
@@ -179,7 +179,9 @@ machine skip; power-cycle to rehome.
 If you do use Studio: v5.0.402 or newer, not the free Starter edition. Machine profile must
 match the marks: `-r 4` wants "Cameo 5 Alpha", `-r 3` wants plain "Cameo 5" even on Alpha
 hardware. 4-mark is fussier than 3-mark; one Alpha user needed light Post-its over the two
-bottom-corner cards during the scan. Matte laminate helps either way.
+bottom-corner cards during the scan. Glare from glossy laminate is a known cause of failed
+scans; I cut glossy-laminated sheets fine with `cut-proxies`, but matte is the safer choice if
+registration keeps failing.
 
 Finish: cut cards can delaminate at the edges. Run them through the laminator again. Cloudy
 lamination is too cold (run 80 µm pouches on the 5 mil setting); wavy cards are too hot.
