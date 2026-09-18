@@ -1,6 +1,6 @@
-# ET-8550 printer presets (pulled from PomeloMadness, 2026-09-03)
+# ET-8550 printer presets (read off the Windows driver, 2026-09-03)
 
-The five custom presets saved in the Windows Epson driver on PomeloMadness, read straight
+The five custom presets saved in the Windows Epson driver, read straight
 off the driver's Printing Preferences dialog (screenshots alongside: `<preset>-main.png`,
 `<preset>-more-options.png`). The driver stores them as an opaque blob
 (`C:\ProgramData\Epson\EPSON ET-8550 Series\E_TCXYCE.UCB`), so the dialog is the source

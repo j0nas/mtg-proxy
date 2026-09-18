@@ -187,8 +187,7 @@ class FetchedDeck:
 
 
 def fetch_json(url: str, timeout: int = 30) -> dict:
-    # urllib, not requests: Moxfield's WAF 403s the requests fingerprint but
-    # accepts a plain urllib client with a browser User-Agent (2026-08).
+    # Plain urllib with a browser User-Agent; both sites answer that fine (2026-08).
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:  # fixed https hosts
         return json.load(r)

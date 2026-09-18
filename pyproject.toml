@@ -3,6 +3,7 @@ name = "mtg-proxy"
 version = "1.0.0"
 description = "Decklist in, print-ready PDF + Silhouette cut file out (ET-8550 + Cameo 5 Alpha)"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12,<3.13"
 # The vendored silhouette-card-maker engine is imported in-process, so its pinned
 # requirements.txt is mirrored here (same versions) plus the CLI framework.
