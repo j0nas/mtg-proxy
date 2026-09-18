@@ -24,30 +24,48 @@ cleaner unidirectional passes).
 (thick-paper mode) that the screenshots don't show; the panel text lists "Thick paper"
 and "Adobe RGB".
 
-## The same thing on the Mac (CUPS / IPP Everywhere driver)
+## The same thing on the Mac (Epson driver queue)
 
-The Mac talks to the ET-8550 through CUPS' generic IPP driver, so the option names differ
-and a few Windows-only toggles (Quiet Mode, Bidirectional) have no equivalent. Mapping
-for **4x2 Glossy**:
+Two ways the Mac can talk to the ET-8550, with very different option sets:
 
-| Windows | CUPS option |
+- **AirPrint / IPP Everywhere** (what "Add Printer" picks by default): generic IPP options only
+  (`media`, `InputSlot`, `MediaType=photographic-glossy`, `cupsPrintQuality`, `ColorModel`). No
+  Quiet Mode, no Bidirectional, no Best Quality.
+- **Epson driver** (Add Printer → "Use: EPSON ET-8550 Series"; installed under
+  `/Library/Printers/EPSON`): the full driver with Epson's own option codes. Since 2026-09 the
+  Mac queue is this one, named `EPSON_ET_8550_Series_2` (the AirPrint queue was replaced).
+
+Mapping for **4x2 Glossy** on the Epson-driver queue (codes from the Epson PPD,
+`lpoptions -p EPSON_ET_8550_Series_2 -l` lists them all, `gzcat "/Library/Printers/PPDs/Contents/Resources/EPSON ET-8550 Series.gz" | grep EPIJ_Medi` shows the labels):
+
+| Windows | Epson PPD option |
 |---|---|
-| Rear Paper Feeder | `-o InputSlot=rear` |
-| A4 | `-o media=A4` |
+| A4 | `-o EPIJ_Size=1` |
+| Rear Paper Feeder | `-o EPIJ_FdSo=0` (11 = Auto Select, 2/3 = cassettes) |
+| Photo Paper Glossy | `-o EPIJ_Medi=145` (92 Ultra Glossy, 13 Premium Glossy, 12 Matte, 2 Photo Quality Ink Jet, 0 plain, 159/160 thick) |
+| Quality High | `-o EPIJ_Qual=306` (307 = Best Quality, 303 = Normal) |
+| Bidirectional off | `-o EPIJ_OPT_Bi_D=0` |
+| Quiet Mode on | `-o EPIJ_Silt=1` |
 | Landscape | comes from the PDF page itself |
-| Photo Paper Glossy | `-o MediaType=photographic-glossy` |
-| Color | `-o ColorModel=RGB` |
-| Quality High | `-o cupsPrintQuality=High` |
-| Reverse Order | `-o outputorder=reverse` (irrelevant for one sheet) |
-| no scaling (not a preset field, but essential for registration) | `-o print-scaling=none -o fit-to-page=false` |
+| no scaling (essential for registration) | `-o print-scaling=none -o fit-to-page=false` |
 
-Other paper types on the Mac side: Epson Ultra Glossy → `photographic-high-gloss`, Epson
-Matte → `photographic-matte`, Photo Quality Ink Jet → `photographic` (nearest), plain →
-`stationery`. Thick paper → `com.epson-thickpaper1`/`2`.
+"Emphasize Text" / "Emphasize Thin Lines" (Windows: More Options → Image Options…) do not exist
+in the Mac driver at all; the nearest controls are Print Quality and Sharpen. Irrelevant for the
+proxy sheets — they are flattened rasters with solid registration marks.
 
-On the Mac this mapping exists as the CUPS printer instance `EPSON_ET_8550_Series/4x2-glossy`
-(`~/.cups/lpoptions`, chezmoi-managed): `lp -d EPSON_ET_8550_Series/4x2-glossy file.pdf`
-from any tool. `make-proxies --print` uses it for real sheets and plain-paper defaults for
-the `--test` sheet. Recreate by hand with
-`lpoptions -p EPSON_ET_8550_Series/4x2-glossy -o media=A4 -o InputSlot=rear -o MediaType=photographic-glossy -o cupsPrintQuality=High -o ColorModel=RGB -o print-scaling=none -o fit-to-page=false`. Full list of what the Mac driver offers:
-`lpoptions -p EPSON_ET_8550_Series -l`.
+On the Mac this mapping exists as the CUPS printer instance `EPSON_ET_8550_Series_2/4x2-glossy`
+(`~/.cups/lpoptions`, chezmoi-managed): `lp -d EPSON_ET_8550_Series_2/4x2-glossy file.pdf` from
+any tool. `make-proxies --print` finds whichever live queue carries a `/4x2-glossy` instance
+(`MTG_PROXY_LP_INSTANCE` overrides) and uses plain-paper defaults for the `--test` sheet; if no
+instance exists it falls back to the AirPrint-style explicit options above, which only make sense
+on an AirPrint queue. Recreate the instance by hand with
+
+```sh
+lpoptions -p EPSON_ET_8550_Series_2/4x2-glossy \
+  -o EPIJ_Size=1 -o EPIJ_FdSo=0 -o EPIJ_Medi=145 -o EPIJ_Qual=306 \
+  -o EPIJ_OPT_Bi_D=0 -o EPIJ_Silt=1 -o print-scaling=none -o fit-to-page=false
+```
+
+The macOS 26 print dialog folds the driver's panes into the collapsed "Printer Options" section;
+Quiet Mode and Bidirectional are not exposed there even on the Epson driver, but the CUPS
+instance sets them on every job sent through `lp` regardless of what the dialog shows.

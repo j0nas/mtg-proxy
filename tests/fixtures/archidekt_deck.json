@@ -1,0 +1,167 @@
+{
+ "id": 7031486,
+ "name": "Buffs by Hans",
+ "categories": [
+  {
+   "name": "Creature",
+   "includedInDeck": true
+  },
+  {
+   "name": "Commander",
+   "includedInDeck": true
+  },
+  {
+   "name": "Engines",
+   "includedInDeck": true
+  },
+  {
+   "name": "Instant",
+   "includedInDeck": true
+  },
+  {
+   "name": "Buff",
+   "includedInDeck": true
+  },
+  {
+   "name": "Removal",
+   "includedInDeck": true
+  },
+  {
+   "name": "Sorcery",
+   "includedInDeck": true
+  },
+  {
+   "name": "Big Draw",
+   "includedInDeck": true
+  },
+  {
+   "name": "Artifact",
+   "includedInDeck": true
+  },
+  {
+   "name": "Enchantment",
+   "includedInDeck": true
+  },
+  {
+   "name": "Planeswalker",
+   "includedInDeck": true
+  },
+  {
+   "name": "Land",
+   "includedInDeck": true
+  },
+  {
+   "name": "Beats",
+   "includedInDeck": true
+  },
+  {
+   "name": "Ramp",
+   "includedInDeck": true
+  },
+  {
+   "name": "Maybeboard",
+   "includedInDeck": false
+  },
+  {
+   "name": "Sideboard",
+   "includedInDeck": false
+  }
+ ],
+ "cards": [
+  {
+   "quantity": 1,
+   "categories": [
+    "Commander"
+   ],
+   "card": {
+    "collectorNumber": "175",
+    "edition": {
+     "editioncode": "dmc"
+    },
+    "oracleCard": {
+     "name": "Xyris, the Writhing Storm"
+    },
+    "displayName": null
+   }
+  },
+  {
+   "quantity": 1,
+   "categories": [
+    "Engines"
+   ],
+   "card": {
+    "collectorNumber": "69",
+    "edition": {
+     "editioncode": "vow"
+    },
+    "oracleCard": {
+     "name": "Mischievous Catgeist // Catlike Curiosity"
+    },
+    "displayName": null
+   }
+  },
+  {
+   "quantity": 1,
+   "categories": [
+    "Land"
+   ],
+   "card": {
+    "collectorNumber": "156",
+    "edition": {
+     "editioncode": "woc"
+    },
+    "oracleCard": {
+     "name": "Command Tower"
+    },
+    "displayName": null
+   }
+  },
+  {
+   "quantity": 1,
+   "categories": [
+    "Maybeboard"
+   ],
+   "card": {
+    "collectorNumber": "12",
+    "edition": {
+     "editioncode": "m21"
+    },
+    "oracleCard": {
+     "name": "Zzz Maybe Card"
+    },
+    "displayName": null
+   }
+  },
+  {
+   "quantity": 2,
+   "categories": [
+    "Sideboard",
+    "Removal"
+   ],
+   "card": {
+    "collectorNumber": "",
+    "edition": {
+     "editioncode": ""
+    },
+    "oracleCard": {
+     "name": "No Printing Card"
+    },
+    "displayName": null
+   }
+  },
+  {
+   "quantity": 1,
+   "categories": [],
+   "card": {
+    "collectorNumber": "1",
+    "edition": {
+     "editioncode": "lea"
+    },
+    "oracleCard": {
+     "name": "Uncategorized Card"
+    },
+    "displayName": null
+   }
+  }
+ ]
+}

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Deterministic gate before every commit: lint, format check, unit tests.
+# Enabled by setup.sh (git config core.hooksPath .githooks). Skip once with: git commit --no-verify
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+uv run --quiet ruff check src tests
+uv run --quiet ruff format --check src tests
+uv run --quiet pytest -q

@@ -1,34 +1,58 @@
 # MTG Proxy Factory — ET-8550 + Silhouette Cameo 5 Alpha
 
-Decklist in → print-ready PDF + Silhouette cut file out, built on
-[silhouette-card-maker](https://github.com/Alan-Cha/silhouette-card-maker) (cloned in
-`silhouette-card-maker/`, venv inside, managed with `uv`). The clone carries local
-patches in `plugins/mtg/` (batch + parallel Scryfall fetching) — re-apply them if you
-ever pull upstream updates.
+Decklist in → print-ready PDF + Silhouette cut file out. A Python package (`mtgproxy`,
+CLI `mtg-proxy`, managed with `uv`) that drives the vendored
+[silhouette-card-maker](https://github.com/Alan-Cha/silhouette-card-maker) engine in-process
+(cloned in `silhouette-card-maker/` from the fork `j0nas/silhouette-card-maker`, branch
+`local-patches`: batch + parallel Scryfall fetching, `--token_copies`, MTGA parser fixes).
+`./setup.sh` makes a fresh clone runnable (§0).
 
 Stack: ET-8550 (your own print profile) → 135 gsm glossy photo paper → 80 µm matte
 lamination pouches → Cameo 5 Alpha with AutoBlade. Total card thickness ≈ 0.32 mm,
 very close to a real MTG card (0.305 mm).
 
 ```
-make-proxies.sh      decklist → ./<deck>/{<deck>.pdf, <deck>-duplex.pdf?, *.studio3, CUT-NOTES.md}
-                     in the CURRENT directory (-o DIR for another parent); decklist paths are cwd-relative too
-save-offset.sh       store the printer's duplex offset once, auto-applied afterwards
+mtg-proxy make       decklist → ./<deck>/{<deck>.pdf, <deck>-duplex.pdf?, *.studio3, CUT-NOTES.md, run.json}
+  (make-proxies.sh)  in the CURRENT directory (-o DIR for another parent); decklist paths are cwd-relative too.
+                     A deck fetched from a URL also lands there as <deck>.txt.
+mtg-proxy cut        cut a printed sheet on the Cameo directly (no Studio); run it inside the deck
+  (cut-proxies.sh)   folder and it reads run.json for paper / card size / registration pattern
+mtg-proxy offset     store the printer's duplex offset once, auto-applied afterwards
+  (save-offset.sh)
+mtg-proxy notes      show the newest CUT-NOTES.md below the current directory (or a named run)
+mtg-proxy cache      Scryfall image cache stats / --clear (~/.cache/mtg-proxy, MTG_PROXY_CACHE overrides)
+mtg-proxy doctor     check engine, cutter driver, data files
+mtg-proxy rebase-template / make-back   template surgery (§2¾) / regenerate assets/back.png
+src/mtgproxy/        the package (engine.py = in-process engine access, build.py = the pipeline,
+                     decks.py = Moxfield/Archidekt, layout.py = cut SVG, studio3.py = template patcher)
+tests/               pytest suite (no network, no printer); ruff + pytest run in the pre-commit hook
 data/cut_offset.json machine cut offset (mm), baked into every cutting template at build time
-data/offset_data.json printer duplex offset (save-offset.sh), applied to every double-sided PDF
+data/offset_data.json printer duplex offset (mtg-proxy offset), applied to every double-sided PDF
 templates/           project cutting-template bases — Studio saves rebased offset-free, so they
                      open with the Cameo 5 Alpha profile pre-selected (see §2¾)
-tools/               placeholder/test-card + card-back generators, studio3 offset patcher + rebaser
-decks/               put your decklists here
+decks/               your decklists (gitignored)
 (no output/ here)    results live where you ran the command, one folder per deck; a rerun
                      replaces only its own files. Under WSL they are also mirrored FLAT into
                      %USERPROFILE%\Desktop\projects\mtg-proxy (MTG_PROXY_WIN_OUT overrides).
-                     `make-proxies --notes [deck]`
-                     shows the newest CUT-NOTES.md below the current directory
 assets/back.png      default card back for --backs runs — replace with your own any time
-silhouette-card-maker/  vendored PDF engine — its own git repo (fork j0nas/silhouette-card-maker,
-                     branch local-patches), excluded from this outer repo's git
+silhouette-card-maker/  vendored PDF engine — its own git repo, gitignored here (setup.sh clones it)
+inkscape-silhouette/    vendored cutter driver with its own venv — same deal
 ```
+
+The `*.sh` scripts are three-line shims onto the CLI (kept for the dotfiles' `make-proxies` /
+`cut-proxies` functions); `make-proxies --test`, `make-proxies --notes`, `cut-proxies --dry-run`
+etc. all still work. `uv run mtg-proxy ...` is the same thing from inside the repo.
+
+## 0. Setup (fresh clone)
+
+```sh
+./setup.sh              # clones the engine fork + cutter driver, builds both venvs, installs git hooks
+./setup.sh --no-cutter  # print-only machine: skip inkscape-silhouette
+mtg-proxy doctor        # (uv run mtg-proxy doctor) — what's missing and how to fix it
+```
+
+Needs `uv` and `git` on PATH; USB cutting on the Mac additionally needs `libusb` (Homebrew,
+managed in the dotfiles). Everything is idempotent — rerun `setup.sh` after pulling.
 
 ## 1. Verify the workflow first (no wasted ink)
 
@@ -70,20 +94,23 @@ laminate, cut. If the gauges read clean, switch to real cards.
 ./make-proxies.sh decks/mydeck.txt -r 3               # 3-mark fallback (see §4)
 ./make-proxies.sh decks/mydeck.txt --backs            # double-sided (default is fronts only)
 ./make-proxies.sh decks/mydeck.txt --basics           # include basic lands (skipped by default)
-./make-proxies.sh decks/mydeck.txt -- --prefer_extra_art --tokens   # extra fetch.py args
+./make-proxies.sh decks/mydeck.txt -t 2               # plus 2 of each distinct token, grouped at the end of the sheets
+./make-proxies.sh decks/mydeck.txt -- --prefer_set sld  # extra fetch.py args after --
 ./make-proxies.sh decks/mydeck.txt --skip-fetch       # reuse already-fetched images
+./make-proxies.sh decks/mydeck.txt --dry-run          # resolve the decklist + output folder, stop
+./make-proxies.sh decks/mydeck.txt --print --printer X  # CUPS destination other than the 4x2-glossy instance
+./make-proxies.sh decks/mydeck.txt --trim "Temple Garden" --trim "Battle Angels of Tyr:0.5"   # see below
 ```
 
 **Moxfield URLs** work directly as the decklist argument: the deck is pulled from Moxfield's
-JSON API (`tools/fetch_moxfield.py`) into `decks/<deckname>.txt` and the run continues from
-that file. `--board main|side|considering` picks the board — this exists because Moxfield
+JSON API (`mtgproxy/decks.py`) into the output folder as `<deckname>/<deckname>.txt` and the
+run continues from that file. `--board main|side|considering` picks the board — this exists because Moxfield
 itself cannot export (or even copy) the Considering board. Each line carries the exact
 printing picked on Moxfield (set + collector number), which the fetch honors over the
 default fancy-art preferences. Private decks are not reachable. The saved decklist file can
 be rerun offline later like any other.
 
-**Archidekt URLs** work the same way (`tools/fetch_archidekt.py`, Archidekt's public
-`/api/decks/<id>/` JSON). Archidekt has categories instead of boards: a card is in the deck
+**Archidekt URLs** work the same way (Archidekt's public `/api/decks/<id>/` JSON). Archidekt has categories instead of boards: a card is in the deck
 when its primary category is flagged "included in deck", and the stock excluded categories
 are Sideboard and Maybeboard — so `--board main` is everything counted in the deck
 (commander included), `--board side` the Sideboard category and `--board considering` the
@@ -95,9 +122,22 @@ them). **Double-faced cards** (transform/MDFC) are pulled out of the main PDF in
 separate `<deck>-duplex.pdf` with their real backfaces — print that one with manual
 duplex, long-edge flip, and cut it like any other sheet. Fetching resolves the whole
 deck in bulk (75 cards per Scryfall
-request) and downloads images in parallel; a 100-card deck builds in ~15 s. If Scryfall
-ever rate-limits anyway, the fetch backs off automatically — `MTG_FETCH_WORKERS=1`
-forces fully serial fetching as a last resort.
+request) and downloads images in parallel; a 100-card deck builds in ~15 s the first time.
+**Card images are cached** across decks and runs in `~/.cache/mtg-proxy` (keyed by the exact
+Scryfall image URL, so a printing never goes stale; `mtg-proxy cache` shows the size,
+`--clear` empties it, `--no-cache` bypasses it for one run) — reruns and overlapping decks
+take a couple of seconds. Card *lookups* always hit Scryfall, so a list without printings
+still resolves to current art. If Scryfall ever rate-limits anyway, the fetch backs off
+automatically — `MTG_FETCH_WORKERS=1` forces fully serial fetching as a last resort.
+
+**Contrasting bleed on borderless cards** (`--trim`): the engine builds the 1.25 mm print bleed
+by smearing each image's outermost pixel row outward. Every Scryfall scan has a thin rim there;
+on a black-bordered card it's black on black, but on borderless / extended-art printings the rim
+is a dark line against art and the bleed shows as a band (the corners are fine — they're filled
+from inside the art). `--trim "Card Name"` replaces that card's outer 0.3 mm ring with the ring
+just inside before the bleed is built; `--trim "Card Name:0.5"` sets the width, `--trim all` does
+every card, and the flag repeats. Trims are recorded in `run.json` and applied once even across
+`--skip-fetch` reruns. To find candidates, look for borderless printings in the decklist.
 
 Default decklist format is MTG Arena style (`4 Lightning Bolt` / `2 Arid Mesa (MH2) 244`,
 optional `Deck`/`Sideboard` headers). The count is optional too — a bare `Lightning Bolt`
@@ -105,14 +145,17 @@ line means one copy, so a plain list of card names works as-is. `simple` is bare
 names, one per line.
 
 Every output folder contains a `CUT-NOTES.md` checklist generated for that exact run
-(paper size, mark pattern, matching machine profile, cut settings).
+(paper size, mark pattern, matching machine profile, cut settings) and a `run.json` sidecar
+with the same facts in machine form — `cut-proxies` reads it, so the registration pattern
+you printed is the one the cutter scans for, without retyping `-r`.
 
 ## 2½. Invoking it
 
-Run the script from any shell (macOS, Linux or WSL) — the dotfiles define a `make-proxies`
-function that finds the clone (`$MTG_PROXY_DIR`, else `~/Desktop/projects/mtg-proxy`, else
-`~/projects/mtg-proxy`), and the script resolves its own location, so the working directory
-only matters for relative decklist paths:
+Run it from any shell (macOS, Linux or WSL) — the dotfiles define `make-proxies` /
+`cut-proxies` functions that find the clone (`$MTG_PROXY_DIR`, else
+`~/Desktop/projects/mtg-proxy`, else `~/projects/mtg-proxy`) and call the shims, which `uv run`
+the CLI from the repo's own venv (syncing it first if needed). The working directory only
+matters for relative decklist paths and for where the output folder goes:
 
 ```sh
 make-proxies --test
@@ -131,7 +174,7 @@ PowerShell/cmd, the equivalent one-liner is `wsl <clone path>/make-proxies.sh <a
 The Cameo 5 Alpha cuts ~1mm high relative to the registration marks it scans — a machine
 bias, independent of paper size or layout. The compensation lives as one number
 in `data/cut_offset.json` (currently `y_mm: 1.0`, positive = shift cuts down) and is baked
-into every cutting template at build time by `tools/offset_studio3.py`; the placed template
+into every cutting template at build time by `mtgproxy/studio3.py`; the placed template
 carries it in its name (`a4-standard-v5+y1mm.studio3`). **Never nudge shapes in Silhouette
 Studio** — hand-edited templates get overwritten by the next run's mirror. If alignment
 drifts (new blade, new machine), cut one sheet, measure the vertical error, update the
@@ -143,13 +186,14 @@ cuts landed perfectly; the patcher was validated bit-exact against that template
 Alpha** pre-selected (instead of the upstream default, plain Cameo 5), the saved material
 selection loaded, and media set to **A4**. The base was made by saving a generated template from
 Studio with those settings switched (machine + material 2026-08, A4 media 2026-09), then
-transplanting the pristine stock geometry back in with `tools/rebase_template.py` — which proves
-its work by checking that base + cut offset reproduces the Studio save byte-for-byte. To bake
-different Studio state: open the generated `*+y1mm.studio3` in Studio, change *settings only*
-(never move shapes), save it over the mirrored copy, then rerun the rebase:
+transplanting the pristine stock geometry back in with `mtg-proxy rebase-template` — which proves
+its work by checking that base + cut offset reproduces the Studio save byte-for-byte (the test
+suite re-proves the shipped base against the stock template on every run). To bake different
+Studio state: open the generated `*+y1mm.studio3` in Studio, change *settings only* (never move
+shapes), save it over the mirrored copy, then rerun the rebase:
 
 ```sh
-silhouette-card-maker/venv/bin/python tools/rebase_template.py \
+uv run mtg-proxy rebase-template \
   '<windows mirror folder>/a4-standard-v5-alpha+y1mm.studio3' \
   silhouette-card-maker/cutting_templates/a4-standard-v5.studio3 \
   templates/a4-standard-v5-alpha.studio3
@@ -168,7 +212,7 @@ baked into the base now; if Page Setup ever shows "Custom" again, re-bake with t
    sheet (100 %, manual duplex, long-edge flip).
 2. Against a strong light, find the front/back square pair that lines up; read its red
    `(x, y)` label. Units are 300 PPI pixels, ≈ 0.085 mm each.
-3. `./save-offset.sh -x <x> -y <y>` (add `-a <deg>` for rotational error).
+3. `./save-offset.sh -x <x> -y <y>` (= `mtg-proxy offset`; add `-a <deg>` for rotational error).
 
 The offset lands in `data/offset_data.json` (tracked — commit it, and it follows the
 printer to every clone) and every future double-sided PDF gets it automatically.
@@ -238,17 +282,20 @@ scan command **explicitly** — `-r 4` sends the four-L-mark scan (`TB124`), `-r
 square + two-L scan (`TB123`). The Alpha accepts both; Studio only ever lets it do one.
 
 ```sh
-./cut-proxies.sh                 # A4, standard cards, 4-mark, USB, F25/S25/D5/P3
-./cut-proxies.sh --ble           # Bluetooth LE — no cable, no pairing (Mac)
-./cut-proxies.sh -r 3            # sheet printed with make-proxies -r 3
-./cut-proxies.sh --passes 4      # one more pass; also --force/--speed/--depth
-./cut-proxies.sh --dry-run       # no machine: builds output/cut/a4-standard.{svg,cmds}
-./cut-proxies.sh --preview       # look at the paths in a window before sending
+cd mydeck && cut-proxies        # reads ./run.json: paper, card size, 3- or 4-mark — as printed
+cut-proxies --run mydeck        # same, from the parent folder
+cut-proxies --ble               # Bluetooth LE — no cable, no pairing (Mac)
+cut-proxies -r 3                # no run.json (or override it): sheet printed with -r 3
+cut-proxies --passes 4          # one more pass; also --force/--speed/--depth
+cut-proxies --dry-run           # no machine: builds output/cut/<name>.{svg,cmds}, checks the scan cmd
+cut-proxies --preview           # look at the paths in a window before sending
 ```
+
+Without a `run.json` in reach it falls back to flags/defaults (A4, standard, 4-mark) and says so.
 
 What it does, in order:
 
-1. `tools/cut_svg.py` asks silhouette-card-maker's own `generate_dxf.py` for the card
+1. `mtgproxy/layout.py` asks silhouette-card-maker's own `generate_dxf.py` for the card
    outlines of the paper/card combo (the same layout engine that placed the cards in the
    PDF) and converts them to a page-sized SVG in mm, rounded corners as real arcs.
    Registration-mark geometry (10 mm inset, 277×190 mm apart on A4 landscape) comes
@@ -269,9 +316,26 @@ replacing Silhouette's USB driver with WinUSB (Zadig), which breaks Studio's con
 The Mac needs no driver dance — plug the USB cable in, or use `--ble`
 (`--scan` lists nearby BLE devices if the default name "CAMEO 5 ALPHA" doesn't match).
 
-Setup (once): the driver clone lives in `inkscape-silhouette/` (gitignored, like the
-card-maker clone) with its own venv; `cut-proxies.sh` prints the exact clone + venv
-commands if it is missing. `libusb` comes from Homebrew via the dotfiles.
+Setup (once): `./setup.sh` clones the driver into `inkscape-silhouette/` (gitignored, like the
+card-maker clone) and builds its own venv; `cut-proxies` prints the exact commands if it is
+missing. `libusb` comes from Homebrew via the dotfiles.
+
+## 6. Development
+
+```sh
+uv sync                 # venv with the engine's pinned deps + dev tools (ruff, pytest)
+uv run pytest           # ~50 unit tests: deck parsing (recorded API fixtures), template patcher
+                        # (bit-exact against the stock template), cut geometry, notes/sidecar/mirror/
+                        # print-job builders, CLI dry runs — no network, no printer, ~1 s
+uv run ruff check src tests && uv run ruff format src tests
+```
+
+`setup.sh` points `core.hooksPath` at `.githooks/`, whose pre-commit runs ruff + pytest;
+`git commit --no-verify` skips it once. Dependencies are pinned to the engine's
+`requirements.txt` versions in `pyproject.toml` and locked in `uv.lock`; bump both together
+when the fork updates. The engine is imported in-process (`mtgproxy/engine.py` puts its root
+on `sys.path` and runs its click commands with `standalone_mode=False` under `chdir`), so its
+`game/` working dirs and `data/offset_data.json` stay where the engine expects them.
 
 ## Sources
 

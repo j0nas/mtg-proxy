@@ -1,0 +1,56 @@
+{
+ "name": "Orah Test Deck",
+ "boards": {
+  "commanders": {
+   "count": 1,
+   "cards": {
+    "a": {
+     "quantity": 1,
+     "card": {
+      "name": "Orah, Skyclave Hierophant",
+      "set": "znr",
+      "cn": "237"
+     }
+    }
+   }
+  },
+  "mainboard": {
+   "count": 2,
+   "cards": {
+    "b": {
+     "quantity": 1,
+     "card": {
+      "name": "Sol Ring",
+      "set": "cmm",
+      "cn": "464"
+     }
+    },
+    "c": {
+     "quantity": 1,
+     "card": {
+      "name": "Agadeem's Awakening // Agadeem, the Undercrypt",
+      "set": "znr",
+      "cn": "90"
+     }
+    }
+   }
+  },
+  "sideboard": {
+   "count": 0,
+   "cards": {}
+  },
+  "maybeboard": {
+   "count": 1,
+   "cards": {
+    "d": {
+     "quantity": 1,
+     "card": {
+      "name": "Smothering Tithe",
+      "set": "",
+      "cn": ""
+     }
+    }
+   }
+  }
+ }
+}

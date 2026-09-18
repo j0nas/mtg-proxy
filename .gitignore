@@ -1,8 +1,14 @@
-output/
-silhouette-card-maker
+# vendored engine + driver: their own clones (setup.sh)
 silhouette-card-maker/
-__pycache__/
 inkscape-silhouette/
+# project venv (uv sync)
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+# cut-proxies transcripts/logs and any stray build output inside the repo
+output/
+# your decklists (build output goes wherever you run the command)
+decks/
 .DS_Store
-decks/*
-

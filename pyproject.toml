@@ -1,0 +1,55 @@
+[project]
+name = "mtg-proxy"
+version = "1.0.0"
+description = "Decklist in, print-ready PDF + Silhouette cut file out (ET-8550 + Cameo 5 Alpha)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+# The vendored silhouette-card-maker engine is imported in-process, so its pinned
+# requirements.txt is mirrored here (same versions) plus the CLI framework.
+dependencies = [
+    "click==8.4.2",
+    "cloudscraper==1.2.71",
+    "ezdxf==1.4.4",
+    "filetype==1.2.0",
+    "matplotlib==3.11.1",
+    "mtg_parser==0.0.1a55",
+    "natsort==8.4.0",
+    "numpy==2.5.2",
+    "pillow==12.3.0",
+    "pydantic==2.13.4",
+    "pypdf==6.1.1",
+    "pypdfium2==5.12.1",
+    "requests==2.34.2",
+    "split-image==2.0.5",
+    "typer==0.21.1",
+]
+
+[project.scripts]
+mtg-proxy = "mtgproxy.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "ruff>=0.14",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.13,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "mtgproxy"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["silhouette-card-maker", "inkscape-silhouette", "tools"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003", "E501"]
