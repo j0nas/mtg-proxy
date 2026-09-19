@@ -193,7 +193,7 @@ def test_cli_redo_and_backlog(tmp_path, monkeypatch):
     assert r.exit_code == 0, r.output
     lines = (tmp_path / "BACKLOG.txt").read_text().splitlines()
     assert lines[1].startswith("1 Temple Garden (TRK) 491  # deck=deck ref=p1.2") and lines[1].endswith(
-        "trim=0.3"
+        "trim=0.3 single"
     )
     assert lines[2].startswith("1 Sol Ring (CMM) 464  # deck=deck ref=p1.1")
     r = runner.invoke(app, ["redo", "bogus", "--run", str(deck)])
@@ -217,3 +217,39 @@ def test_cli_make_has_defer_flag_and_records_it():
     assert "--defer-partial" in runner.invoke(app, ["make", "--help"]).output
     o = build.BuildOptions(token_copies=2, fetch_args=["--prefer_set", "sld"])
     assert o.recorded()["token_copies"] == 2 and o.recorded()["fetch_args"] == ["--prefer_set", "sld"]
+
+
+def test_hand_written_lines_get_their_faces_resolved_once(tmp_path):
+    from mtgproxy.decks import DOUBLE_SIDED_LAYOUTS
+
+    assert "reversible_card" in DOUBLE_SIDED_LAYOUTS  # the two-art shocklands print double-sided
+    bl = Backlog.at(tmp_path)
+    bl.add([Entry.parse("1 Hallowed Fountain // Hallowed Fountain (ECL) 347"), Entry.parse("1 Sol Ring"),
+            Entry.from_slot(_card("Delver", "sld", "1", dfc=True), "d", "d1.1", None)])  # fmt: skip
+    assert [e.faces_known for e in bl.entries] == [False, False, True]
+    asked = []
+
+    def lookup(e):
+        asked.append(e.name)
+        return {"Hallowed Fountain // Hallowed Fountain": True, "Sol Ring": False}.get(e.name)
+
+    assert bl.resolve_faces(lookup) == 2 and asked == ["Hallowed Fountain // Hallowed Fountain", "Sol Ring"]
+    assert [len(g) for g in bl.split()] == [1, 2]  # Fountain now counts as duplex
+    bl.save()
+    lines = bl.path.read_text().splitlines()
+    assert lines[1].endswith("# dfc") and lines[2].endswith("# single")
+    bl = Backlog.at(tmp_path)
+    assert bl.resolve_faces(lambda e: (_ for _ in ()).throw(AssertionError("must not ask again"))) == 0
+    # Scryfall unreachable: stays unknown, counted single, asked again next time
+    bl.add([Entry.parse("1 Brainstorm")])
+    assert bl.resolve_faces(lambda e: None) == 0 and not bl.entries[-1].faces_known
+
+
+def test_cli_backlog_resolves_faces_via_scryfall(tmp_path, monkeypatch):
+    monkeypatch.setattr("mtgproxy.cli._per_page", lambda paper, card: 8)
+    monkeypatch.setattr("mtgproxy.cli.is_double_sided", lambda name, s, cn: name.startswith("Hallowed"))
+    (tmp_path / "BACKLOG.txt").write_text("1 Hallowed Fountain // Hallowed Fountain (ECL) 347\n1 Sol Ring\n")
+    r = runner.invoke(app, ["backlog", "-o", str(tmp_path)])
+    assert r.exit_code == 0 and "duplex: 1" in r.output and "fronts: 1" in r.output, r.output
+    assert "[dfc]" in r.output
+    assert "# dfc" in (tmp_path / "BACKLOG.txt").read_text()

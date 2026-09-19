@@ -14,7 +14,7 @@ from . import __version__, build, cutting, engine, manifest, notes, printing, st
 from . import backlog as backlog_mod
 from .backlog import Backlog, BacklogError, Entry
 from .cache import ImageCache
-from .decks import DeckError
+from .decks import DeckError, is_double_sided
 from .layout import LayoutError
 from .manifest import ManifestError
 from .paths import DEFAULT_BACK, DRV_PY, NOTES_NAME, SCM, cache_dir
@@ -440,11 +440,25 @@ OutOpt = Annotated[
 ]
 
 
+def _resolve_faces(bl: Backlog) -> None:
+    """Hand-added lines: find out on Scryfall whether they are double-sided, once."""
+    if any(not e.faces_known for e in bl.entries):
+        n = bl.resolve_faces(lambda e: is_double_sided(e.name, e.set, e.cn))
+        if n:
+            bl.save()
+        if unknown := [e.card for e in bl.entries if not e.faces_known]:
+            typer.echo(
+                f"warning: could not look up on Scryfall, counted as single-sided: {', '.join(unknown)}",
+                err=True,
+            )
+
+
 def _show_backlog(out: Path, paper: str, card_size: str = "standard") -> Backlog:
     bl = Backlog.at(out.resolve())
     if not bl.entries:
         typer.echo(f"backlog empty ({bl.path})")
         raise typer.Exit()
+    _resolve_faces(bl)
     typer.echo(bl.summary(_per_page(paper, card_size)))
     typer.echo(bl.listing())
     return bl
@@ -512,6 +526,7 @@ def backlog_build(
     bl = Backlog.at(out)
     if not bl.entries:
         fail(f"backlog empty ({bl.path})")
+    _resolve_faces(bl)
     per_page = _per_page(paper, "standard")
     cards, keep = bl.take(per_page, full_only)
     if not cards:

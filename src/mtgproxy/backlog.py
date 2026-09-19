@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
@@ -43,6 +44,11 @@ class Entry:
     trim: float | None = None
     dfc: bool = False
     token: bool = False
+    single: bool = False  # known single-sided; neither flag = not yet looked up
+
+    @property
+    def faces_known(self) -> bool:
+        return self.dfc or self.single
 
     @property
     def card(self) -> str:
@@ -63,6 +69,8 @@ class Entry:
             parts.append("dfc")
         if self.token:
             parts.append("token")
+        if self.single and not self.dfc:
+            parts.append("single")
         return " ".join(parts)
 
     def format(self) -> str:
@@ -97,11 +105,15 @@ class Entry:
                 e.dfc = True
             elif key == "token":
                 e.token = True
+            elif key == "single":
+                e.single = True
         return e
 
     @classmethod
     def from_slot(cls, c: SlotCard, deck: str, ref: str, trim: float | None) -> Entry:
-        return cls(c.name, c.set, c.cn, 1, deck, ref, date.today().isoformat(), trim, c.dfc, c.token)
+        return cls(
+            c.name, c.set, c.cn, 1, deck, ref, date.today().isoformat(), trim, c.dfc, c.token, not c.dfc
+        )
 
     def units(self) -> list[Entry]:
         return [replace(self, qty=1) for _ in range(self.qty)]
@@ -134,6 +146,21 @@ class Backlog:
 
     def add(self, new: list[Entry]) -> None:
         self.entries.extend(new)
+
+    def resolve_faces(self, lookup: Callable[[Entry], bool | None]) -> int:
+        """Hand-written lines carry no dfc/single marker; ask ``lookup`` (True = double-sided)
+        once per such line and record the answer so the sheet count is right. Returns how many
+        were resolved (the file should be saved when > 0)."""
+        n = 0
+        for e in self.entries:
+            if e.faces_known:
+                continue
+            two = lookup(e)
+            if two is None:
+                continue
+            e.dfc, e.single = two, not two
+            n += 1
+        return n
 
     @property
     def cards(self) -> list[Entry]:

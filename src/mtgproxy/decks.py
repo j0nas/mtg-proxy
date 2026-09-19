@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -219,3 +220,21 @@ def fetch_deck(ref: str, board: str = "main", source_name: str | None = None) ->
             f"board {board!r} of {name!r} is empty (non-empty boards: {', '.join(entries.nonempty_boards) or 'none'})"
         )
     return FetchedDeck(src.name, name, board, entries.lines)
+
+
+# Scryfall layouts the engine prints as double-sided (plugins/mtg/scryfall.py double_sided_layouts).
+DOUBLE_SIDED_LAYOUTS = {"transform", "modal_dfc", "double_faced_token", "reversible_card", "meld"}
+
+
+def is_double_sided(name: str, set_code: str = "", cn: str = "") -> bool | None:
+    """Ask Scryfall whether this printing (or, without set/cn, this card) has a back face.
+    None when Scryfall can't be reached or doesn't know the card."""
+    if set_code and cn:
+        url = f"https://api.scryfall.com/cards/{set_code.lower()}/{urllib.parse.quote(cn)}"
+    else:
+        url = "https://api.scryfall.com/cards/named?" + urllib.parse.urlencode({"exact": name})
+    try:
+        card = fetch_json(url, timeout=15)
+    except (urllib.error.URLError, ValueError, OSError):
+        return None
+    return card.get("layout") in DOUBLE_SIDED_LAYOUTS
