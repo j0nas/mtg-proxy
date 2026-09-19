@@ -253,3 +253,27 @@ def test_cli_backlog_resolves_faces_via_scryfall(tmp_path, monkeypatch):
     assert r.exit_code == 0 and "duplex: 1" in r.output and "fronts: 1" in r.output, r.output
     assert "[dfc]" in r.output
     assert "# dfc" in (tmp_path / "BACKLOG.txt").read_text()
+
+
+def test_front_marker_prints_a_dfc_as_a_single_sided_card(tmp_path, monkeypatch):
+    e = Entry.parse("1 Hallowed Fountain // Hallowed Fountain (ECL) 347  # dfc front")
+    assert e.dfc and e.front and e.format().endswith("# dfc front")
+    bl = Backlog(tmp_path / "b.txt", [e, Entry("Delver", dfc=True)])
+    assert [[c.name for c in g] for g in bl.split()] == [
+        ["Hallowed Fountain // Hallowed Fountain"],
+        ["Delver"],
+    ]
+    front, ds = tmp_path / "front", tmp_path / "ds"
+    front.mkdir(), ds.mkdir()
+    for n in ("1HallowedFountainHallowedFountain1.png", "2Delver1.png"):
+        (front / n).write_bytes(b"x"), (ds / n).write_bytes(b"x")
+    monkeypatch.setattr(engine, "FRONT", front)
+    monkeypatch.setattr(engine, "DOUBLE_SIDED", ds)
+    assert build.drop_backs(["Hallowed Fountain // Hallowed Fountain", "Sol Ring"]) == [
+        "Hallowed Fountain // Hallowed Fountain"
+    ]
+    assert [p.name for p in ds.iterdir()] == ["2Delver1.png"]
+    main, duplex = manifest.partition(fronts_only=True, duplex_dfc=True)
+    assert [p.name for p in main] == ["1HallowedFountainHallowedFountain1.png"] and [
+        p.name for p in duplex
+    ] == ["2Delver1.png"]

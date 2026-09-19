@@ -515,6 +515,12 @@ def backlog_build(
             "--split-faces/--duplex", help="each DFC face as its own card (default: separate duplex PDF)"
         ),
     ] = False,
+    front_only: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--front-only", help="print this double-faced card's front as a single-sided card. Repeatable."
+        ),
+    ] = None,
     name: Annotated[
         str | None, typer.Option("--name", help="run folder name (default backlog-<date>)")
     ] = None,
@@ -527,6 +533,12 @@ def backlog_build(
     if not bl.entries:
         fail(f"backlog empty ({bl.path})")
     _resolve_faces(bl)
+    for want in front_only or []:
+        hits = [e for e in bl.entries if trim.clean_name(want) in trim.clean_name(e.name)]
+        if not hits:
+            fail(f"--front-only: nothing in the backlog matching {want!r}")
+        for e in hits:
+            e.front = True
     per_page = _per_page(paper, "standard")
     cards, keep = bl.take(per_page, full_only)
     if not cards:
@@ -548,6 +560,7 @@ def backlog_build(
         registration=registration,
         fronts_only=not backs,
         duplex_dfc=not split_faces,
+        front_only=[c.name for c in cards if c.front],
         include_basics=True,  # every line here is explicit
         print_mode=print_,
         printer=printer,

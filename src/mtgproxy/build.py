@@ -58,6 +58,7 @@ class BuildOptions:
     back: Path = DEFAULT_BACK
     trims: list[trim.TrimSpec] = field(default_factory=list)
     defer_partial: bool = False  # partial last page of each sheet → BACKLOG.txt instead of the PDF
+    front_only: list[str] = field(default_factory=list)  # DFC names to print as a single-sided front
 
     def recorded(self) -> dict:
         """What manifest.rebuild needs to re-derive the sheets of this run later."""
@@ -236,6 +237,19 @@ def prune_to_tokens() -> int:
                 f.unlink()
                 pruned += 1
     return pruned
+
+
+def drop_backs(names: list[str]) -> list[str]:
+    """Print these double-faced cards as ordinary single-sided cards: remove their back
+    images so the engine lays them out with the fronts. Returns the names that matched."""
+    keys = {trim.clean_name(n): n for n in names}
+    hit: set[str] = set()
+    for f in engine.images_in(engine.DOUBLE_SIDED):
+        m = trim.CARD_FILE.match(f.name)
+        if m and (name := keys.get(m.group(1).lower())):
+            f.unlink()
+            hit.add(name)
+    return [n for n in names if n in hit]
 
 
 def stage_and_index(opts: BuildOptions) -> manifest.Recorder:
@@ -455,6 +469,13 @@ def run_build(opts: BuildOptions) -> BuildResult:
         log(
             f"edge trim: {len(trimmed)} image(s) — " + ", ".join(f"{s.name} ({s.mm:g}mm)" for s in opts.trims)
         )
+
+    if opts.front_only:
+        dropped = drop_backs(opts.front_only)
+        missing = [n for n in opts.front_only if n not in dropped]
+        if missing:
+            raise BuildError(f"front-only: no double-faced card named {', '.join(repr(n) for n in missing)}")
+        log(f"front face only (single-sided): {', '.join(dropped)}")
 
     if opts.tokens_only:
         pruned = prune_to_tokens()

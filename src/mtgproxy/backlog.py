@@ -45,6 +45,7 @@ class Entry:
     dfc: bool = False
     token: bool = False
     single: bool = False  # known single-sided; neither flag = not yet looked up
+    front: bool = False  # double-faced printing, but print only its front as a single-sided card
 
     @property
     def faces_known(self) -> bool:
@@ -71,6 +72,8 @@ class Entry:
             parts.append("token")
         if self.single and not self.dfc:
             parts.append("single")
+        if self.front:
+            parts.append("front")
         return " ".join(parts)
 
     def format(self) -> str:
@@ -107,6 +110,8 @@ class Entry:
                 e.token = True
             elif key == "single":
                 e.single = True
+            elif key == "front":
+                e.front = True
         return e
 
     @classmethod
@@ -169,7 +174,7 @@ class Backlog:
     def split(self) -> tuple[list[Entry], list[Entry]]:
         """(single-sided, double-faced) physical cards."""
         cards = self.cards
-        return [c for c in cards if not c.dfc], [c for c in cards if c.dfc]
+        return [c for c in cards if not c.dfc or c.front], [c for c in cards if c.dfc and not c.front]
 
     def take(self, per_page: int, full_only: bool) -> tuple[list[Entry], list[Entry]]:
         """(cards to build now, cards that stay queued). ``full_only`` keeps each
