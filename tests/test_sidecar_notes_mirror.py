@@ -98,3 +98,27 @@ def test_mirror_is_flat_and_wipes_stale_templates(tmp_path):
     ]
     assert to_windows_notation(tmp_path / "x") == str(tmp_path / "x").replace("/", "\\")
     assert to_windows_notation(type(tmp_path)("/mnt/c/Users/me/Desktop")) == "C:\\Users\\me\\Desktop"
+
+
+def test_mirror_reports_a_locked_stale_file_instead_of_crashing(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from mtgproxy import mirror
+
+    out, win = tmp_path / "run", tmp_path / "win"
+    out.mkdir(), win.mkdir()
+    (out / "deck.pdf").write_bytes(b"new")
+    (out / "x.studio3").write_bytes(b"t")
+    (win / "deck.pdf").write_bytes(b"old, open in a viewer")
+    real_unlink = Path.unlink
+
+    def locked_unlink(self, missing_ok=False):
+        if self.name == "deck.pdf":
+            raise PermissionError(13, "Permission denied", str(self))
+        real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", locked_unlink)
+    r = mirror.mirror(out, "deck", win)
+    assert r.failed == ["deck.pdf"]
+    assert (win / "deck.pdf").read_bytes() == b"old, open in a viewer"  # never half-overwritten
+    assert (win / "x.studio3").is_file()

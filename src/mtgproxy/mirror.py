@@ -62,16 +62,27 @@ def mirror(out: Path, name: str, win_out: Path) -> MirrorResult:
     """Copy this run's files into ``win_out`` flat, wiping our previous artifacts first."""
     win_out.mkdir(parents=True, exist_ok=True)
     # Templates are regenerated fresh every run, and stale ones are dangerous to cut with.
+    # A file Windows holds open (PDF viewer, Studio) can be neither removed nor replaced:
+    # it is reported as stale, never allowed to abort the run that already succeeded.
+    failed: list[str] = []
     for stale in [win_out / f"{name}.pdf", win_out / f"{name}-duplex.pdf", win_out / f"{name}-{NOTES_NAME}"]:
-        stale.unlink(missing_ok=True)
+        if not _remove(stale):
+            failed.append(stale.name)
     for stale in win_out.glob("*.studio3"):
-        stale.unlink(missing_ok=True)
-    failed = []
+        _remove(stale)
     for f in sorted(out.iterdir()):
-        if f.name in (NOTES_NAME, SIDECAR_NAME) or not f.is_file():
+        if f.name in (NOTES_NAME, SIDECAR_NAME) or not f.is_file() or f.name in failed:
             continue
         try:
             shutil.copyfile(f, win_out / f.name)
         except OSError:
             failed.append(f.name)
     return MirrorResult(to_windows_notation(win_out), failed)
+
+
+def _remove(p: Path) -> bool:
+    try:
+        p.unlink(missing_ok=True)
+    except OSError:
+        return False
+    return True
