@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from . import engine, mirror, notes, printing, studio3, trim
+from . import engine, manifest, mirror, notes, printing, studio3, trim
+from .backlog import Backlog, Entry
 from .cache import ImageCache
 from .decks import FetchedDeck, fetch_deck, is_deck_url
 from .paths import DEFAULT_BACK, DUPLEX_OFFSET_FILE, NOTES_NAME, SCM, TEMPLATES, cache_dir
@@ -56,6 +57,19 @@ class BuildOptions:
     dry_run: bool = False
     back: Path = DEFAULT_BACK
     trims: list[trim.TrimSpec] = field(default_factory=list)
+    defer_partial: bool = False  # partial last page of each sheet → BACKLOG.txt instead of the PDF
+
+    def recorded(self) -> dict:
+        """What manifest.rebuild needs to re-derive the sheets of this run later."""
+        return {
+            "fmt": self.fmt,
+            "duplex_dfc": self.duplex_dfc,
+            "fancy_art": self.fancy_art,
+            "include_basics": self.include_basics,
+            "token_copies": self.token_copies,
+            "tokens_only": self.tokens_only,
+            "fetch_args": list(self.fetch_args),
+        }
 
 
 @dataclass
@@ -69,6 +83,8 @@ class BuildResult:
     cards: int
     windows_path: str | None = None
     mirror_failed: list[str] = field(default_factory=list)
+    deferred: list[Entry] = field(default_factory=list)
+    backlog: Path | None = None
 
 
 def log(msg: str) -> None:
@@ -174,8 +190,11 @@ def stage_images(opts: BuildOptions, deck: ResolvedDeck, cache: ImageCache | Non
     engine.set_back(opts.back)
     if cache is not None:
         cache.install(engine.scryfall_module())
+    rec = manifest.Recorder()
+    rec.install(engine.scryfall_module())
     assert deck.path is not None
     engine.fetch_cards(deck.path, deck.fmt, fetch_args_for(opts))
+    rec.save()
     if cache is not None and (cache.hits or cache.misses):
         log(f"image cache: {cache.hits} hit(s), {cache.misses} download(s) → {cache.dir}")
 
@@ -219,6 +238,20 @@ def prune_to_tokens() -> int:
     return pruned
 
 
+def stage_and_index(opts: BuildOptions) -> manifest.Recorder:
+    """Fetch (or reuse) the images of ``opts.deck`` and put them in sheet order;
+    returns the printings recorder for the manifest. Shared by the build and by
+    ``manifest.rebuild`` for runs made before manifests existed."""
+    deck = resolve_deck(opts)
+    cache = ImageCache(cache_dir()) if opts.use_cache else None
+    stage_images(opts, deck, cache)
+    if move_tokens_last():
+        log("tokens moved to the end of the sheet order")
+    if opts.tokens_only:
+        prune_to_tokens()
+    return manifest.Recorder.load()
+
+
 # --- step 4: PDFs ------------------------------------------------------------
 def pdf_base_args(opts: BuildOptions) -> list[str]:
     # --extend_corners 3.5mm: Scryfall scans have rounded corners; this fills the
@@ -249,12 +282,39 @@ class PdfOutputs:
     pdf: Path | None
     duplex_pdf: Path | None
     dfc_count: int
+    main: list[Path] = field(default_factory=list)  # files on the main sheet, in page order
+    duplex: list[Path] = field(default_factory=list)  # files on the duplex sheet, in page order
+    deferred: list[Path] = field(default_factory=list)  # partial-page files kept out (--defer-partial)
+
+
+def _defer(files: list[Path], per_page: int) -> tuple[list[Path], list[Path]]:
+    keep = len(files) // per_page * per_page
+    return files[:keep], files[keep:]
+
+
+def _view(parent: Path, name: str, files: list[Path]) -> Path:
+    """A directory of symlinks: the engine reads a directory, and game/* must stay untouched."""
+    d = parent / name
+    d.mkdir()
+    for f in files:
+        (d / f.name).symlink_to(manifest.view_target(f))
+    return d
 
 
 def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
     base = pdf_base_args(opts)
     offset = duplex_offset_args()
     game_pdf = engine.OUTPUT / "game.pdf"
+    main, duplex = manifest.partition(opts.fronts_only, opts.duplex_dfc)
+    deferred: list[Path] = []
+    if opts.defer_partial:
+        per_page = manifest.cards_per_page(opts.paper, opts.card_size)
+        main, d1 = _defer(main, per_page)
+        duplex, d2 = _defer(duplex, per_page)
+        deferred = d1 + d2
+        if deferred:
+            log(f"--defer-partial: {len(deferred)} card(s) of a partial page go to the backlog instead")
+    dfc_count = 0
 
     if not opts.fronts_only:
         # --backs: one double-sided PDF; DFCs get their real backs, the rest the card back.
@@ -264,38 +324,44 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
             log(
                 "NOTE: no saved duplex offset — run the calibration once before double-sided decks (see README)."
             )
-        engine.create_pdf([*base, *offset])
+        if not main:
+            log("NOTE: nothing left to print on this sheet.")
+            return PdfOutputs(None, None, 0, [], [], deferred)
+        with tempfile.TemporaryDirectory() as tmp:
+            front = _view(Path(tmp), "front", main)
+            backs = _view(
+                Path(tmp),
+                "backs",
+                [engine.DOUBLE_SIDED / f.name for f in main if (engine.DOUBLE_SIDED / f.name).is_file()],
+            )
+            engine.create_pdf(
+                [*base, *offset, "--front_dir_path", str(front), "--double_sided_dir_path", str(backs)]
+            )
         pdf = out / f"{name}.pdf"
         shutil.copyfile(game_pdf, pdf)
-        return PdfOutputs(pdf, None, 0)
+        return PdfOutputs(pdf, None, 0, main, [], deferred)
 
     # Fronts only. Symlink views leave game/* untouched (safe for --skip-fetch).
     with tempfile.TemporaryDirectory() as tmp:
         view = Path(tmp)
-        main_front, dfc_front, no_backs = view / "main_front", view / "dfc_front", view / "no_backs"
-        for d in (main_front, dfc_front, no_backs):
-            d.mkdir()
-        dfc_count = 0
-        for f in engine.images_in(engine.FRONT):
-            if opts.duplex_dfc and (engine.DOUBLE_SIDED / f.name).is_file():
-                (dfc_front / f.name).symlink_to(f)
-            else:
-                (main_front / f.name).symlink_to(f)
+        main_front, dfc_front, no_backs = (
+            _view(view, "main_front", main),
+            _view(view, "dfc_front", duplex),
+            _view(view, "no_backs", []),
+        )
         if opts.duplex_dfc:
-            dfc_count = sum(1 for _ in dfc_front.iterdir())
+            dfc_count = len(duplex)
         else:
-            # Each face of a double-faced card becomes its own single-sided card in
-            # the main PDF (front stays in place, back slots in next to it).
-            for f in engine.images_in(engine.DOUBLE_SIDED):
-                (main_front / f"{f.stem}-back{f.suffix}").symlink_to(f)
-                dfc_count += 1
+            # Each face of a double-faced card is its own single-sided card in the
+            # main PDF (the back slots in next to its front, see manifest.partition).
+            dfc_count = sum(1 for f in main if f.stem.endswith("-back"))
             if dfc_count:
                 log(
                     f"double-faced cards: {dfc_count} — printing both faces as separate cards (--split-faces)"
                 )
 
         pdf: Path | None = None
-        if any(main_front.iterdir()):
+        if main:
             engine.create_pdf(
                 [
                     *base,
@@ -308,11 +374,13 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
             )
             pdf = out / f"{name}.pdf"
             shutil.copyfile(game_pdf, pdf)
+        elif deferred and not duplex:
+            log("NOTE: nothing left to print on this sheet.")
         else:
             log("NOTE: every card in this deck is double-sided — no fronts-only PDF to build.")
 
         duplex_pdf: Path | None = None
-        if opts.duplex_dfc and dfc_count > 0:
+        if opts.duplex_dfc and duplex:
             log(f"double-sided cards: {dfc_count} — building {name}-duplex.pdf")
             if not offset:
                 log(
@@ -324,7 +392,7 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
             )
             duplex_pdf = out / f"{name}-duplex.pdf"
             shutil.copyfile(duplex_out, duplex_pdf)
-    return PdfOutputs(pdf, duplex_pdf, dfc_count)
+    return PdfOutputs(pdf, duplex_pdf, dfc_count, main, duplex, deferred)
 
 
 # --- step 5: cutting template ------------------------------------------------
@@ -403,6 +471,27 @@ def run_build(opts: BuildOptions) -> BuildResult:
     pdfs = build_pdfs(opts, out, name)
     template, baked, (dx, dy) = place_template(opts, out)
 
+    # Per-slot manifest: what is on which page, and the exact printing, so
+    # `mtg-proxy redo` can queue a miscut or a skipped page later.
+    sheets: dict[str, manifest.Sheet] = {}
+    deferred: list[Entry] = []
+    if not opts.test_mode:
+        rec = manifest.Recorder.load()
+        per_page = manifest.cards_per_page(opts.paper, opts.card_size)
+        sheets[manifest.MAIN] = manifest.make_sheet(
+            manifest.MAIN, pdfs.main, pdfs.pdf.name if pdfs.pdf else None, per_page, rec
+        )
+        if pdfs.duplex:
+            sheets[manifest.DUPLEX] = manifest.make_sheet(
+                manifest.DUPLEX, pdfs.duplex, pdfs.duplex_pdf.name if pdfs.duplex_pdf else None, per_page, rec
+            )
+        trims = {s.name: s.mm for s in opts.trims}
+        for f in pdfs.deferred:
+            c = rec.lookup(f)
+            c.dfc = (engine.DOUBLE_SIDED / f.name).is_file()
+            deferred.append(Entry.from_slot(c, name, "deferred", _trim_for(c, trims)))
+    printed = len(pdfs.main) + len(pdfs.duplex)
+
     (out / NOTES_NAME).write_text(
         notes.render(
             notes.NotesContext(
@@ -410,7 +499,7 @@ def run_build(opts: BuildOptions) -> BuildResult:
                 paper=opts.paper,
                 card_size=opts.card_size,
                 registration=opts.registration,
-                cards=cards,
+                cards=printed,
                 fronts_only=opts.fronts_only,
                 duplex_dfc=opts.duplex_dfc,
                 dfc_count=pdfs.dfc_count,
@@ -425,7 +514,7 @@ def run_build(opts: BuildOptions) -> BuildResult:
         paper=opts.paper,
         card_size=opts.card_size,
         registration=opts.registration,
-        cards=cards,
+        cards=printed,
         fronts_only=opts.fronts_only,
         generated=date.today().isoformat(),
         pdf=pdfs.pdf.name if pdfs.pdf else None,
@@ -438,9 +527,17 @@ def run_build(opts: BuildOptions) -> BuildResult:
         if deck.path and deck.path.parent == out
         else (str(deck.path) if deck.path else None),
         source=deck.fetched.source if deck.fetched else None,
+        deferred=len(deferred),
+        options=opts.recorded(),
+        sheets={k: v.as_dict() for k, v in sheets.items()},
     ).write(out)
 
-    result = BuildResult(name, out, pdfs.pdf, pdfs.duplex_pdf, template, pdfs.dfc_count, cards)
+    result = BuildResult(name, out, pdfs.pdf, pdfs.duplex_pdf, template, pdfs.dfc_count, printed)
+    if deferred:
+        backlog = Backlog.at(out.parent)
+        backlog.add(deferred)
+        backlog.save()
+        result.deferred, result.backlog = deferred, backlog.path
 
     # Optional: print via CUPS at exact size. The duplex PDF is deliberately NOT
     # sent — manual duplex on photo paper is a hands-on job.
@@ -464,9 +561,19 @@ def run_build(opts: BuildOptions) -> BuildResult:
     return result
 
 
+def _trim_for(c: manifest.SlotCard, trims: dict[str, float]) -> float | None:
+    """The --trim width that applied to this card in the run (run.json keys trims by the name as typed)."""
+    if c.token:
+        return None
+    by_key = {trim.clean_name(n): mm for n, mm in trims.items()}
+    return by_key.get(trim.clean_name(c.name), by_key.get("all"))
+
+
 def print_summary(r: BuildResult, opts: BuildOptions) -> None:
     log("")
     log("=== DONE ===")
+    if not r.pdf and not r.duplex_pdf:
+        log(f"  (no sheet to print: all {len(r.deferred)} card(s) went to the backlog)")
     if r.pdf:
         log(f"  PDF:      {r.pdf}")
     if r.duplex_pdf:
@@ -477,6 +584,8 @@ def print_summary(r: BuildResult, opts: BuildOptions) -> None:
     log(
         f"  Cut:      cd {os.path.relpath(r.out)} && cut-proxies   (reads run.json; direct to the Cameo, no Studio)"
     )
+    if r.deferred:
+        log(f"  Backlog:  {len(r.deferred)} card(s) deferred → {r.backlog}   (mtg-proxy backlog)")
     if r.windows_path:
         log(f"  Windows:  {r.windows_path}")
     if r.mirror_failed:

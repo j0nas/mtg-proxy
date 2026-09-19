@@ -32,6 +32,9 @@ class RunInfo:
     trims: dict[str, float] = field(default_factory=dict)
     decklist: str | None = None
     source: str | None = None
+    deferred: int = 0  # cards pushed to BACKLOG.txt by --defer-partial
+    options: dict = field(default_factory=dict)  # build options needed to re-derive the sheets
+    sheets: dict = field(default_factory=dict)  # per-slot manifest, see manifest.py
     version: str = __version__
 
     def write(self, out_dir: Path) -> Path:

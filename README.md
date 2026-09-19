@@ -13,14 +13,16 @@ cards cost and why the stack looks like this is written up at
 ```
 mtg-proxy make      decklist -> ./<deck>/{<deck>.pdf, <deck>-duplex.pdf?, *.studio3, CUT-NOTES.md, run.json}
 mtg-proxy cut       cut a printed sheet on the Cameo, no Silhouette Studio; reads run.json from the deck folder
+mtg-proxy redo      queue miscuts / a skipped page of a run for reprinting (BACKLOG.txt)
+mtg-proxy backlog   show the queue, `backlog build` prints it as one sheet, `backlog drop` edits it
 mtg-proxy offset    store the printer's duplex offset once
 mtg-proxy notes     show the newest CUT-NOTES.md below the cwd
 mtg-proxy cache     Scryfall image cache stats / --clear (~/.cache/mtg-proxy)
 mtg-proxy doctor    check engine, cutter driver, data files
 ```
 
-`make-proxies.sh`, `cut-proxies.sh` and `save-offset.sh` are shims onto those commands. Output
-lands in the current directory, one folder per deck. Under WSL it is also mirrored flat into
+`make-proxies.sh`, `cut-proxies.sh` and `save-offset.sh` are shims onto those commands, and
+`mtg-proxy.sh` onto the whole CLI. Output lands in the current directory, one folder per deck. Under WSL it is also mirrored flat into
 `%USERPROFILE%\Desktop\projects\mtg-proxy` (`MTG_PROXY_WIN_OUT` overrides).
 
 ```
@@ -100,7 +102,32 @@ replaces the outer 0.3 mm with the ring just inside first; `:0.5` sets the width
 every card.
 
 Every output folder gets a `CUT-NOTES.md` for that run and a `run.json` that `cut-proxies` reads,
-so the registration pattern you printed is the one it scans for.
+so the registration pattern you printed is the one it scans for. `run.json` also holds the
+manifest: which printing sits on which page and slot of each PDF, which is what `redo` uses.
+
+## Reprints and leftovers
+
+A deck rarely ends clean: a miscut or two, a card that laminated badly, and a last page that
+was only half full and not worth a sheet. All of that goes into one queue, `BACKLOG.txt`, in
+the directory the deck folders live in, and gets printed as one well-filled sheet later.
+
+```sh
+make-proxies decks/mydeck.txt --defer-partial   # partial last page → BACKLOG.txt, not the PDF
+cd mydeck && mtg-proxy redo "Sol Ring" p3.5 last  # after cutting: by name, page.slot, or a whole page
+mtg-proxy redo dlast                            # d = the duplex PDF (d1, d1.2, dlast)
+cd .. && mtg-proxy backlog                      # 11 fronts = 1 full sheet + 3 waiting, 2 duplex
+mtg-proxy backlog build                         # ./backlog-<date>/ — a run folder like any deck
+mtg-proxy backlog build --full-only             # full sheets now, the rest stays queued
+mtg-proxy backlog drop "Sol Ring"               # or by the number the listing shows
+```
+
+`redo` takes the exact printing, trim and front/duplex placement from the run's manifest, so
+the reprint matches what you cut. Repeat a name for more copies; a name must match one card
+(`temple` is fine, `l` is not). The backlog is MTGA lines with the source deck in a comment,
+so it can be edited by hand. `backlog build` writes the built cards into the run folder's
+decklist and removes them from the queue; a miscut from a backlog sheet goes back in with
+`redo` like any other. Runs made before manifests existed are re-derived from their decklist
+through the image cache on the first `redo`; pass the `-t N` / `--basics` they were built with.
 
 The dotfiles' `make-proxies` and `cut-proxies` functions find the clone (`$MTG_PROXY_DIR`, then
 `~/Desktop/projects/mtg-proxy`) and run the shims from any shell, including WSL with Windows

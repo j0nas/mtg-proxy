@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import shutil
 import sys
+from datetime import date
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
-from . import __version__, build, cutting, engine, notes, printing, studio3, trim
+from . import __version__, build, cutting, engine, manifest, notes, printing, studio3, trim
+from . import backlog as backlog_mod
+from .backlog import Backlog, BacklogError, Entry
 from .cache import ImageCache
 from .decks import DeckError
 from .layout import LayoutError
+from .manifest import ManifestError
 from .paths import DEFAULT_BACK, DRV_PY, NOTES_NAME, SCM, cache_dir
 from .sidecar import RunInfo, find_sidecar
 
@@ -110,6 +114,13 @@ def make(
         bool,
         typer.Option("--notes", help="show CUT-NOTES of a previous run (DECK = run name, default latest)"),
     ] = False,
+    defer_partial: Annotated[
+        bool,
+        typer.Option(
+            "--defer-partial/--all-pages",
+            help="leave each sheet's partial last page out of the PDF and queue those cards in BACKLOG.txt",
+        ),
+    ] = False,
     trims: Annotated[
         list[str] | None,
         typer.Option(
@@ -154,6 +165,7 @@ def make(
         dry_run=dry_run,
         back=back,
         trims=trim_specs,
+        defer_partial=defer_partial,
     )
     try:
         result = build.run_build(opts)
@@ -325,6 +337,221 @@ def rebase_template(
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(base)
     typer.echo(str(out))
+
+
+# --- backlog: miscuts and skipped pages, across decks ------------------------
+def _load_run(run: Path | None) -> tuple[Path, RunInfo]:
+    sidecar = find_sidecar(run)
+    if sidecar is None:
+        where = run or Path.cwd()
+        fail(
+            f"no run.json in {where} — run this inside a deck's output folder "
+            "(the real one, not the flat Windows mirror), or point --run at it"
+        )
+    return sidecar.parent, RunInfo.read(sidecar)
+
+
+def _sheets_of(run_dir: Path, info: RunInfo, overrides: dict) -> dict[str, manifest.Sheet]:
+    if info.sheets:
+        return manifest.sheets_from_dict(info.sheets)
+    info.options = {**info.options, **overrides}
+    typer.echo(
+        f"{info.name}: run.json has no card manifest (older run) — re-deriving it from {info.decklist} "
+        "via the image cache (no PDF is written)…"
+    )
+    try:
+        sheets = manifest.rebuild(run_dir, info)
+    except (ManifestError, build.BuildError, engine.EngineMissing, RuntimeError) as e:
+        fail(str(e))
+    info.sheets = {k: v.as_dict() for k, v in sheets.items()}
+    info.write(run_dir)
+    return sheets
+
+
+@app.command(
+    help=(
+        "Queue cards of this run for reprinting (miscuts, bad laminations, the page you skipped). "
+        "REF: a card name (unique match), p3 (whole page 3), p3.5 (page 3 slot 5), last (last page); "
+        "d1 / d1.2 / dlast for the duplex sheet. Repeat a name for more copies. Appends to BACKLOG.txt "
+        "next to the deck folder."
+    )
+)
+def redo(
+    refs: Annotated[list[str], typer.Argument(help="card names, pN, pN.S, last, dN, dN.S, dlast")],
+    run: Annotated[
+        Path | None, typer.Option("--run", help="run.json (or its folder) — default: current directory")
+    ] = None,
+    dry_run: Annotated[bool, typer.Option("-n", "--dry-run", help="show what would be queued")] = False,
+    tokens: Annotated[
+        int | None,
+        typer.Option("-t", "--tokens", help="older run without manifest: the -t N it was built with", min=1),
+    ] = None,
+    basics: Annotated[
+        bool, typer.Option("--basics", help="older run without manifest: it was built with --basics")
+    ] = False,
+) -> None:
+    run_dir, info = _load_run(run)
+    overrides: dict = {}
+    if tokens is not None:
+        overrides["token_copies"] = tokens
+    if basics:
+        overrides["include_basics"] = True
+    sheets = _sheets_of(run_dir, info, overrides)
+    entries: list[Entry] = []
+    for ref in refs:
+        try:
+            cards = manifest.resolve(ref, sheets)
+        except ManifestError as e:
+            fail(str(e))
+        for c in cards:
+            entries.append(
+                Entry.from_slot(c, info.name, manifest.locate(c, sheets), build._trim_for(c, info.trims))
+            )
+            typer.echo(f"  + {c.line:<50} {entries[-1].ref}" + ("  [dfc]" if c.dfc else ""))
+    if not entries:
+        fail("nothing matched")
+    bl = Backlog.at(run_dir.parent)
+    if dry_run:
+        typer.echo(f"dry run: {len(entries)} card(s) would be added to {bl.path}")
+        return
+    bl.add(entries)
+    bl.save()
+    typer.echo(f"queued {len(entries)} card(s) → {bl.path}")
+    typer.echo(bl.summary(_per_page(info.paper, info.card_size)))
+
+
+def _per_page(paper: str, card_size: str) -> int:
+    try:
+        return manifest.cards_per_page(paper, card_size)
+    except (KeyError, engine.EngineMissing, OSError):
+        return 8
+
+
+backlog_app = typer.Typer(
+    invoke_without_command=True,
+    no_args_is_help=False,
+    help="Cards still owed across decks (BACKLOG.txt in the current directory): show, build, drop.",
+)
+app.add_typer(backlog_app, name="backlog")
+
+OutOpt = Annotated[
+    Path,
+    typer.Option("-o", "--out", help="directory holding BACKLOG.txt and the deck folders", file_okay=False),
+]
+
+
+def _show_backlog(out: Path, paper: str, card_size: str = "standard") -> Backlog:
+    bl = Backlog.at(out.resolve())
+    if not bl.entries:
+        typer.echo(f"backlog empty ({bl.path})")
+        raise typer.Exit()
+    typer.echo(bl.summary(_per_page(paper, card_size)))
+    typer.echo(bl.listing())
+    return bl
+
+
+@backlog_app.callback()
+def backlog_main(
+    ctx: typer.Context, out: OutOpt = Path("."), paper: Annotated[str, typer.Option("-p", "--paper")] = "a4"
+) -> None:
+    if ctx.invoked_subcommand is None:
+        _show_backlog(out, paper)
+
+
+@backlog_app.command(name="show", help="List the queued cards and how many full sheets they make.")
+def backlog_show(
+    out: OutOpt = Path("."), paper: Annotated[str, typer.Option("-p", "--paper")] = "a4"
+) -> None:
+    _show_backlog(out, paper)
+
+
+@backlog_app.command(name="drop", help="Remove entries: by listed number or by (unique) card name.")
+def backlog_drop(refs: Annotated[list[str], typer.Argument()], out: OutOpt = Path(".")) -> None:
+    bl = Backlog.at(out.resolve())
+    for ref in refs:
+        try:
+            for e in bl.drop(ref):
+                typer.echo(f"  - {e.format()}")
+        except BacklogError as e:
+            fail(str(e))
+    bl.save()
+    typer.echo(f"{len(bl.cards)} card(s) left")
+
+
+@backlog_app.command(
+    name="build",
+    help=(
+        "Turn the backlog into a run folder ./backlog-<date>/ (PDF, duplex PDF, cut file, run.json) like any "
+        "deck, then clear the built cards from BACKLOG.txt. --full-only keeps a partial last page queued."
+    ),
+)
+def backlog_build(
+    out: OutOpt = Path("."),
+    paper: Annotated[str, typer.Option("-p", "--paper", help="a4 | letter | a3 ...")] = "a4",
+    registration: Annotated[str, typer.Option("-r", "--registration", help="4 | 3 registration marks")] = "4",
+    backs: Annotated[
+        bool, typer.Option("--backs/--fronts-only", help="double-sided (default: fronts only)")
+    ] = False,
+    full_only: Annotated[
+        bool, typer.Option("--full-only", help="build full sheets only; the rest stays queued")
+    ] = False,
+    name: Annotated[
+        str | None, typer.Option("--name", help="run folder name (default backlog-<date>)")
+    ] = None,
+    print_: Annotated[bool, typer.Option("--print", help="send the PDF straight to CUPS at 100%")] = False,
+    printer: Annotated[str | None, typer.Option("--printer", help="CUPS destination for --print")] = None,
+    dry_run: Annotated[bool, typer.Option("-n", "--dry-run", help="show what would be built")] = False,
+) -> None:
+    out = out.resolve()
+    bl = Backlog.at(out)
+    if not bl.entries:
+        fail(f"backlog empty ({bl.path})")
+    per_page = _per_page(paper, "standard")
+    cards, keep = bl.take(per_page, full_only)
+    if not cards:
+        fail(f"no full sheet yet ({bl.summary(per_page)}) — drop --full-only to print a partial one")
+    run_name = name or _fresh_name(out, f"backlog-{date.today().isoformat()}")
+    typer.echo(f"{len(cards)} card(s) → {out / run_name}/" + (f", {len(keep)} stay queued" if keep else ""))
+    if dry_run:
+        typer.echo(backlog_mod.decklist_text(cards), nl=False)
+        return
+    run_dir = out / run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    deck = run_dir / f"{run_name}.txt"
+    deck.write_text(backlog_mod.decklist_text(cards))
+    trims = {c.name: c.trim for c in cards if c.trim is not None}
+    opts = build.BuildOptions(
+        deck=str(deck),
+        out_parent=out,
+        paper=paper,
+        registration=registration,
+        fronts_only=not backs,
+        include_basics=True,  # every line here is explicit
+        print_mode=print_,
+        printer=printer,
+        trims=[trim.TrimSpec(n, mm) for n, mm in trims.items()],
+    )
+    try:
+        result = build.run_build(opts)
+    except (build.BuildError, DeckError, engine.EngineMissing, studio3.Studio3Error, RuntimeError) as e:
+        fail(str(e))
+    bl.entries = keep
+    bl.save()
+    build.print_summary(result, opts)
+    typer.echo(
+        f"  Queue:    {len(keep)} card(s) left in {bl.path}"
+        if keep
+        else f"  Queue:    empty ({bl.path.name} removed)"
+    )
+    if result.mirror_failed:
+        raise typer.Exit(1)
+
+
+def _fresh_name(parent: Path, base: str) -> str:
+    name, n = base, 2
+    while (parent / name).exists():
+        name, n = f"{base}-{n}", n + 1
+    return name
 
 
 @app.command(name="make-back", help="Regenerate the generic proxy card back at assets/back.png.")
