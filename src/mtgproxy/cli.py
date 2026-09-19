@@ -495,6 +495,12 @@ def backlog_build(
     full_only: Annotated[
         bool, typer.Option("--full-only", help="build full sheets only; the rest stays queued")
     ] = False,
+    split_faces: Annotated[
+        bool,
+        typer.Option(
+            "--split-faces/--duplex", help="each DFC face as its own card (default: separate duplex PDF)"
+        ),
+    ] = False,
     name: Annotated[
         str | None, typer.Option("--name", help="run folder name (default backlog-<date>)")
     ] = None,
@@ -526,6 +532,7 @@ def backlog_build(
         paper=paper,
         registration=registration,
         fronts_only=not backs,
+        duplex_dfc=not split_faces,
         include_basics=True,  # every line here is explicit
         print_mode=print_,
         printer=printer,
