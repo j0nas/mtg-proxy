@@ -238,6 +238,38 @@ def cut(
     dry_run: Annotated[
         bool, typer.Option("-n", "--dry-run", help="no machine needed; writes output/cut/<name>.cmds")
     ] = False,
+    reg_inset: Annotated[
+        float | None,
+        typer.Option(
+            "--reg-inset",
+            min=3,
+            max=30,
+            help="mark corners' distance from the paper edges in mm (layout default: 10)",
+        ),
+    ] = None,
+    reg_length: Annotated[
+        float | None,
+        typer.Option(
+            "--reg-length",
+            help="printed mark leg length in mm to announce (driver default 20; A4 card-maker marks: 9.4)",
+        ),
+    ] = None,
+    cut_beyond: Annotated[
+        float,
+        typer.Option(
+            "--cut-beyond",
+            min=0,
+            max=30,
+            help="let cuts run MM past the right/bottom marks (the driver clips to the mark rectangle)",
+        ),
+    ] = 0.0,
+    reg_thickness: Annotated[
+        float | None,
+        typer.Option(
+            "--reg-thickness",
+            help="printed mark thickness in mm to announce (driver default 0.5; card-maker marks: 1)",
+        ),
+    ] = None,
     preview: Annotated[
         bool, typer.Option("--preview", help="matplotlib preview window before sending")
     ] = False,
@@ -263,6 +295,7 @@ def cut(
         x_off=x_off, y_off=y_off,
         connection="ble" if ble else "usb", ble_name=ble_name,
         svg=svg, dry_run=dry_run, preview=preview,
+        reg_length=reg_length, reg_thickness=reg_thickness, cut_beyond=cut_beyond, reg_inset=reg_inset,
         extra=list(ctx.args),
         label=info.name if info else None,
     )  # fmt: skip

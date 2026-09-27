@@ -180,9 +180,29 @@ cd mydeck && cut-proxies   # reads run.json: paper, card size, mark pattern
 cut-proxies --run mydeck   # same, from the parent folder
 cut-proxies --ble          # Bluetooth, no cable
 cut-proxies --passes 4     # also --force/--speed/--depth, --x-off/--y-off
-cut-proxies --dry-run      # builds output/cut/<name>.{svg,cmds}, no machine
+cut-proxies --dry-run      # simulates a found scan, runs the whole cut, fails if anything is clipped
 cut-proxies --preview
+cut-proxies --svg job.svg --reg-length 9.4 --reg-thickness 1 --cut-beyond 12   # any page-sized SVG
 ```
+
+Registration flags, learned on the first real driver cut (2026-09-28, the silhouette-deckbox
+print-and-cut job). All three go through `src/mtgproxy/regmark_launch.py`, a thin wrapper around
+the unmodified driver:
+
+- `--reg-length` / `--reg-thickness` (mm) announce the size of the marks actually printed.
+  Before each scan the driver sends a hard-coded mark description of 20 × 0.5 mm (`TB51,400` /
+  `TB53,10`). Studio announces the real size: 9.40 × 0.99 mm for the card-maker's A4 marks.
+- `--cut-beyond MM`: with registration on, the driver clips every cut to the rectangle between
+  the marks, clamping outside points onto its edge. This widens that box right and down. The
+  Cameo 5 line receives no hardware cutting-area limit at the frame. Don't use the driver's own
+  `--sw_clipping False`: it only makes the clamped segments get cut, as straight lines along the
+  frame. Nothing may sit above or left of the top-left mark. The margin must also cover the
+  +1 mm y-offset.
+- `--reg-inset MM` moves the expected marks from the layout's 10 mm toward the paper edge,
+  which gives a design more height. It must match the printed marks.
+
+`--dry-run` now answers the scan itself and reports the cut's extent and any clipped points. A
+plain dry run used to stop at the scan, which hid the clipping.
 
 Run it on the Mac. On Windows, libusb means replacing Silhouette's driver with WinUSB, which
 breaks Studio.

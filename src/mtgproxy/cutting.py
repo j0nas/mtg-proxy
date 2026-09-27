@@ -10,9 +10,10 @@ inkscape-silhouette's pure-Python sendto_silhouette.py in its own venv.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import layout, studio3
@@ -49,6 +50,16 @@ class CutOptions:
     dry_run: bool = False
     preview: bool = False
     extra: list[str] = field(default_factory=list)
+    # Mark geometry to announce before the scan (mm). None = the driver's hard-coded 20 × 0.5,
+    # Silhouette Studio's defaults; the card-maker's A4 marks are 9.4 × 1 (see regmark_launch.py).
+    reg_length: float | None = None
+    reg_thickness: float | None = None
+    # With registration the driver clips every cut to the rectangle between the marks (software
+    # only — the Cameo 5 line gets no hardware limit there). Widen it right/down by this many mm.
+    cut_beyond: float = 0.0
+    # Mark corners' distance from the paper edges (mm). None = the layout's (10 for the card-maker's
+    # A4). A smaller inset gives a design more room: nothing may sit above/left of the top-left mark.
+    reg_inset: float | None = None
     out_dir: Path = field(default_factory=lambda: ROOT / "output" / "cut")
     label: str | None = None  # deck name, for log/transcript file names
 
@@ -76,6 +87,57 @@ def driver_argv(o: CutOptions, geom: layout.Geometry, x_off: float, y_off: float
         # transcript shows the Alpha's real command set (TB124 for 4-mark).
         args += ["--force_hardware", "Silhouette_Cameo5_Alpha"]
     return args + list(o.extra)
+
+
+LAUNCHER = Path(__file__).with_name("regmark_launch.py")
+
+
+def with_inset(geom: layout.Geometry, inset: float) -> layout.Geometry:
+    """The same page with its marks moved to ``inset`` mm from every paper edge."""
+    return replace(
+        geom,
+        reg_inset_mm=inset,
+        reg_x_mm=round(geom.page_w_mm - 2 * inset, 3),
+        reg_y_mm=round(geom.page_h_mm - 2 * inset, 3),
+    )
+
+
+def command(o: CutOptions, driver_args: list[str], svg: Path) -> list[str]:
+    """The full argv: the driver directly, or through the launcher for mark-geometry overrides and
+    for dry runs (where it simulates the scan so the whole cut is exercised)."""
+    if o.reg_length is None and o.reg_thickness is None and not o.cut_beyond and not o.dry_run:
+        return [str(DRV_PY), str(DRV / "sendto_silhouette.py"), *driver_args, str(svg)]
+    opts: list[str] = []
+    for flag, value in (
+        ("--length", o.reg_length),
+        ("--thickness", o.reg_thickness),
+        ("--beyond", o.cut_beyond),
+    ):
+        if value:
+            opts += [flag, str(value)]
+    return [str(DRV_PY), str(LAUNCHER), str(DRV), *opts, "--", *driver_args, str(svg)]
+
+
+def clip_report(log: str) -> tuple[int, str] | None:
+    """(points clipped, cut bbox) from the driver log's final bounding-box line."""
+    m = re.search(r"Final bounding box and point counts: (\{.*\})", log)
+    if not m:
+        return None
+    count = re.search(r"'clip': \{[^}]*'count': (\d+)", m.group(1))
+    bbox = re.search(r"'llx': ([-\d.]+), 'urx': ([-\d.]+), 'lly': ([-\d.]+), 'ury': ([-\d.]+)\}$", m.group(1))
+    where = (
+        f"x {float(bbox.group(1)):g}..{float(bbox.group(2)):g}, y {float(bbox.group(4)):g}..{float(bbox.group(3)):g} mm"
+        if bbox
+        else "?"
+    )
+    return (int(count.group(1)) if count else 0), where
+
+
+def mark_commands_in(transcript: str) -> tuple[str | None, str | None]:
+    """The TB51 (length) and TB53 (thickness) values the transcript announced."""
+    length = re.search(r"TB51,(\d+)", transcript)
+    thickness = re.search(r"TB53,(\d+)", transcript)
+    return (length.group(1) if length else None, thickness.group(1) if thickness else None)
 
 
 def scan_command_in(transcript: str) -> str | None:
@@ -114,18 +176,15 @@ def run_cut(o: CutOptions) -> int:
             raise CutError(f"SVG not found: {o.svg}")
         svg, name = o.svg, o.svg.stem
         geom = layout.build_cut_svg(o.paper, o.card_size, None)
+    if o.reg_inset is not None:
+        geom = with_inset(geom, o.reg_inset)
 
     # 2. Machine cut bias (measured with Studio; same file the .studio3 path uses).
     cfg_x, cfg_y = studio3.read_cut_offset()
     x_off = cfg_x if o.x_off is None else o.x_off
     y_off = cfg_y if o.y_off is None else o.y_off
 
-    argv = [
-        str(DRV_PY),
-        str(DRV / "sendto_silhouette.py"),
-        *driver_argv(o, geom, x_off, y_off, name),
-        str(svg),
-    ]
+    argv = command(o, driver_argv(o, geom, x_off, y_off, name), svg)
     print(
         f"cut-proxies: {name} — {geom.cards} cards, {o.registration}-mark registration "
         f"(marks inset {geom.reg_inset_mm}mm, {geom.reg_x_mm}x{geom.reg_y_mm}mm apart)"
@@ -134,21 +193,44 @@ def run_cut(o: CutOptions) -> int:
         f"cut-proxies: force {o.force} · speed {o.speed} · depth {o.depth} · passes {o.passes} · "
         f"offset x={x_off:g}mm y={y_off:g}mm · via {o.connection}"
     )
+    if o.reg_length is not None or o.reg_thickness is not None:
+        print(
+            f"cut-proxies: announcing marks {20.0 if o.reg_length is None else o.reg_length:g} mm long, "
+            f"{0.5 if o.reg_thickness is None else o.reg_thickness:g} mm thick (driver default 20 x 0.5)"
+        )
     if o.dry_run:
         print(f"cut-proxies: DRY RUN — nothing is sent; transcript in {o.out_dir / f'{name}.cmds'}")
         # The dry run necessarily dies at the registration scan (no machine answers), so
         # its traceback is noise; keep it in a file and judge the transcript instead.
         with open(o.out_dir / f"{name}.stderr", "w") as err:
-            subprocess.run(argv, stderr=err, check=False)
+            subprocess.run(argv, stderr=err, check=False, env={**os.environ, "MTGPROXY_SIMULATE_SCAN": "1"})
         want = SCAN_COMMAND[o.registration]
         try:
             cmd = scan_command_in((o.out_dir / f"{name}.cmds").read_text(errors="replace"))
         except OSError:
             cmd = None
         if cmd and cmd.startswith(want):
+            length, thickness = mark_commands_in((o.out_dir / f"{name}.cmds").read_text(errors="replace"))
             print(
-                f"cut-proxies: dry run OK — regmark scan command {cmd} ({o.registration}-mark), transcript {o.out_dir / f'{name}.cmds'}"
+                f"cut-proxies: dry run OK — regmark scan command {cmd} ({o.registration}-mark), "
+                f"marks announced TB51,{length} TB53,{thickness}, transcript {o.out_dir / f'{name}.cmds'}"
             )
+            try:
+                report = clip_report((o.out_dir / f"{name}.log").read_text(errors="replace"))
+            except OSError:
+                report = None
+            if report is None:
+                raise CutError(
+                    "dry run: the simulated scan did not reach the cut — no bounding box in the log"
+                )
+            clipped, where = report
+            print(f"cut-proxies: cut spans {where} from the top-left mark; {clipped} point(s) clipped")
+            if clipped:
+                raise CutError(
+                    f"{clipped} point(s) fall outside the cut area (the mark frame"
+                    + (f" widened {o.cut_beyond:g} mm right/down" if o.cut_beyond else "")
+                    + ") and would NOT be cut. Keep the design inside it, or raise --cut-beyond."
+                )
             return 0
         raise CutError(
             f"dry run did not produce the expected {want} scan (got '{cmd or 'nothing'}') — see {o.out_dir / f'{name}.stderr'}"
