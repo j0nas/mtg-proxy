@@ -58,17 +58,13 @@ def registered(job: Job) -> list[list[tuple[float, float]]]:
 
 
 def check_bounds(job: Job) -> tuple[float, float, float, float]:
-    """The commanded extent (x0, y0, x1, y1) from the top-left mark. Raises if a commanded point
-    lies above/left of that mark (negative coordinates are untested), or if the design itself
-    (page coordinates, before the machine's bias) leaves the paper."""
+    """The commanded extent (x0, y0, x1, y1) from the top-left mark. Raises if the design itself
+    (page coordinates, before the machine's bias) leaves the paper. A cut may reach above or left
+    of the top-left mark (negative coordinates, down to the paper's edge): the cutting area is
+    widened to cover it (see ``low_corner``)."""
     pts = [pt for line in registered(job) for pt in line]
     x0, y0 = min(x for x, _ in pts), min(y for _, y in pts)
     x1, y1 = max(x for x, _ in pts), max(y for _, y in pts)
-    if x0 < 0 or y0 < 0:
-        raise CutError(
-            f"the cut reaches {-min(x0, 0):.2f} mm left / {-min(y0, 0):.2f} mm above the top-left mark's "
-            "corner; keep the design right of and below it"
-        )
     f = job.frame
     px0, py0, px1, py1 = bbox(job.lines)
     if px0 < 0 or py0 < 0 or px1 > f.page_w or py1 > f.page_h:
@@ -77,6 +73,13 @@ def check_bounds(job: Job) -> tuple[float, float, float, float]:
             f"(it spans x {px0:.2f}..{px1:.2f}, y {py0:.2f}..{py1:.2f} mm)"
         )
     return x0, y0, x1, y1
+
+
+def low_corner(extent: tuple[float, float, float, float]) -> tuple[float, float]:
+    """The cutting area's near corner (y, x) for a job's commanded extent: the top-left mark (0, 0),
+    Studio's, unless the cut reaches above or left of it; then 0.5 mm past the farthest point."""
+    x0, y0 = extent[0], extent[1]
+    return (min(0.0, y0 - 0.5) if y0 < 0 else 0.0, min(0.0, x0 - 0.5) if x0 < 0 else 0.0)
 
 
 POINTS_PER_DRAW = 32  # keeps each D command under ~400 bytes
@@ -170,11 +173,12 @@ class Session:
     def prepare(self) -> None:
         self.send(*p.PREPARE)
 
-    def setup(self, blade: p.Blade, frame: Frame) -> None:
-        """The blade, inside a cutting area reaching the paper's far edges (+2 mm for the bias)."""
+    def setup(self, blade: p.Blade, frame: Frame, low: tuple[float, float] = (0.0, 0.0)) -> None:
+        """The blade, inside a cutting area reaching the paper's far edges (+2 mm for the bias)
+        and, when a cut reaches above or left of the top-left mark, back to ``low`` (y, x)."""
         area_y = frame.page_h - frame.inset + 2
         area_x = frame.page_w - frame.inset + 2
-        self.send(*p.blade_setup(blade, area_y, area_x))
+        self.send(*p.blade_setup(blade, area_y, area_x, *low))
 
     def register(self, frame: Frame, starts: list[tuple[float, float]]) -> tuple[float, float]:
         """Scan the marks, trying each (top, left) start in mm until the machine reports them found.

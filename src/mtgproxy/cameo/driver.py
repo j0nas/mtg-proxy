@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import geometry, protocol
-from .session import CutError, Frame, Job, Session, SessionLog, check_bounds
+from .session import CutError, Frame, Job, Session, SessionLog, check_bounds, low_corner
 from .transport import BleTransport, RecordingTransport, Transport, UsbTransport
 
 FIRMWARE = b"CAMEO 5 ALPHA V1.04    \x03"
@@ -76,9 +76,16 @@ def cut(job: Job, t: Transport, log: SessionLog, starts: list[tuple[float, float
         log.say(f"connected: {firmware} via {t.name}, mat loaded")
         s.prepare()
         start = s.register(job.frame, starts)
-        s.setup(job.blade, job.frame)
+        extent = check_bounds(job)
+        low = low_corner(extent)
+        if low != (0.0, 0.0):
+            log.say(
+                f"cut reaches {-min(extent[1], 0):.2f} mm above / {-min(extent[0], 0):.2f} mm left of the top-left "
+                f"mark: cutting area widened to {low[0]:g}, {low[1]:g} mm"
+            )
+        s.setup(job.blade, job.frame, low)
         s.cut(job)
-        return Result(firmware, start, check_bounds(job))
+        return Result(firmware, start, extent)
     finally:
         wrap_up(s, t, log)
 

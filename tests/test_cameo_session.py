@@ -79,15 +79,28 @@ def test_no_mat_means_nothing_is_sent_beyond_the_queries():
     assert sent(t) == "\x1b\x04FG\x03\x1b\x05"
 
 
-def test_bounds_measure_the_top_left_rule_on_commands_and_the_paper_on_the_design():
+def test_bounds_hold_the_design_to_the_paper_and_measure_commands_from_the_top_left_mark():
     assert session.check_bounds(job()) == (15.0, 16.0, 55.0, 56.0)  # 1 mm y bias applied
     # Right at the paper's bottom edge is fine even though the bias pushes the command past it.
     edge = [geometry.Polyline(((10, 209.5), (20, 209.5)))]
     assert session.check_bounds(job(edge))[3] == pytest.approx(205.5)
-    with pytest.raises(session.CutError, match="above the top-left mark"):
-        session.check_bounds(job([geometry.Polyline(((10, 3), (20, 3)))]))
+    # Above/left of the top-left mark is fine as long as it stays on the paper.
+    assert session.check_bounds(job([geometry.Polyline(((2, 1), (20, 1)))]))[:2] == (-3.0, -3.0)
     with pytest.raises(session.CutError, match="off the 297 x 210 mm page"):
         session.check_bounds(job([geometry.Polyline(((10, 20), (300, 20)))]))
+    with pytest.raises(session.CutError, match="off the 297 x 210 mm page"):
+        session.check_bounds(job([geometry.Polyline(((10, -0.5), (20, 3)))]))
+
+
+def test_the_cutting_area_widens_past_the_top_left_mark_only_when_a_cut_goes_there():
+    assert session.low_corner((15.0, 16.0, 55.0, 56.0)) == (0.0, 0.0)  # Studio's \\0,0
+    assert session.low_corner((-3.0, -2.0, 55.0, 56.0)) == (-2.5, -3.5)  # y, x: 0.5 mm past
+    t = machine()
+    driver.cut(job([geometry.Polyline(((10, 2.5), (40, 2.5)))]), t, log(), driver.default_starts(FRAME))
+    assert "\\-40,0\x03Z4140,5880\x03" in sent(t)  # page y 2.5 → -1.5 commanded (inset 5, +1 bias), 0.5 past
+    t = machine()
+    driver.cut(job(), t, log(), driver.default_starts(FRAME))
+    assert "\\0,0\x03Z4140,5880\x03" in sent(t)
 
 
 def test_the_cut_goes_out_in_whole_commands_of_at_most_1_kb_with_a_status_check_between():

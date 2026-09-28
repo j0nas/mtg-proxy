@@ -202,9 +202,10 @@ Registration:
   never did (calibration sheets, 2026-09-28). `--scan-start TOP,LEFT` overrides it.
 - `--reg-inset MM` moves the expected marks from the layout's 10 mm toward the paper edge (5 mm
   is proven). It must match the printed marks.
-- Nothing may be cut above or left of the top-left mark, and nothing off the paper. Keep 6 mm
-  around every mark free of print (Graphtec's guidance): ink near a mark can be read as part of
-  it.
+- Cuts may reach above or left of the top-left mark, as long as they stay on the paper: the
+  cutting area then starts past them (`\\-y,-x`); every other job sends Studio's `\\0,0`.
+  First used on the deck box's round 4 (2026-09-28). Keep 6 mm around every mark free of print
+  (Graphtec's guidance): ink near a mark can be read as part of it.
 
 The machine reports no mark positions (FQ5 reads -64 after every successful scan, straight or
 tilted), so a misread can't be caught from the replies. Every run writes

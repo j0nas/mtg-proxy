@@ -89,15 +89,18 @@ def scan_result(reply: bytes | None) -> str | None:
     return None if m is None else ("found" if m.group(1) == "0" else "not found")
 
 
-def blade_setup(blade: Blade, area_y_mm: float, area_x_mm: float) -> tuple[str, ...]:
+def blade_setup(
+    blade: Blade, area_y_mm: float, area_x_mm: float, low_y_mm: float = 0.0, low_x_mm: float = 0.0
+) -> tuple[str, ...]:
     """After the scan: the cutting area from the top-left mark, then the AutoBlade in slot 1.
 
-    Studio sets the area to the mark frame; we pass the paper's extent instead, so a design may
-    run past the right and bottom marks (the deck box does) while the machine still refuses a
-    runaway coordinate."""
+    Studio sets the area to the mark frame, from the top-left mark (``\\0,0``); we pass the
+    paper's extent instead, so a design may run past the right and bottom marks (the deck box
+    does) while the machine still refuses a runaway coordinate. A design reaching above or left
+    of the top-left mark moves the near corner (``low_*``, negative) out to cover it."""
     f, s, d = blade.force, blade.speed, blade.depth
     return (
-        "\\0,0",
+        f"\\{su(low_y_mm)},{su(low_x_mm)}",
         f"Z{su(area_y_mm)},{su(area_x_mm)}",
         "J1",  # tool slot 1
         f"FX{f},1",  # force
