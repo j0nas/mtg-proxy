@@ -116,12 +116,17 @@ def patch(data: bytes, dx: float, dy: float) -> bytes:
     return bytes(out)
 
 
-def read_cut_offset(path: Path = CUT_OFFSET_FILE) -> tuple[float, float]:
-    """(x_mm, y_mm) from data/cut_offset.json; (0, 0) when absent."""
+def read_cut_offset(path: Path = CUT_OFFSET_FILE, section: str | None = None) -> tuple[float, float]:
+    """(x_mm, y_mm) from data/cut_offset.json: Studio's at the top level, or a section's own
+    (``"driver"``: mtg-proxy's Cameo driver); (0, 0) when absent."""
     try:
         cfg = json.loads(path.read_text())
     except (OSError, ValueError):
         return 0.0, 0.0
+    if section is not None:
+        cfg = cfg.get(section)
+        if not isinstance(cfg, dict):
+            return 0.0, 0.0
     return float(cfg.get("x_mm", 0)), float(cfg.get("y_mm", 0))
 
 

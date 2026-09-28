@@ -205,8 +205,9 @@ def run_cut(o: CutOptions) -> int:
     if o.reg_inset is not None:
         geom = with_inset(geom, o.reg_inset)
 
-    # 2. Machine cut bias (measured with Studio; same file the .studio3 path uses).
-    cfg_x, cfg_y = studio3.read_cut_offset()
+    # 2. Machine cut bias. Studio's (the .studio3 path and the legacy driver) was measured with
+    # Studio; our driver's with deckbox's calibration sheets (pnpm calib, 2026-09-28).
+    cfg_x, cfg_y = studio3.read_cut_offset(section=None if o.legacy else "driver")
     x_off = cfg_x if o.x_off is None else o.x_off
     y_off = cfg_y if o.y_off is None else o.y_off
 

@@ -24,7 +24,9 @@ def test_the_scan_starts_where_studio_starts_it():
     studio = session.Frame(page_w=297, page_h=210, inset=10, width=277, height=190)
     assert driver.default_starts(studio)[0] == (2.5, 11.5)
     deckbox = session.Frame(page_w=297, page_h=210, inset=5, width=287, height=200)
-    assert driver.default_starts(deckbox)[0] == (2.5, 6.5)  # top stays on the paper
+    assert driver.default_starts(deckbox)[0] == (2.5, 11.5)  # top on the paper, left as Studio's
+    wide = session.Frame(page_w=297, page_h=210, inset=20, width=257, height=170)
+    assert driver.default_starts(wide)[0] == (12.5, 21.5)
 
 
 def test_only_a_padded_reply_is_a_scan_result():

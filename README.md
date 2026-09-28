@@ -28,7 +28,7 @@ mtg-proxy doctor    check engine, cutter driver, data files
 ```
 src/mtgproxy/          engine.py (in-process engine), build.py (pipeline), decks.py (Moxfield/Archidekt),
                        layout.py (cut SVG), studio3.py (template patcher)
-data/cut_offset.json   machine cut bias in mm, baked into every cutting template
+data/cut_offset.json   machine cut bias in mm, baked into every cutting template; "driver": cut-proxies' own
 data/offset_data.json  printer duplex offset, applied to every double-sided PDF
 templates/             cutting-template base with the Cameo 5 Alpha profile and A4 media pre-selected
 assets/back.png        default card back for --backs; replace with your own

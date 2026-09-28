@@ -122,7 +122,7 @@ def test_run_cut_fails_instead_of_reporting_done_when_nothing_was_sent(tmp_path,
     svg.write_text("<svg/>")
     monkeypatch.setattr(cutting, "ensure_driver", lambda: None)
     monkeypatch.setattr(cutting.layout, "build_cut_svg", lambda *a: geometry())
-    monkeypatch.setattr(cutting.studio3, "read_cut_offset", lambda: (0.0, 1.0))
+    monkeypatch.setattr(cutting.studio3, "read_cut_offset", lambda **_: (0.0, 1.0))
 
     def fake_driver(argv, **kwargs):
         (tmp_path / "cut.log").write_text(NO_DEVICE_LOG)

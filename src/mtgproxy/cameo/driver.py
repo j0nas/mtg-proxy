@@ -35,9 +35,11 @@ def default_starts(frame: Frame) -> list[tuple[float, float]]:
     docs/studio-capture.md): 7.5 mm above the top-left mark's horizontal leg, 0.5 mm past its
     vertical leg, so the sensor travels down onto a mark line. The old driver started at the
     paper's corner (0, 0), running the sensor along the paper edge instead. For a smaller inset
-    the top stays on the paper (at most 2.5 mm, and never more than halfway to the mark)."""
+    the top stays on the paper (at most 2.5 mm, and never more than halfway to the mark), and the
+    left stays at 11.5 mm, further along the leg: at a 5 mm inset, starting 1.5 mm past the
+    vertical leg skewed the cut; starting at 11.5 did not (calibration sheets, 2026-09-28)."""
     top = max(frame.inset - 7.5, min(2.5, frame.inset / 2))
-    left = frame.inset + frame.thickness + 0.5
+    left = max(frame.inset + frame.thickness + 0.5, min(11.5, frame.inset + frame.length - 1))
     return [(top, left), (top, left)]
 
 

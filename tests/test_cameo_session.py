@@ -34,11 +34,11 @@ def test_a_good_job_scans_cuts_and_returns_to_the_origin_without_moving_it():
     out = sent(t)
     ending = "TB0\x03L0\x03\\0,0\x03M0,0\x03TR0,0\x03J0\x03FN0\x03TB50,0\x03"
     # Studio's order: prepare, describe + scan, then the blade inside the frame, cut, go home.
-    assert out.index("TR0,1") < out.index("TB124,4000,5740,50,130\x03TB99") < out.index("FX20,1")
+    assert out.index("TR0,1") < out.index("TB124,4000,5740,50,230\x03TB99") < out.index("FX20,1")
     assert out.index("FX20,1") < out.index("D") < out.rindex(ending)
     assert "Z4140,5880\x03" in out  # the cutting area reaches the paper's far edges (+2 mm)
     assert "SO0" not in out
-    assert result.start == (2.5, 6.5)
+    assert result.start == (2.5, 11.5)
 
 
 def test_a_status_reply_during_the_scan_is_not_mistaken_for_its_result():

@@ -58,8 +58,10 @@ during the scan; `mtgproxy.cameo` accepts only the padded form.
   horizontal leg and 0.5 mm past its vertical leg: the sensor starts on white paper and travels
   down onto a mark line. inkscape-silhouette sent `max(inset − 10, 0)` for both, which is `0,0`
   (the paper's corner) for any inset ≤ 10 mm, so its sensor ran along the paper edge.
-  `mtgproxy.cameo` uses top = max(inset − 7.5, min(2.5, inset / 2)), left = inset + thickness +
-  0.5, which is exactly Studio's (2.5, 11.5) at a 10 mm inset.
+  `mtgproxy.cameo` uses top = max(inset − 7.5, min(2.5, inset / 2)) and left = max(inset +
+  thickness + 0.5, min(11.5, inset + length − 1)): Studio's (2.5, 11.5) for any inset from 5 to
+  10 mm. Calibration sheets (2026-09-28): at a 5 mm inset, left 6.5 skewed the cut and 11.5 did
+  not. With that start our cuts land 0.5 mm high, the `driver` offset in `data/cut_offset.json`.
 - **The order.** Marks are described and scanned before the blade is set up; the blade setup and
   cutting area come after, in the registered frame.
 - **Mark description** `TB51,188 TB53,20` = 9.4 mm legs, 1 mm lines (length and thickness, in

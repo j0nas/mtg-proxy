@@ -14,7 +14,7 @@ None of these block cutting. Background: `studio-capture.md`.
   a tilted sheet, and Studio never asks. If misregistration recurs, add proof ticks: a few short
   cuts in the margin, then `y` to cut, `r` to rescan, `q` to quit.
 - **Cutting above/left of the top-left mark** (negative registered coordinates) is untested.
-  It would let the deck box use Studio's 10 mm minimum inset instead of 5 mm.
+  Not needed: 5 mm insets register cleanly with Studio's scan start (2026-09-28).
 - **USB transport:** written, never run on hardware.
 - **Retire the old driver** (`--legacy-driver`, `regmark_launch.py`, the inkscape-silhouette
   clone) once ours has cut laminate.

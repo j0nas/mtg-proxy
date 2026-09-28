@@ -86,5 +86,9 @@ def test_read_cut_offset(tmp_path):
     p = tmp_path / "o.json"
     p.write_text(json.dumps({"y_mm": 1.0}))
     assert read_cut_offset(p) == (0.0, 1.0)
+    assert read_cut_offset(p, section="driver") == (0.0, 0.0)
+    p.write_text(json.dumps({"y_mm": 1.0, "driver": {"y_mm": 0.5}}))
+    assert read_cut_offset(p) == (0.0, 1.0)
+    assert read_cut_offset(p, section="driver") == (0.0, 0.5)
     p.write_text("garbage")
     assert read_cut_offset(p) == (0.0, 0.0)
