@@ -35,7 +35,10 @@ def test_transforms_apply_and_arcs_flatten_onto_the_circle(tmp_path):
     (line,) = g.load_svg(svg(tmp_path, body))
     assert close(line.points[0], (103, 50)) and close(line.points[-1], (100, 53))
     assert all(abs(math.dist(p, (100, 50)) - 3) < 1e-3 for p in line.points)
-    assert len(line.points) > 10  # a quarter circle of r=3 is ~4.7 mm: sampled every 0.25 mm
+    # Chords stray at most FLAT_TOL_MM from the arc (the sagitta), so a 3 mm corner needs ~8, not 19.
+    chords = list(zip(line.points, line.points[1:], strict=False))
+    assert all(3 - math.sqrt(9 - (math.dist(a, b) / 2) ** 2) <= g.FLAT_TOL_MM + 1e-3 for a, b in chords)
+    assert 6 <= len(chords) <= 10
 
 
 def test_multiple_subpaths_split_into_separate_polylines(tmp_path):

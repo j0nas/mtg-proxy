@@ -125,6 +125,12 @@ def draw(y_mm: float, x_mm: float) -> str:
     return f"D{su(y_mm)},{su(x_mm)}"
 
 
+def draw_path(points_su: list[tuple[int, int]]) -> str:
+    """One GP-GL draw through several (y, x) points in SU: D y1,x1,y2,x2,… The machine gets the
+    whole run of a path at once instead of one command per point."""
+    return "D" + ",".join(f"{y},{x}" for y, x in points_su)
+
+
 # Studio's ending: back to the origin. Never the "feed" ending (M… SO0), which moves the ORIGIN
 # below the job so that every later scan on that mat starts from the wrong place.
 RETURN_TO_ORIGIN = ("TB0", "L0", "\\0,0", "M0,0", "TR0,0", "J0", "FN0", "TB50,0")

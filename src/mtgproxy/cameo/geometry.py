@@ -17,7 +17,10 @@ from pathlib import Path
 
 Point = tuple[float, float]
 
-SAMPLE_MM = 0.25  # chord length when flattening arcs and curves
+# Curves become chords that stray at most this far from the curve: well under the machine's
+# 0.05 mm step, yet a 3 mm card corner needs ~7 chords, not the ~19 a fixed 0.25 mm pitch made
+# (each chord is a point the machine slows for; the Alpha stuttered through those corners).
+FLAT_TOL_MM = 0.02
 CLOSE_EPS = 1e-6
 MM_PER_PX = 25.4 / 96  # svgelements works in CSS px at its default 96 ppi
 
@@ -65,10 +68,35 @@ def load_svg(path: Path) -> list[Polyline]:
             elif isinstance(seg, Line):
                 current.append(_mm(seg.end))
             elif isinstance(seg, Arc | CubicBezier | QuadraticBezier):
-                n = max(2, math.ceil(seg.length(error=1e-4) * MM_PER_PX / SAMPLE_MM))
-                current.extend(_mm(seg.point(i / n)) for i in range(1, n + 1))
+                current.extend(_mm(pt) for pt in _flatten(seg, FLAT_TOL_MM / MM_PER_PX))
         out.extend(Polyline(tuple(sp)) for sp in subpaths if len(sp) > 1)
     return out
+
+
+def _flatten(seg, tol: float) -> list:
+    """Points after the segment's start, halving each piece until its midpoint lies within
+    ``tol`` of the chord (at least four pieces, so an S-curve can't hide between samples)."""
+    out = []
+
+    def split(t0: float, p0, t1: float, p1, depth: int) -> None:
+        tm = (t0 + t1) / 2
+        pm = seg.point(tm)
+        if depth >= 12 or (depth >= 2 and _off_chord(pm, p0, p1) <= tol):
+            out.append(p1)
+            return
+        split(t0, p0, tm, pm, depth + 1)
+        split(tm, pm, t1, p1, depth + 1)
+
+    split(0.0, seg.point(0.0), 1.0, seg.point(1.0), 0)
+    return out
+
+
+def _off_chord(p, a, b) -> float:
+    ax, ay, bx, by, px, py = float(a.x), float(a.y), float(b.x), float(b.y), float(p.x), float(p.y)
+    chord = math.hypot(bx - ax, by - ay)
+    if chord == 0:
+        return math.hypot(px - ax, py - ay)
+    return abs((bx - ax) * (ay - py) - (ax - px) * (by - ay)) / chord
 
 
 def _mm(p) -> Point:

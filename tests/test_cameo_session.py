@@ -106,3 +106,24 @@ def test_the_probe_asks_every_query_before_and_after_the_scan_and_cuts_nothing()
     assert set(report["replies"]) == set(driver.PROBE_QUERIES)
     assert report["replies"]["FQ5"] == ["    0", "  -64"]
     assert "D" not in sent(t).replace("FQ", "")  # no draw commands at all
+
+
+def test_each_path_is_one_move_then_multi_point_draws_without_repeated_points():
+    square = geometry.Polyline(((20, 20), (60, 20), (60, 20.01), (60, 60), (20, 60), (20, 20)))
+    cmds = session.cut_commands(job([square]))
+    # (60, 20.01) rounds onto (60, 20) at the machine's 0.05 mm step and is dropped.
+    assert cmds == ["M320,300", "D320,1100,1120,1100,1120,300,320,300"]
+    long = geometry.Polyline(tuple((10 + i * 0.5, 20) for i in range(100)))
+    draws = session.cut_commands(job([long]))[1:]
+    assert len(draws) == 4 and all(d.count(",") + 1 <= 2 * session.POINTS_PER_DRAW for d in draws)
+
+
+def test_an_oversized_command_still_goes_out_whole():
+    t = machine()
+    s = session.Session(t, log())
+    session.CHUNK_BYTES, old = 16, session.CHUNK_BYTES
+    try:
+        s.cut(job([geometry.Polyline(((20, 20), (60, 20), (60, 60)))]))
+    finally:
+        session.CHUNK_BYTES = old
+    assert b"D320,1100,1120,1100\x03" in t.sent  # longer than a chunk, sent intact

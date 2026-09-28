@@ -87,7 +87,8 @@ class BleTransport:
     WRITE = "6d92661d-f429-4d67-929b-28e7a9780912"
     READ = "8dcf199a-30e7-4bd4-beb6-beb57dca866c"
     CONTROL = "61490654-b5b4-458c-a867-9e15bc1471e0"
-    CHUNK = 20
+    CHUNK = 20  # until the link reports its MTU
+    MAX_CHUNK = 128  # Studio writes up to 137 bytes at once; stay below what it has proven
     SETTLE_S = 1.0
 
     def __init__(self, log: Log):
@@ -95,6 +96,7 @@ class BleTransport:
         self.name = "ble"
         self.replies = _Replies(log)
         self.client = None
+        self.chunk = self.CHUNK
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.loop.run_forever, name="cameo-ble", daemon=True)
         self.thread.start()
@@ -152,13 +154,17 @@ class BleTransport:
         for char in (self.CONTROL, self.READ, self.WRITE):
             await client.write_gatt_char(char, INIT, response=True)
         await asyncio.sleep(self.SETTLE_S)
+        # One write request carries MTU − 3 bytes (the link negotiates 185 with this machine).
+        self.chunk = max(self.CHUNK, min(client.mtu_size - 3, self.MAX_CHUNK))
         self.name = f"ble {dev.name}"
-        self.log("connected", via=self.name, dropped=self.replies.clear())
+        self.log(
+            "connected", via=self.name, mtu=client.mtu_size, chunk=self.chunk, dropped=self.replies.clear()
+        )
 
     def write(self, data: bytes) -> None:
         self.log("tx", data=data)
-        for i in range(0, len(data), self.CHUNK):
-            self._run(self._write(data[i : i + self.CHUNK]), 10.0)
+        for i in range(0, len(data), self.chunk):
+            self._run(self._write(data[i : i + self.chunk]), 10.0)
 
     async def _write(self, chunk: bytes) -> None:
         for attempt in range(4):

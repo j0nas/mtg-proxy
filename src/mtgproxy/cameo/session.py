@@ -79,12 +79,24 @@ def check_bounds(job: Job) -> tuple[float, float, float, float]:
     return x0, y0, x1, y1
 
 
+POINTS_PER_DRAW = 32  # keeps each D command under ~400 bytes
+
+
 def cut_commands(job: Job) -> list[str]:
+    """A move to each path's start, then its points as multi-point draws, in SU with repeats
+    (points that round to the same 0.05 mm step) dropped."""
     cmds: list[str] = []
     for line in registered(job):
-        (x, y), rest = line[0], line[1:]
-        cmds.append(p.move(y, x))
-        cmds.extend(p.draw(y, x) for x, y in rest)
+        pts: list[tuple[int, int]] = []
+        for x, y in line:
+            pt = (p.su(y), p.su(x))
+            if not pts or pt != pts[-1]:
+                pts.append(pt)
+        if len(pts) < 2:
+            continue
+        cmds.append(f"M{pts[0][0]},{pts[0][1]}")
+        rest = pts[1:]
+        cmds.extend(p.draw_path(rest[i : i + POINTS_PER_DRAW]) for i in range(0, len(rest), POINTS_PER_DRAW))
     return cmds
 
 
@@ -209,11 +221,11 @@ class Session:
         data = p.cmd(*cut_commands(job))
         i = 0
         while i < len(data):
-            end = (
-                len(data)
-                if len(data) - i <= CHUNK_BYTES
-                else data.rfind(p.ETX.encode(), i, i + CHUNK_BYTES) + 1
-            )
+            if len(data) - i <= CHUNK_BYTES:
+                end = len(data)
+            else:  # the last whole command that fits (or one oversized command on its own)
+                cut = data.rfind(p.ETX.encode(), i, i + CHUNK_BYTES)
+                end = (cut if cut >= i else data.index(p.ETX.encode(), i)) + 1
             self.touched = True
             self.t.write(data[i:end])
             state = self.wait_ready(CHUNK_TIMEOUT_S, poll=0.05)
