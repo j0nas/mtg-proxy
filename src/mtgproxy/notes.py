@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+from .cutting import PRESETS
 from .paths import NOTES_NAME
 
 
@@ -22,9 +23,6 @@ class NotesContext:
     fronts_only: bool
     duplex_dfc: bool
     dfc_count: int
-    template_name: str | None
-    template_baked: bool
-    cut_offset_y_mm: float
     today: str = ""
 
     def __post_init__(self) -> None:
@@ -50,8 +48,7 @@ def render(c: NotesContext) -> str:
     if c.dfc_count > 0 and c.duplex_dfc:
         step2 += (
             f"\n   - **{c.name}-duplex.pdf** holds the {c.dfc_count} double-sided card image(s): print that file "
-            "with manual duplex\n     (**long-edge flip**), then laminate and cut it like any other sheet — "
-            "same template,\n     same machine profile, same cut settings."
+            "with manual duplex\n     (**long-edge flip**), then laminate and cut it like any other sheet."
         )
     elif c.dfc_count > 0 and c.fronts_only:
         step2 += (
@@ -59,33 +56,7 @@ def render(c: NotesContext) -> str:
             "\n     cards (--split-faces). Rerun without it for one physical double-sided card."
         )
     paper_flag = "" if c.paper == "a4" else f" -p {c.paper}"
-    if c.registration == "4" and c.template_baked:
-        machine = (
-            "Machine & media: the template opens with **Cameo 5 Alpha** selected and media set\n"
-            "   to **A4** (both baked into the template base) — verify, change nothing else. If media\n"
-            '   ever reads "Custom", switch it to A4: Custom media warps the cuts.'
-        )
-    else:
-        profile = (
-            "Cameo 5 Alpha"
-            if c.registration == "4"
-            else "Cameo 5 (yes, plain 5 — 3-mark PDFs need the old profile even on Alpha hardware)"
-        )
-        machine = (
-            "Set the machine profile MANUALLY to match this PDF's marks — auto-detect picks wrong on some\n"
-            f"   firmware/Studio combos: this PDF is **{c.registration}-mark**, so select **{profile}**."
-        )
-    if c.cut_offset_y_mm:
-        machine += (
-            f"\n   - Cut paths in this template are pre-shifted **{c.cut_offset_y_mm:g}mm down** (the machine cuts high\n"
-            "     relative to the scanned marks). Do NOT nudge shapes in Studio — tune the number in\n"
-            "     data/cut_offset.json instead and rerun."
-        )
-    postit = (
-        "4-mark pattern: cover the cards nearest BOTH bottom corners."
-        if c.registration == "4"
-        else "3-mark pattern: cover the card nearest the bottom-left L mark."
-    )
+    lam, paper = PRESETS["laminate"], PRESETS["paper"]
     return f"""# {c.name} — print & cut checklist
 
 Generated: {c.today} | paper: {c.paper} | card: {c.card_size} | registration: {c.registration}-mark | cards: {c.cards} | sides: {sides}{dfc_note}
@@ -101,19 +72,15 @@ Generated: {c.today} | paper: {c.paper} | card: {c.card_size} | registration: {c
 - Feed the sealed edge first. Re-laminate cut cards once more at the end to seal edges.
 
 ## Cut (Cameo 5 Alpha)
-**Preferred — no Studio:** with the Cameo on and in Bluetooth range of the Mac (`--usb` for the cable), `cd` into this
-folder and run `cut-proxies` (it reads run.json here: {c.registration}-mark scan, {c.paper} paper;
-see README §5). Explicit form: `cut-proxies -r {c.registration}{paper_flag}`.
-Studio fallback:
-1. Open `{c.template_name or "<template>"}` in Silhouette Studio (Studio **v5.0.402+** needed for the Alpha;
-   the limited "Starter" edition of Studio v5 is incompatible — use the full edition).
-2. {machine}
-3. Sheet on mat: top-left of the mat grid, aligned to the *paper* edge, not the laminate edge.
-4. Post-it trick (light-colored, remove after registration scan, before cutting):
-   {postit}
-5. Starting cut settings (AutoBlade, 135 gsm photo paper + 80 µm matte laminate):
-   **Force 25 · Speed 25 · Depth 5 · Passes 3** (cut-proxies defaults)
-   Tune passes first, then force. Rippled/torn edges = force too high or blade dull.
+With the Cameo on and in Bluetooth range of the Mac (`--usb` for the cable), `cd` into this folder
+and run `cut-proxies`. It reads run.json here: {c.registration}-mark scan, {c.paper} paper. Explicit
+form: `cut-proxies -r {c.registration}{paper_flag}`.
+1. Sheet on the mat: its top-left on the grid's top-left, aligned to the *paper* edge, not the
+   laminate edge.
+2. Laminate settings by default: **Force {lam.force} · Speed {lam.speed} · Depth {lam.depth} · Passes {lam.passes}**.
+   Plain paper: `--preset paper` (Force {paper.force} · Speed {paper.speed} · Depth {paper.depth} · Passes {paper.passes}).
+3. Don't eject yet: lift a corner. If a cut isn't through, rerun with `--passes 1` (it rescans
+   the marks). Rippled or torn edges mean too much force or a dull blade.
 """
 
 

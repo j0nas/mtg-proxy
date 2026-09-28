@@ -27,8 +27,6 @@ class RunInfo:
     pdf: str | None = None
     duplex_pdf: str | None = None
     dfc_count: int = 0
-    template: str | None = None
-    cut_offset_mm: dict[str, float] = field(default_factory=dict)
     trims: dict[str, float] = field(default_factory=dict)
     decklist: str | None = None
     source: str | None = None

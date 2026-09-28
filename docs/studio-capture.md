@@ -1,7 +1,7 @@
 # Silhouette Studio ↔ Cameo 5 Alpha, recorded (2026-09-28)
 
 Silhouette Studio cutting mtg-proxy's `test-sheet.pdf` (card-maker A4 standard, landscape, four
-L-marks at a 10 mm inset, 9.4 × 1 mm) with its `a4-standard-v5-alpha+y1mm.studio3` template, over
+L-marks at a 10 mm inset, 9.4 × 1 mm) from a Studio cut template, over
 Bluetooth LE. Recorded with Apple's PacketLogger, with the `Bluetooth_macOS.mobileconfig` logging
 profile installed (without it PacketLogger records nothing on current macOS), and decoded with
 `tshark`. Plain paper, copy-paper preset: force 15, speed 10, depth 3. Firmware
@@ -56,8 +56,7 @@ during the scan; `mtgproxy.cameo` accepts only the padded form.
 - **The scan start.** `TB124,h,w,top,left`: h = 190 mm and w = 277 mm (mark to mark), then top
   2.5 mm and left **11.5 mm** from the origin. That is 7.5 mm above the top-left mark's
   horizontal leg and 0.5 mm past its vertical leg: the sensor starts on white paper and travels
-  down onto a mark line. inkscape-silhouette sent `max(inset − 10, 0)` for both, which is `0,0`
-  (the paper's corner) for any inset ≤ 10 mm, so its sensor ran along the paper edge.
+  down onto a mark line.
   `mtgproxy.cameo` uses top = max(inset − 7.5, min(2.5, inset / 2)) and left = max(inset +
   thickness + 0.5, min(11.5, inset + length − 1)): Studio's (2.5, 11.5) for any inset from 5 to
   10 mm. Calibration sheets (2026-09-28): at a 5 mm inset, left 6.5 skewed the cut and 11.5 did

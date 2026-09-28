@@ -10,21 +10,21 @@ from typing import Annotated
 
 import typer
 
-from . import __version__, build, cutting, engine, manifest, notes, printing, studio3, trim
+from . import __version__, build, cutting, engine, manifest, notes, printing, trim
 from . import backlog as backlog_mod
 from .backlog import Backlog, BacklogError, Entry
 from .cache import ImageCache
 from .decks import DeckError, is_double_sided
 from .layout import LayoutError
 from .manifest import ManifestError
-from .paths import DEFAULT_BACK, DRV_PY, NOTES_NAME, SCM, cache_dir
+from .paths import DEFAULT_BACK, NOTES_NAME, SCM, cache_dir
 from .sidecar import RunInfo, find_sidecar
 
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
     context_settings={"help_option_names": ["-h", "--help"]},
-    help="Decklist in, print-ready PDF + Silhouette cut file out (ET-8550 + Cameo 5 Alpha).",
+    help="Decklist in, print-ready PDF out, cut on the Cameo (ET-8550 + Cameo 5 Alpha).",
 )
 
 
@@ -177,7 +177,7 @@ def make(
     )
     try:
         result = build.run_build(opts)
-    except (build.BuildError, DeckError, engine.EngineMissing, studio3.Studio3Error, RuntimeError) as e:
+    except (build.BuildError, DeckError, engine.EngineMissing, RuntimeError) as e:
         fail(str(e))
     if opts.dry_run:
         return
@@ -211,14 +211,12 @@ def notes_cmd(
 
 
 @app.command(
-    context_settings={"allow_extra_args": True},
     help=(
-        "Cut a printed sheet on the Cameo 5 Alpha directly (no Studio). Reads run.json from the current "
-        "directory (or --run) for paper/card/registration; flags override. Anything after -- goes to sendto_silhouette.py."
+        "Cut a printed sheet on the Cameo 5 Alpha. Reads run.json from the current directory (or --run) "
+        "for paper/card/registration; flags override."
     ),
 )
 def cut(
-    ctx: typer.Context,
     run: Annotated[
         Path | None, typer.Option("--run", help="run.json (or its folder) of the sheet to cut")
     ] = None,
@@ -227,10 +225,18 @@ def cut(
     registration: Annotated[
         str | None, typer.Option("-r", "--registration", help="4 | 3 — MUST match the printed marks")
     ] = None,
-    force: Annotated[int, typer.Option(min=1, max=40)] = 25,
-    speed: Annotated[int, typer.Option(min=1, max=30)] = 25,
-    depth: Annotated[int, typer.Option(min=0, max=10, help="AutoBlade depth")] = 5,
-    passes: Annotated[int, typer.Option(min=1, max=8)] = 3,
+    preset: Annotated[
+        str,
+        typer.Option(
+            "--preset",
+            help="blade settings: laminate (force 20, speed 25, depth 4, 3 passes) | "
+            "paper (force 10, speed 5, depth 1, 1 pass); the flags below override",
+        ),
+    ] = "laminate",
+    force: Annotated[int | None, typer.Option(min=1, max=40)] = None,
+    speed: Annotated[int | None, typer.Option(min=1, max=30)] = None,
+    depth: Annotated[int | None, typer.Option(min=0, max=10, help="AutoBlade depth")] = None,
+    passes: Annotated[int | None, typer.Option(min=1, max=8)] = None,
     y_off: Annotated[
         float | None, typer.Option("--y-off", help="shift cuts down by MM (default: data/cut_offset.json)")
     ] = None,
@@ -259,38 +265,10 @@ def cut(
             help="mark corners' distance from the paper edges in mm (layout default: 10)",
         ),
     ] = None,
-    reg_length: Annotated[
-        float | None,
-        typer.Option(
-            "--reg-length",
-            help="printed mark leg length in mm to announce (driver default 20; A4 card-maker marks: 9.4)",
-        ),
-    ] = None,
-    cut_beyond: Annotated[
-        float,
-        typer.Option(
-            "--cut-beyond",
-            min=0,
-            max=30,
-            help="let cuts run MM past the right/bottom marks (the driver clips to the mark rectangle)",
-        ),
-    ] = 0.0,
+    reg_length: Annotated[float, typer.Option("--reg-length", help="printed mark leg length in mm")] = 9.4,
     reg_thickness: Annotated[
-        float | None,
-        typer.Option(
-            "--reg-thickness",
-            help="printed mark thickness in mm to announce (driver default 0.5; card-maker marks: 1)",
-        ),
-    ] = None,
-    preview: Annotated[
-        bool, typer.Option("--preview", help="matplotlib preview window before sending (--legacy-driver)")
-    ] = False,
-    legacy_driver: Annotated[
-        bool,
-        typer.Option(
-            "--legacy-driver", help="cut with the vendored inkscape-silhouette instead of our own driver"
-        ),
-    ] = False,
+        float, typer.Option("--reg-thickness", help="printed mark line thickness in mm")
+    ] = 1.0,
     probe: Annotated[
         bool,
         typer.Option(
@@ -303,12 +281,15 @@ def cut(
             "--scan-start",
             metavar="TOP,LEFT",
             help="where the mark search starts, mm from the loaded origin; repeat to retry in order "
-            "(default: Studio's start, above the top-left mark's horizontal leg; tried twice)",
+            "(default: 2.5,11.5, on the top-left mark's horizontal leg; tried twice)",
         ),
     ] = None,
 ) -> None:
     if scan:
         raise typer.Exit(cutting.ble_scan())
+    if preset not in cutting.PRESETS:
+        fail(f"--preset must be one of {', '.join(cutting.PRESETS)}, got {preset!r}")
+    blade = cutting.PRESETS[preset]
     info: RunInfo | None = None
     sidecar = find_sidecar(run)
     if sidecar is not None:
@@ -324,14 +305,16 @@ def cut(
         paper=paper or (info.paper if info else "a4"),
         card_size=card or (info.card_size if info else "standard"),
         registration=registration or (info.registration if info else "4"),
-        force=force, speed=speed, depth=depth, passes=passes,
+        force=blade.force if force is None else force,
+        speed=blade.speed if speed is None else speed,
+        depth=blade.depth if depth is None else depth,
+        passes=blade.passes if passes is None else passes,
         x_off=x_off, y_off=y_off,
         connection="ble" if ble else "usb", ble_name=ble_name,
-        svg=svg, dry_run=dry_run, preview=preview,
-        reg_length=reg_length, reg_thickness=reg_thickness, cut_beyond=cut_beyond, reg_inset=reg_inset,
-        extra=list(ctx.args),
+        svg=svg, dry_run=dry_run,
+        reg_length=reg_length, reg_thickness=reg_thickness, reg_inset=reg_inset,
         label=info.name if info else None,
-        legacy=legacy_driver, probe=probe, scan_starts=[parse_start(v) for v in scan_start or []] or None,
+        probe=probe, scan_starts=[parse_start(v) for v in scan_start or []] or None,
     )  # fmt: skip
     try:
         rc = cutting.run_cut(o)
@@ -371,39 +354,6 @@ def cache(clear: Annotated[bool, typer.Option("--clear", help="delete every cach
         return
     s = c.stats()
     typer.echo(f"{c.dir}: {s.files} image(s), {s.bytes / 1e6:.1f} MB")
-
-
-@app.command(
-    name="rebase-template", help="Rebase a Studio-saved template into an offset-free base (README §2¾)."
-)
-def rebase_template(
-    saved: Annotated[
-        Path,
-        typer.Argument(
-            help="template saved from Silhouette Studio (settings changed, shapes untouched)",
-            exists=True,
-            dir_okay=False,
-        ),
-    ],
-    stock: Annotated[
-        Path,
-        typer.Argument(
-            help="pristine stock template (silhouette-card-maker/cutting_templates/...)",
-            exists=True,
-            dir_okay=False,
-        ),
-    ],
-    out: Annotated[Path, typer.Argument(help="output base template (templates/...)", dir_okay=False)],
-) -> None:
-    try:
-        base, dx, dy = studio3.rebase(saved.read_bytes(), stock.read_bytes())
-    except studio3.Studio3Error as e:
-        fail(str(e))
-    typer.echo(f"baked offset measured: x={dx:g}mm y={dy:g}mm", err=True)
-    typer.echo("verified: base + offset reproduces the Studio save byte-for-byte", err=True)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(base)
-    typer.echo(str(out))
 
 
 # --- backlog: miscuts and skipped pages, across decks ------------------------
@@ -635,7 +585,7 @@ def backlog_build(
     )
     try:
         result = build.run_build(opts)
-    except (build.BuildError, DeckError, engine.EngineMissing, studio3.Studio3Error, RuntimeError) as e:
+    except (build.BuildError, DeckError, engine.EngineMissing, RuntimeError) as e:
         fail(str(e))
     bl.entries = keep
     bl.save()
@@ -663,9 +613,9 @@ def make_back(out: Annotated[Path, typer.Option("--out", dir_okay=False)] = DEFA
     typer.echo(f"wrote {write_back(out)} ({W}x{H}px @ {PPI} PPI)")
 
 
-@app.command(help="Check that the vendored engine, cutter driver and data files are in place.")
+@app.command(help="Check that the vendored engine and data files are in place.")
 def doctor() -> None:
-    from .paths import CUT_OFFSET_FILE, DUPLEX_OFFSET_FILE, TEMPLATES
+    from .paths import CUT_OFFSET_FILE, DUPLEX_OFFSET_FILE
 
     checks = [
         ("engine (silhouette-card-maker)", (SCM / "create_pdf.py").is_file(), "run ./setup.sh"),
@@ -678,21 +628,15 @@ def doctor() -> None:
             "checkout branch local-patches of j0nas/silhouette-card-maker",
         ),
         (
-            "cutter driver venv (inkscape-silhouette/.venv)",
-            DRV_PY.is_file(),
-            "run ./setup.sh (only needed for cut-proxies)",
-        ),
-        (
             "machine cut offset (data/cut_offset.json)",
             CUT_OFFSET_FILE.is_file(),
-            "commit one; see README §2¾",
+            "see README (Cut offset)",
         ),
         (
             "duplex offset (data/offset_data.json)",
             DUPLEX_OFFSET_FILE.is_file(),
             "mtg-proxy offset -x .. -y .. (README §3)",
         ),
-        ("A4 template base (templates/)", any(TEMPLATES.glob("a4-standard-*.studio3")), "see README §2¾"),
         ("card back (assets/back.png)", DEFAULT_BACK.is_file(), "mtg-proxy make-back"),
         ("CUPS lp", printing.lp_available(), "needed only for --print"),
     ]

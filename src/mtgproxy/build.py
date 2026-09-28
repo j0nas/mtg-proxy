@@ -1,4 +1,4 @@
-"""The build: decklist → ./<deck>/{<deck>.pdf, <deck>-duplex.pdf?, *.studio3, CUT-NOTES.md, run.json}.
+"""The build: decklist → ./<deck>/{<deck>.pdf, <deck>-duplex.pdf?, CUT-NOTES.md, run.json}.
 
 Output goes to ``<out_parent>/<name>/`` (default: the current directory — the
 repo itself is an implementation detail). Only OUR artifacts from a previous
@@ -17,11 +17,11 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from . import engine, manifest, mirror, notes, printing, studio3, trim
+from . import engine, manifest, mirror, notes, printing, trim
 from .backlog import Backlog, Entry
 from .cache import ImageCache
 from .decks import FetchedDeck, fetch_deck, is_deck_url
-from .paths import DEFAULT_BACK, DUPLEX_OFFSET_FILE, NOTES_NAME, SCM, TEMPLATES, cache_dir
+from .paths import DEFAULT_BACK, DUPLEX_OFFSET_FILE, NOTES_NAME, SCM, cache_dir
 from .sidecar import RunInfo
 from .testcards import write_test_cards
 
@@ -79,7 +79,6 @@ class BuildResult:
     out: Path
     pdf: Path | None
     duplex_pdf: Path | None
-    template: Path | None
     dfc_count: int
     cards: int
     windows_path: str | None = None
@@ -153,8 +152,6 @@ def clear_stale(out: Path, name: str) -> None:
     """Remove OUR artifacts from a previous run — called only once the new images are ready,
     so a run that fails while fetching leaves the previous PDF in place."""
     for stale in [out / f"{name}.pdf", out / f"{name}-duplex.pdf", out / NOTES_NAME]:
-        stale.unlink(missing_ok=True)
-    for stale in out.glob("*.studio3"):
         stale.unlink(missing_ok=True)
 
 
@@ -409,29 +406,6 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
     return PdfOutputs(pdf, duplex_pdf, dfc_count, main, duplex, deferred)
 
 
-# --- step 5: cutting template ------------------------------------------------
-def find_template(paper: str, card_size: str) -> tuple[Path | None, bool]:
-    """(template, baked): project base from templates/ (Studio state baked in), else stock."""
-    from natsort import natsorted
-
-    ours = natsorted(TEMPLATES.glob(f"{paper}-{card_size}-*.studio3"))
-    if ours:
-        return ours[-1], True
-    stock = natsorted((SCM / "cutting_templates").glob(f"{paper}-{card_size}-v*.studio3"))
-    if stock:
-        return stock[-1], False
-    return None, False
-
-
-def place_template(opts: BuildOptions, out: Path) -> tuple[Path | None, bool, tuple[float, float]]:
-    template, baked = find_template(opts.paper, opts.card_size)
-    dx, dy = studio3.read_cut_offset()
-    if template is None:
-        warn(f"warning: no cutting template found for {opts.paper}/{opts.card_size}")
-        return None, False, (dx, dy)
-    return studio3.place_template(template, out, dx, dy), baked, (dx, dy)
-
-
 # --- the whole thing ---------------------------------------------------------
 def run_build(opts: BuildOptions) -> BuildResult:
     if opts.tokens_only and opts.test_mode:
@@ -490,7 +464,6 @@ def run_build(opts: BuildOptions) -> BuildResult:
 
     clear_stale(out, name)
     pdfs = build_pdfs(opts, out, name)
-    template, baked, (dx, dy) = place_template(opts, out)
 
     # Per-slot manifest: what is on which page, and the exact printing, so
     # `mtg-proxy redo` can queue a miscut or a skipped page later.
@@ -524,9 +497,6 @@ def run_build(opts: BuildOptions) -> BuildResult:
                 fronts_only=opts.fronts_only,
                 duplex_dfc=opts.duplex_dfc,
                 dfc_count=pdfs.dfc_count,
-                template_name=template.name if template else None,
-                template_baked=baked,
-                cut_offset_y_mm=dy,
             )
         )
     )
@@ -541,8 +511,6 @@ def run_build(opts: BuildOptions) -> BuildResult:
         pdf=pdfs.pdf.name if pdfs.pdf else None,
         duplex_pdf=pdfs.duplex_pdf.name if pdfs.duplex_pdf else None,
         dfc_count=pdfs.dfc_count,
-        template=template.name if template else None,
-        cut_offset_mm={"x": dx, "y": dy},
         trims={s.name: s.mm for s in opts.trims},
         decklist=deck.path.name
         if deck.path and deck.path.parent == out
@@ -553,7 +521,7 @@ def run_build(opts: BuildOptions) -> BuildResult:
         sheets={k: v.as_dict() for k, v in sheets.items()},
     ).write(out)
 
-    result = BuildResult(name, out, pdfs.pdf, pdfs.duplex_pdf, template, pdfs.dfc_count, printed)
+    result = BuildResult(name, out, pdfs.pdf, pdfs.duplex_pdf, pdfs.dfc_count, printed)
     if deferred:
         backlog = Backlog.at(out.parent)
         backlog.add(deferred)
@@ -599,12 +567,8 @@ def print_summary(r: BuildResult, opts: BuildOptions) -> None:
         log(f"  PDF:      {r.pdf}")
     if r.duplex_pdf:
         log(f"  Duplex:   {r.duplex_pdf} ({r.dfc_count} double-sided cards — manual duplex, long-edge flip)")
-    if r.template:
-        log(f"  Cut file: {r.template}")
     log(f"  Notes:    make-proxies --notes {r.name}")
-    log(
-        f"  Cut:      cd {os.path.relpath(r.out)} && cut-proxies   (reads run.json; direct to the Cameo, no Studio)"
-    )
+    log(f"  Cut:      cd {os.path.relpath(r.out)} && cut-proxies   (reads run.json)")
     if r.deferred:
         log(f"  Backlog:  {len(r.deferred)} card(s) deferred → {r.backlog}   (mtg-proxy backlog)")
     if r.windows_path:
@@ -614,5 +578,5 @@ def print_summary(r: BuildResult, opts: BuildOptions) -> None:
         log("  *** MIRROR INCOMPLETE — the Windows copy of these files is STALE (old run!):")
         for f in r.mirror_failed:
             log(f"  ***   {f}")
-        log("  *** Close the file on the Windows side (PDF viewer / Silhouette Studio) and rerun,")
+        log("  *** Close the file on the Windows side (PDF viewer) and rerun,")
         log("  *** or copy it manually from the WSL output path above. Do NOT print the stale copy.")

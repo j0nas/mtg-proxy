@@ -1,6 +1,6 @@
 # mtg-proxy
 
-Decklist in, print-ready PDF and Silhouette cut file out. A small Python CLI (`mtg-proxy`,
+Decklist in, print-ready PDF out, cut on the Cameo by our own driver. A small Python CLI (`mtg-proxy`,
 managed with `uv`) that drives [silhouette-card-maker](https://github.com/Alan-Cha/silhouette-card-maker)
 in-process, from my fork `j0nas/silhouette-card-maker` (branch `local-patches`: batched and
 parallel Scryfall fetching, `--token_copies`, MTGA parser fixes).
@@ -11,14 +11,14 @@ cards cost and why the stack looks like this is written up at
 [jona.no/docs/mtg-proxying](https://jona.no/docs/mtg-proxying).
 
 ```
-mtg-proxy make      decklist -> ./<deck>/{<deck>.pdf, <deck>-duplex.pdf?, *.studio3, CUT-NOTES.md, run.json}
-mtg-proxy cut       cut a printed sheet on the Cameo, no Silhouette Studio; reads run.json from the deck folder
+mtg-proxy make      decklist -> ./<deck>/{<deck>.pdf, <deck>-duplex.pdf?, CUT-NOTES.md, run.json}
+mtg-proxy cut       cut a printed sheet on the Cameo; reads run.json from the deck folder
 mtg-proxy redo      queue miscuts / a skipped page of a run for reprinting (BACKLOG.txt)
 mtg-proxy backlog   show the queue, `backlog build` prints it as one sheet, `backlog drop` edits it
 mtg-proxy offset    store the printer's duplex offset once
 mtg-proxy notes     show the newest CUT-NOTES.md below the cwd
 mtg-proxy cache     Scryfall image cache stats / --clear (~/.cache/mtg-proxy)
-mtg-proxy doctor    check engine, cutter driver, data files
+mtg-proxy doctor    check engine and data files
 ```
 
 `make-proxies.sh`, `cut-proxies.sh` and `save-offset.sh` are shims onto those commands, and
@@ -27,19 +27,17 @@ mtg-proxy doctor    check engine, cutter driver, data files
 
 ```
 src/mtgproxy/          engine.py (in-process engine), build.py (pipeline), decks.py (Moxfield/Archidekt),
-                       layout.py (cut SVG), studio3.py (template patcher)
-data/cut_offset.json   machine cut bias in mm, baked into every cutting template; "driver": cut-proxies' own
+                       layout.py (cut SVG), cutting.py (cut-proxies), cameo/ (the Cameo driver)
+data/cut_offset.json   the machine's cut offset in mm, applied to every cut
 data/offset_data.json  printer duplex offset, applied to every double-sided PDF
-templates/             cutting-template base with the Cameo 5 Alpha profile and A4 media pre-selected
 assets/back.png        default card back for --backs; replace with your own
-silhouette-card-maker/ and inkscape-silhouette/   vendored clones, gitignored, made by setup.sh
+silhouette-card-maker/ the vendored engine clone, gitignored, made by setup.sh
 ```
 
 ## Setup
 
 ```sh
-./setup.sh              # clones the engine fork and cutter driver, builds both venvs, installs git hooks
-./setup.sh --no-cutter  # print-only machine
+./setup.sh              # clones the engine fork, builds the venv, installs git hooks
 mtg-proxy doctor        # what's missing and how to fix it
 ```
 
@@ -135,26 +133,12 @@ paths.
 
 ## Cut offset
 
-The Cameo 5 Alpha cuts ~1 mm high relative to the marks it scans, regardless of layout.
-`data/cut_offset.json` holds the correction (`y_mm: 1.0`, positive shifts cuts down) and
-`studio3.py` bakes it into every generated template, named like `a4-standard-v5+y1mm.studio3`.
-Don't nudge shapes in Studio; the next run overwrites the file. If alignment drifts, cut one
-sheet, measure, update the number.
-
-The template base `templates/a4-standard-v5-alpha.studio3` also carries the machine profile
-(Cameo 5 Alpha), the material, and the media, which must be the A4 preset, not Custom. The
-upstream template ships with typed-in dimensions 0.07 mm off true A4; that looked cosmetic, but
-Custom media gave warped cuts on the Alpha. To bake other Studio settings, open a generated
-template in Studio, change settings only, save it, and run:
-
-```sh
-uv run mtg-proxy rebase-template <saved.studio3> \
-  silhouette-card-maker/cutting_templates/a4-standard-v5.studio3 \
-  templates/a4-standard-v5-alpha.studio3
-```
-
-It checks that base plus offset reproduces the Studio save byte for byte, and the test suite
-re-checks the shipped base on every run.
+With cut-proxies' scan, the Cameo 5 Alpha cuts 0.5 mm high relative to the printed marks, and
+true in x. `data/cut_offset.json` holds the correction (`y_mm: 0.5`; positive shifts cuts
+right/down). It was measured with the deck-box project's calibration sheet (`pnpm calib` in
+`~/Desktop/projects/silhouette/deckbox`): printed vernier scales at five stations, cut vernier
+ticks scored against them. To re-measure, score one with the offset off (`--x-off 0 --y-off 0`)
+and read where each cut tick 0 lands against its printed 0 line.
 
 ## Duplex offset
 
@@ -169,86 +153,69 @@ Stored in `data/offset_data.json`, tracked, applied to every double-sided PDF.
 
 ## Cutting
 
-`cut-proxies` skips Silhouette Studio. Studio with Alpha firmware 1.05 mis-detects the machine
-as a plain Cameo 5 and picks the registration scan on its own, which is how a working sheet
-turns into a morning of failed scans. It drives the Cameo over Bluetooth LE (`--usb` for the
-cable) with its own driver, `src/mtgproxy/cameo/`, and sends the scan command explicitly: `-r 4`
-is the four-L-mark scan, `-r 3` the square plus two L's.
+`cut-proxies` drives the Cameo over Bluetooth LE (`--usb` for the cable) with its own driver,
+`src/mtgproxy/cameo/`, and sends the scan command explicitly: `-r 4` is the four-L-mark scan,
+`-r 3` the square plus two L's.
 
 ```sh
 cd mydeck && cut-proxies   # reads run.json: paper, card size, mark pattern
 cut-proxies --run mydeck   # same, from the parent folder
+cut-proxies --preset paper # plain paper instead of laminate
+cut-proxies --passes 4     # also --force/--speed/--depth, --x-off/--y-off
 cut-proxies --usb          # over the cable instead of Bluetooth LE
 cut-proxies --scan         # list the Bluetooth devices in range
-cut-proxies --passes 4     # also --force/--speed/--depth, --x-off/--y-off
 cut-proxies --dry-run      # no machine: runs the whole job against a stand-in, checks the bounds
 cut-proxies --probe        # scans the marks, logs what the machine reports, cuts nothing
 cut-proxies --svg job.svg --reg-inset 5   # any page-sized SVG
-cut-proxies --legacy-driver               # the vendored inkscape-silhouette, as a fallback
 ```
 
-Why our own driver (2026-09-28): registration was inconsistent under identical conditions, and
-inkscape-silhouette made it worse. The job now follows Studio's recorded conversation with this
-machine (`docs/studio-capture.md`). It ended every job by moving the machine's origin below the
-cut (`SO0`), so the next scan on that mat started from the wrong place. It started the search
-on the paper's corner, where the paper edge reads like a mark line. It hard-coded a 20 × 0.5 mm
-mark description, and it treated the first reply after a scan as final. `mtgproxy.cameo`:
+Settings, AutoBlade only (the Kraft blade can't turn the 3 mm corners):
 
-- `geometry`: the SVG → polylines in page mm. Everything inside an outline is cut before it,
-  nearest start first. Closed loops are cut as continuous laps with a 0.5 mm overcut.
-- `protocol`: the GP-GL strings. The blade setup is byte for byte what worked before; the tests
-  pin it.
+| `--preset` | Force | Speed | Depth | Passes |
+|---|---|---|---|---|
+| `laminate` (default): 130–135 gsm glossy in 80 µm pouches | 20 | 25 | 4 | 3 |
+| `paper`: plain copier paper, cut through | 10 | 5 | 1 | 1 |
+
+Explicit flags override the preset. Run one sheet, don't eject, lift a corner, and rerun with
+`--passes 1` if a cut isn't through (it rescans the marks). Rippled edges mean too much force or
+a dull blade. Max force or speed makes the machine skip; power-cycle to rehome.
+
+The job follows Silhouette Studio's own conversation with this machine, recorded over Bluetooth
+(`docs/studio-capture.md`). `mtgproxy.cameo`:
+
+- `geometry`: the SVG → polylines in page mm, curves flattened to a 0.02 mm chord. Everything
+  inside an outline is cut before it, nearest start first. Closed loops are cut as continuous
+  laps with a 0.5 mm overcut.
+- `protocol`: the GP-GL strings, pinned by the tests to Studio's.
 - `transport`: Bluetooth LE (bleak), USB (libusb1), or a recording stand-in for dry runs.
-- `session`: preflight (refuses without a loaded mat), blade setup, mark description and scan,
-  and the cut in ≤1 KB pieces with a status wait between them. After anything moved, it always
-  returns to the origin, and it never moves the origin.
+- `session`: preflight (refuses without a loaded mat), mark description and scan, blade setup,
+  and the cut in ≤1 KB pieces with a status wait between them. It always returns to the origin
+  and never moves it.
 
 Registration:
 
 - `--reg-length` / `--reg-thickness` (mm, default 9.4 × 1, the card-maker's A4 marks) describe
   the printed marks before the scan.
-- `--scan-start TOP,LEFT` (mm from the loaded origin, repeatable) sets where the sensor starts
-  searching. The default is Studio's own geometry, read from a recording of Studio driving this
-  machine (`docs/studio-capture.md`): above the top-left mark's horizontal leg, just past its
-  vertical leg, so the sensor crosses a mark line and not the paper edge. That is (2.5, 11.5) at
-  a 10 mm inset. The scan is tried twice, and each attempt is logged.
-- `--reg-inset MM` moves the expected marks from the layout's 10 mm toward the paper edge,
-  which gives a design more height. It must match the printed marks.
-- Nothing may be cut above or left of the top-left mark (negative coordinates are untested), and
-  nothing off the paper. Keep 6 mm around every mark free of print (Graphtec's guidance): anything
-  near a mark can be read as one.
+- The scan starts at (2.5, 11.5) mm from the paper's corner, Studio's own start: on white
+  paper above the top-left mark's horizontal leg, well past its vertical leg. At a 5 mm inset,
+  starting 1.5 mm past the vertical leg skewed cuts differently on every sheet; this start
+  never did (calibration sheets, 2026-09-28). `--scan-start TOP,LEFT` overrides it.
+- `--reg-inset MM` moves the expected marks from the layout's 10 mm toward the paper edge (5 mm
+  is proven). It must match the printed marks.
+- Nothing may be cut above or left of the top-left mark, and nothing off the paper. Keep 6 mm
+  around every mark free of print (Graphtec's guidance): ink near a mark can be read as part of
+  it.
 
-Every run writes `output/cut/<name>.session.jsonl`: each byte sent and received, with
-timestamps, plus the Bluetooth movement events. `--probe` asks every query that might report the
-detected marks (FQ5, the GP-GL O* outputs, `[`, `U`, …) before and after a scan. Run it twice
-with the sheet moved a known distance; a reply that moves with it is a readback we can check
-against tolerances.
-
-Run it on the Mac. On Windows, libusb means replacing Silhouette's driver with WinUSB, which
-breaks Studio.
+The machine reports no mark positions (FQ5 reads -64 after every successful scan, straight or
+tilted), so a misread can't be caught from the replies. Every run writes
+`output/cut/<name>.session.jsonl`: each byte sent and received, with timestamps, plus the
+Bluetooth movement events.
 
 Placement: sheet top-left on the mat grid, aligned to the paper edge, not the laminate edge.
 Standard 12x12" mat against the left notch, pinch rollers on the mat, lid closed, room neither
-very bright nor very dark. If the scan fails nothing is cut.
-
-Settings, AutoBlade only (the Kraft blade can't turn the 3 mm corners):
-
-| | Force | Speed | Depth | Passes |
-|---|---|---|---|---|
-| Default here (laminated 135 gsm photo paper) | 25 | 25 | 5 | 3 |
-| @kgclippy, same stack on a Cameo 5a | 30 | 25 | 7 | 3 |
-| Upstream author, 250 gsm + 3 mil on a Cameo 5 | 35 | 25 | 7 | 4 |
-
-Tune passes, then force, then speed, then depth. Run one sheet, don't eject, lift a corner, add a
-pass if needed. Rippled edges mean too much force or a dull blade. Max force or speed makes the
-machine skip; power-cycle to rehome.
-
-If you do use Studio: v5.0.402 or newer, not the free Starter edition. Machine profile must
-match the marks: `-r 4` wants "Cameo 5 Alpha", `-r 3` wants plain "Cameo 5" even on Alpha
-hardware. 4-mark is fussier than 3-mark; one Alpha user needed light Post-its over the two
-bottom-corner cards during the scan. Glare from glossy laminate is a known cause of failed
-scans; I cut glossy-laminated sheets fine with `cut-proxies`, but matte is the safer choice if
-registration keeps failing.
+very bright nor very dark. A sheet that creeps on a worn mat skews long jobs: use a sticky mat
+or tape the edges. If the scan fails nothing is cut. Glare from glossy laminate is a known cause
+of failed scans; glossy sheets cut fine here, but matte is the safer choice if scans fail.
 
 Finish: cut cards can delaminate at the edges. Run them through the laminator again. Cloudy
 lamination is too cold (run 80 µm pouches on the 5 mil setting); wavy cards are too hot.
@@ -259,7 +226,7 @@ A3 works on the ET-8550 (18 cards a sheet) but needs the 12x24" mat.
 
 ```sh
 uv sync
-uv run pytest           # ~50 tests, no network, no printer, ~1 s
+uv run pytest           # ~90 tests, no network, no printer, no Cameo, ~2 s
 uv run ruff check src tests && uv run ruff format src tests
 ```
 
@@ -273,6 +240,4 @@ working dirs stay where it expects them.
 - [silhouette-card-maker docs](https://alan-cha.github.io/silhouette-card-maker/)
 - [GitHub issue #162](https://github.com/Alan-Cha/silhouette-card-maker/issues/162), an Alpha user's 4-corner registration experience
 - [Silhouette School: 3 vs 4 registration marks](https://www.silhouetteschoolblog.com/2026/01/silhouette-registration-mark-types.html)
-- [Silhouette School: Cameo 5a firmware/Studio detection bug](https://www.silhouetteschoolblog.com/2025/12/silhouette-cameo-5a-major-bug-warning.html)
 - [Silhouette School: registration failures on glossy media](https://www.silhouetteschoolblog.com/2016/10/silhouette-print-and-cut-registration-failed.html)
-- [@kgclippy's Cameo 5a settings](https://www.tiktok.com/@kgclippy/video/7603979095810084127)

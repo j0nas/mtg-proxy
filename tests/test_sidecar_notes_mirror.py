@@ -25,13 +25,14 @@ def _info(**kw) -> RunInfo:
 
 
 def test_sidecar_roundtrip_and_forward_compat(tmp_path):
-    p = _info(template="a4+y1mm.studio3", cut_offset_mm={"x": 0.0, "y": 1.0}).write(tmp_path)
+    p = _info(trims={"Temple Garden": 0.3}).write(tmp_path)
     assert p.name == SIDECAR_NAME
     raw = json.loads(p.read_text())
     raw["some_future_field"] = 1
+    raw["template"] = "a4+y1mm.studio3"  # older runs: Studio template fields, now ignored
     p.write_text(json.dumps(raw))
     back = RunInfo.read(p)
-    assert back.registration == "4" and back.cut_offset_mm == {"x": 0.0, "y": 1.0}
+    assert back.registration == "4" and back.trims == {"Temple Garden": 0.3}
 
 
 def test_find_sidecar(tmp_path, monkeypatch):
@@ -46,8 +47,7 @@ def test_find_sidecar(tmp_path, monkeypatch):
 def test_notes_render_covers_the_run():
     ctx = notes.NotesContext(
         name="orah", paper="letter", card_size="standard", registration="3", cards=12, fronts_only=True,
-        duplex_dfc=True, dfc_count=2, template_name="letter-standard-v3+y1mm.studio3", template_baked=False,
-        cut_offset_y_mm=1.0, today="2026-09-17",
+        duplex_dfc=True, dfc_count=2, today="2026-09-17",
     )  # fmt: skip
     text = notes.render(ctx)
     assert "# orah — print & cut checklist" in text
@@ -57,14 +57,12 @@ def test_notes_render_covers_the_run():
     )
     assert "**orah-duplex.pdf** holds the 2 double-sided card image(s)" in text
     assert "cut-proxies -r 3 -p letter" in text
-    assert "Cameo 5 (yes, plain 5" in text
-    assert "pre-shifted **1mm down**" in text
-    assert "3-mark pattern: cover the card nearest the bottom-left L mark." in text
-    baked = notes.render(
-        notes.NotesContext("d", "a4", "standard", "4", 8, False, True, 0, "t.studio3", True, 0.0)
-    )
-    assert "opens with **Cameo 5 Alpha** selected" in baked and "pre-shifted" not in baked
-    assert "manual duplex, **long-edge flip**" in baked
+    assert "**Force 20 · Speed 25 · Depth 4 · Passes 3**" in text
+    assert "`--preset paper` (Force 10 · Speed 5 · Depth 1 · Passes 1)" in text
+    assert "Studio" not in text and "studio3" not in text
+    duplex = notes.render(notes.NotesContext("d", "a4", "standard", "4", 8, False, True, 0))
+    assert "manual duplex, **long-edge flip**" in duplex
+    assert "`cut-proxies -r 4`" in duplex
 
 
 def test_latest_notes(tmp_path):
@@ -78,19 +76,17 @@ def test_latest_notes(tmp_path):
     assert notes.latest_notes(tmp_path) == tmp_path / "new" / NOTES_NAME
 
 
-def test_mirror_is_flat_and_wipes_stale_templates(tmp_path):
+def test_mirror_is_flat_and_keeps_other_decks(tmp_path):
     out = tmp_path / "deck"
     out.mkdir()
-    for n in ("deck.pdf", "deck-duplex.pdf", "a4+y1mm.studio3", NOTES_NAME, SIDECAR_NAME, "deck.txt"):
+    for n in ("deck.pdf", "deck-duplex.pdf", NOTES_NAME, SIDECAR_NAME, "deck.txt"):
         (out / n).write_text(n)
     win = tmp_path / "win"
     win.mkdir()
-    (win / "stale-old.studio3").write_text("stale")
     (win / "other-deck.pdf").write_text("keep")
     r = mirror(out, "deck", win)
     assert r.failed == []
     assert sorted(p.name for p in win.iterdir()) == [
-        "a4+y1mm.studio3",
         "deck-duplex.pdf",
         "deck.pdf",
         "deck.txt",
@@ -108,7 +104,7 @@ def test_mirror_reports_a_locked_stale_file_instead_of_crashing(tmp_path, monkey
     out, win = tmp_path / "run", tmp_path / "win"
     out.mkdir(), win.mkdir()
     (out / "deck.pdf").write_bytes(b"new")
-    (out / "x.studio3").write_bytes(b"t")
+    (out / "deck.txt").write_bytes(b"t")
     (win / "deck.pdf").write_bytes(b"old, open in a viewer")
     real_unlink = Path.unlink
 
@@ -121,4 +117,4 @@ def test_mirror_reports_a_locked_stale_file_instead_of_crashing(tmp_path, monkey
     r = mirror.mirror(out, "deck", win)
     assert r.failed == ["deck.pdf"]
     assert (win / "deck.pdf").read_bytes() == b"old, open in a viewer"  # never half-overwritten
-    assert (win / "x.studio3").is_file()
+    assert (win / "deck.txt").is_file()

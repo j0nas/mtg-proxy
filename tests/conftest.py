@@ -5,14 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from mtgproxy.paths import SCM, TEMPLATES
+from mtgproxy.paths import SCM
 
 FIXTURES = Path(__file__).parent / "fixtures"
-STOCK_A4 = SCM / "cutting_templates" / "a4-standard-v5.studio3"
-BASE_A4 = TEMPLATES / "a4-standard-v5-alpha.studio3"
 
 needs_engine = pytest.mark.skipif(not (SCM / "create_pdf.py").is_file(), reason="vendored engine not cloned")
-needs_stock_template = pytest.mark.skipif(not STOCK_A4.is_file(), reason="stock template not present")
 
 
 @pytest.fixture

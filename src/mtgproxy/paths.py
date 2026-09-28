@@ -7,10 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCM = ROOT / "silhouette-card-maker"  # vendored PDF engine (fork j0nas/silhouette-card-maker, local-patches)
-DRV = ROOT / "inkscape-silhouette"  # vendored cutter driver (fablabnbg/inkscape-silhouette)
-DRV_PY = DRV / ".venv" / "bin" / "python"
 DATA = ROOT / "data"
-TEMPLATES = ROOT / "templates"
 ASSETS = ROOT / "assets"
 DECKS = ROOT / "decks"
 CUT_OFFSET_FILE = DATA / "cut_offset.json"

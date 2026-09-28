@@ -3,8 +3,8 @@
 ``generate_dxf.py single`` (the same layout engine that placed the cards in the
 PDF) produces a DXF in page coordinates with the origin top-left and Y going
 NEGATIVE downwards; this converts it into a page-sized SVG in millimetres,
-Y-down positive from the same origin, which inkscape-silhouette can send to
-the cutter directly. Rounded corners come through as true arcs.
+Y-down positive from the same origin, which cut-proxies sends to the cutter
+directly. Rounded corners come through as true arcs.
 
 Registration marks are NOT drawn: the cutter finds the printed ones itself. The
 mark geometry it needs (inset from the page edge, mark-to-mark distances) is

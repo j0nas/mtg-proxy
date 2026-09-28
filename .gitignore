@@ -1,6 +1,5 @@
-# vendored engine + driver: their own clones (setup.sh)
+# vendored engine: its own clone (setup.sh)
 silhouette-card-maker/
-inkscape-silhouette/
 # project venv (uv sync)
 .venv/
 __pycache__/

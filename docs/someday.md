@@ -16,8 +16,4 @@ None of these block cutting. Background: `studio-capture.md`.
 - **Cutting above/left of the top-left mark** (negative registered coordinates) is untested.
   Not needed: 5 mm insets register cleanly with Studio's scan start (2026-09-28).
 - **USB transport:** written, never run on hardware.
-- **Retire the old driver** (`--legacy-driver`, `regmark_launch.py`, the inkscape-silhouette
-  clone) once ours has cut laminate.
-- **A plain-paper preset:** Studio's copy-paper settings (force 15, speed 10, depth 3) cut
-  raggedly on a mat tuned for laminate.
 - **A blog post and a standalone library** for other Cameo owners fighting Silhouette Studio.

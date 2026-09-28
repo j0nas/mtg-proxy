@@ -50,10 +50,10 @@ def test_resolve_deck_url_uses_fetched_name(monkeypatch):
 def test_prepare_out_keeps_everything_and_clear_stale_removes_only_our_artifacts(tmp_path):
     out = tmp_path / "deck"
     out.mkdir()
-    for n in ("deck.pdf", "deck-duplex.pdf", "x.studio3", NOTES_NAME, "deck.txt", "run.json", "keep.png"):
+    for n in ("deck.pdf", "deck-duplex.pdf", NOTES_NAME, "deck.txt", "run.json", "keep.png"):
         (out / n).write_text("x")
     assert prepare_out(tmp_path, "deck") == out
-    assert len(list(out.iterdir())) == 7  # a failed run must not have wiped the previous PDF
+    assert len(list(out.iterdir())) == 6  # a failed run must not have wiped the previous PDF
     build.clear_stale(out, "deck")
     assert sorted(p.name for p in out.iterdir()) == ["deck.txt", "keep.png", "run.json"]
     with pytest.raises(BuildError, match="--out dir not found"):
@@ -70,22 +70,6 @@ def test_prune_to_tokens(tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "DOUBLE_SIDED", ds)
     assert prune_to_tokens() == 3
     assert [p.name for p in front.iterdir()] == ["2Ophiomancer_token1.png"]
-
-
-def test_find_template_prefers_project_base_and_highest_version(tmp_path, monkeypatch):
-    monkeypatch.setattr(build, "TEMPLATES", tmp_path / "t")
-    monkeypatch.setattr(build, "SCM", tmp_path / "scm")
-    (tmp_path / "scm" / "cutting_templates").mkdir(parents=True)
-    for n in ("a4-standard-v3.studio3", "a4-standard-v10.studio3"):
-        (tmp_path / "scm" / "cutting_templates" / n).write_bytes(b"")
-    assert build.find_template("a4", "standard") == (
-        tmp_path / "scm/cutting_templates/a4-standard-v10.studio3",
-        False,
-    )
-    (tmp_path / "t").mkdir()
-    (tmp_path / "t" / "a4-standard-v5-alpha.studio3").write_bytes(b"")
-    assert build.find_template("a4", "standard") == (tmp_path / "t/a4-standard-v5-alpha.studio3", True)
-    assert build.find_template("a3", "standard") == (None, False)
 
 
 @needs_engine

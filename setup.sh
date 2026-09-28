@@ -5,24 +5,18 @@
 #   2. silhouette-card-maker (PDF engine)             → ./silhouette-card-maker
 #      fork j0nas/silhouette-card-maker, branch local-patches (batch + parallel
 #      Scryfall fetching, --token_copies, MTGA parser fixes, exact page boxes)
-#   3. inkscape-silhouette (cutter driver)            → ./inkscape-silhouette/.venv
-#      only needed for cut-proxies; needs libusb (brew install libusb)
-#   4. the project venv (.venv) with the engine's pinned deps + mtg-proxy itself
-#   5. git hooks (ruff + pytest before every commit)
-#
-# Options: --no-cutter  skip step 3 (a machine that only prints)
+#   3. the project venv (.venv) with the engine's pinned deps + mtg-proxy itself
+#      (cut-proxies' Cameo driver included; USB cutting on a Mac also needs brew's libusb)
+#   4. git hooks (ruff + pytest before every commit)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
 ENGINE_REPO="https://github.com/j0nas/silhouette-card-maker.git"
 ENGINE_BRANCH="local-patches"
-DRIVER_REPO="https://github.com/fablabnbg/inkscape-silhouette.git"
-WITH_CUTTER=1
 for a in "$@"; do
   case "$a" in
-    --no-cutter) WITH_CUTTER=0 ;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $a" >&2; exit 1 ;;
   esac
 done
@@ -44,26 +38,6 @@ mkdir -p silhouette-card-maker/game/front silhouette-card-maker/game/back \
 echo "== project venv (.venv)"
 uv sync --quiet
 echo "   $(uv run --quiet mtg-proxy --version)"
-
-if [[ $WITH_CUTTER -eq 1 ]]; then
-  echo "== cutter driver: inkscape-silhouette"
-  if [[ ! -d inkscape-silhouette/.git ]]; then
-    git clone "$DRIVER_REPO" inkscape-silhouette
-  else
-    echo "   present (@ $(git -C inkscape-silhouette rev-parse --short HEAD))"
-  fi
-  if [[ ! -x inkscape-silhouette/.venv/bin/python ]]; then
-    ( cd inkscape-silhouette \
-      && uv venv --quiet --python 3.12 .venv \
-      && uv pip install --quiet --python .venv/bin/python -r requirements.txt libusb1 bleak \
-      && uv pip install --quiet --python .venv/bin/python --no-deps inkex )
-  else
-    echo "   venv present"
-  fi
-  if [[ "$(uname -s)" == "Darwin" ]] && ! { command -v brew >/dev/null 2>&1 && brew list --formula libusb >/dev/null 2>&1; }; then
-    echo "   NOTE: libusb not found via Homebrew — USB cutting needs it: brew install libusb"
-  fi
-fi
 
 echo "== git hooks"
 git config core.hooksPath .githooks

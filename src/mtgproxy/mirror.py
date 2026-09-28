@@ -61,15 +61,12 @@ def to_windows_notation(p: Path) -> str:
 def mirror(out: Path, name: str, win_out: Path) -> MirrorResult:
     """Copy this run's files into ``win_out`` flat, wiping our previous artifacts first."""
     win_out.mkdir(parents=True, exist_ok=True)
-    # Templates are regenerated fresh every run, and stale ones are dangerous to cut with.
-    # A file Windows holds open (PDF viewer, Studio) can be neither removed nor replaced:
+    # A file Windows holds open (a PDF viewer) can be neither removed nor replaced:
     # it is reported as stale, never allowed to abort the run that already succeeded.
     failed: list[str] = []
     for stale in [win_out / f"{name}.pdf", win_out / f"{name}-duplex.pdf", win_out / f"{name}-{NOTES_NAME}"]:
         if not _remove(stale):
             failed.append(stale.name)
-    for stale in win_out.glob("*.studio3"):
-        _remove(stale)
     for f in sorted(out.iterdir()):
         if f.name in (NOTES_NAME, SIDECAR_NAME) or not f.is_file() or f.name in failed:
             continue
