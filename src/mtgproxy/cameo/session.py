@@ -49,6 +49,7 @@ class Job:
     frame: Frame
     blade: p.Blade
     bias: tuple[float, float] = (0.0, 0.0)  # (x, y) mm, the machine's measured cut offset
+    shapes: list[Polyline] = field(default_factory=list)  # each path once, before passes
 
 
 def registered(job: Job) -> list[list[tuple[float, float]]]:

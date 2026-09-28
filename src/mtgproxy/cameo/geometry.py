@@ -104,7 +104,7 @@ def _mm(p) -> Point:
     return (round(float(p.x) * MM_PER_PX, 4), round(float(p.y) * MM_PER_PX, 4))
 
 
-def _inside(p: Point, poly: tuple[Point, ...]) -> bool:
+def inside(p: Point, poly: tuple[Point, ...]) -> bool:
     """Even-odd point-in-polygon test."""
     x, y = p
     hit = False
@@ -125,7 +125,7 @@ def depths(lines: list[Polyline]) -> list[int]:
             sum(
                 1
                 for j, outer, (ox0, oy0, ox1, oy1) in closed
-                if j != i and ox0 <= x0 and oy0 <= y0 and x1 <= ox1 and y1 <= oy1 and _inside(p, outer.points)
+                if j != i and ox0 <= x0 and oy0 <= y0 and x1 <= ox1 and y1 <= oy1 and inside(p, outer.points)
             )
         )
     return out

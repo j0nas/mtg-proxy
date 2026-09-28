@@ -166,6 +166,7 @@ cut-proxies --usb          # over the cable instead of Bluetooth LE
 cut-proxies --scan         # list the Bluetooth devices in range
 cut-proxies --dry-run      # no machine: runs the whole job against a stand-in, checks the bounds
 cut-proxies --probe        # scans the marks, logs what the machine reports, cuts nothing
+cut-proxies --proof        # scores each mark's L after the scan; y cuts, r rescans, q stops
 cut-proxies --svg job.svg --reg-inset 5   # any page-sized SVG
 ```
 
@@ -191,6 +192,7 @@ The job follows Silhouette Studio's own conversation with this machine, recorded
 - `session`: preflight (refuses without a loaded mat), mark description and scan, blade setup,
   and the cut in ≤1 KB pieces with a status wait between them. It always returns to the origin
   and never moves it.
+- `proof`: the proof cuts over the marks, and whether one would touch the job.
 
 Registration:
 
@@ -208,9 +210,15 @@ Registration:
   (Graphtec's guidance): ink near a mark can be read as part of it.
 
 The machine reports no mark positions (FQ5 reads -64 after every successful scan, straight or
-tilted), so a misread can't be caught from the replies. Every run writes
-`output/cut/<name>.session.jsonl`: each byte sent and received, with timestamps, plus the
-Bluetooth movement events.
+tilted; its firmware keeps them to itself), so a misread can't be caught from the replies. It can
+be caught by eye: `--proof` (four L-marks only) scores every mark's L along its centre lines
+after the scan, then waits. Lift the lid: registered right, every cut runs down the middle of the
+black and ends where the leg ends; a misread corner's cuts sit beside its lines, by the size of
+the misread. Each leg is left uncut for 1.5 mm either side of where the sensor crosses it, so a
+rescan reads clean ink: what stays is an L at each corner and a piece at each leg's end. `y`
+cuts the job, `r` goes home and scans again (the new cuts go on the same marks; up to three
+rounds), `q` stops with nothing more cut. Every run writes `output/cut/<name>.session.jsonl`:
+each byte sent and received, with timestamps, plus the Bluetooth movement events.
 
 Placement: sheet top-left on the mat grid, aligned to the paper edge, not the laminate edge.
 Standard 12x12" mat against the left notch, pinch rollers on the mat, lid closed, room neither

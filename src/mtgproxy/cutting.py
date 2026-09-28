@@ -59,6 +59,7 @@ class CutOptions:
     out_dir: Path = field(default_factory=lambda: ROOT / "output" / "cut")
     label: str | None = None  # deck name, for log/transcript file names
     probe: bool = False  # scan and query the machine, cut nothing (see cameo.driver.probe)
+    proof: bool = False  # proof cuts over the marks after the scan; the job waits for y / r / q
     scan_starts: list[tuple[float, float]] | None = None  # (top, left) mm; None = the driver's defaults
 
 
@@ -97,6 +98,8 @@ def run_cut(o: CutOptions) -> int:
 
     if o.registration not in ("3", "4"):
         raise CutError("--registration must be 3 or 4")
+    if o.proof and o.registration != "4":
+        raise CutError("--proof needs the four L-marks (-r 4): the proof cuts trace them")
     o.out_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Cut geometry from the card-maker's own layout engine (same source as the PDF).
@@ -152,7 +155,10 @@ def run_cut(o: CutOptions) -> int:
             print(probe_table(report["replies"]))
             print(f"cut-proxies: probe done; log {log_path}")
             return 0
-        result = driver.cut(job, t, log, starts)
+        confirm = None
+        if o.proof:
+            confirm = dry_confirm if o.dry_run else ask_operator
+        result = driver.cut(job, t, log, starts, confirm)
     except (session.CutError, TransportError) as e:
         raise CutError(f"{e}\ncut-proxies: session log: {log_path}") from e
     finally:
@@ -168,6 +174,37 @@ def run_cut(o: CutOptions) -> int:
         f"cut-proxies: done — {what} cut. Don't eject yet: lift a corner and rerun with more --passes if needed."
     )
     return 0
+
+
+PROOF_HELP = """\
+cut-proxies: proof cuts are down, on the marks: each mark's L scored along its centre lines,
+with a gap across each leg where the sensor reads it. Lift the lid and look at all four
+corners. Registered right, every cut runs down the middle of the black and ends where the leg
+ends. A misread corner's cuts sit beside its lines: how far beside is the misread.
+    y  every cut on its mark: cut the job
+    r  a cut is off its mark: scan the marks again (the new cuts go on the same marks)
+    q  stop: nothing more is cut, the head goes home"""
+
+
+def ask_operator(attempt: int, rescan: bool) -> str:
+    """Asked on the terminal between the proof cuts and the cut (cameo.driver.prove)."""
+    if attempt == 0:
+        print(PROOF_HELP)
+    else:
+        print(
+            f"cut-proxies: round {attempt + 1}'s cuts went on the same marks: a cut beside a mark that "
+            "wasn't there before is this round's."
+        )
+    choices = "y/r/q" if rescan else "y/q"
+    while True:
+        a = input(f"cut-proxies: every cut on its mark? [{choices}] ").strip().lower()[:1]
+        if a in ("y", "q") or (rescan and a == "r"):
+            return a
+
+
+def dry_confirm(attempt: int, rescan: bool) -> str:
+    print("cut-proxies: dry run: proof cuts answered y")
+    return "y"
 
 
 def probe_table(replies: dict[str, list[str | None]]) -> str:

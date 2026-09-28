@@ -1,16 +1,20 @@
 """Entry points: plan a job from an SVG, open a transport, cut, or probe the registration.
 
-``probe`` is an experiment, not a cut: it scans the marks and asks the machine every query that
+``cut`` can stop between the scan and the cut for proof cuts over the marks (``proof``), which the
+operator checks by eye before anything else is cut. ``probe`` is an experiment, not a cut: it scans the marks and asks the machine every query that
 might report where it found them, before and after the scan. Run it twice with the sheet moved a
 known distance; a reply that moves with the sheet is a readback we can check against tolerances.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import contextlib
+import threading
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from . import geometry, protocol
+from . import geometry, proof, protocol
 from .session import CutError, Frame, Job, Session, SessionLog, check_bounds, low_corner
 from .transport import BleTransport, RecordingTransport, Transport, UsbTransport
 
@@ -48,7 +52,7 @@ def plan(svg: Path, frame: Frame, blade: protocol.Blade, passes: int, bias: tupl
     if not lines:
         raise CutError(f"{svg} has no paths to cut")
     ordered = geometry.order(lines, start=(frame.inset, frame.inset))
-    job = Job(geometry.passes(ordered, passes), frame, blade, bias)
+    job = Job(geometry.passes(ordered, passes), frame, blade, bias, shapes=ordered)
     check_bounds(job)
     return job
 
@@ -68,26 +72,96 @@ class Result:
     extent: tuple[float, float, float, float]
 
 
-def cut(job: Job, t: Transport, log: SessionLog, starts: list[tuple[float, float]]) -> Result:
-    """The whole job. Once anything moved the machine, it always ends back at the origin."""
+# The operator's answer to a round of proof cuts: (round, rescan offered) → "y" cut, "r" rescan,
+# anything else stops.
+Confirm = Callable[[int, bool], str]
+
+
+def cut(
+    job: Job, t: Transport, log: SessionLog, starts: list[tuple[float, float]], confirm: Confirm | None = None
+) -> Result:
+    """The whole job. Once anything moved the machine, it always ends back at the origin.
+
+    With ``confirm``, proof cuts go down over the marks between the scan and the cut, and nothing
+    else is cut until the operator says so. A rescan returns to the origin and repeats a fresh run's start."""
     s = Session(t, log)
     try:
-        firmware = s.preflight()
-        log.say(f"connected: {firmware} via {t.name}, mat loaded")
-        s.prepare()
-        start = s.register(job.frame, starts)
         extent = check_bounds(job)
         low = low_corner(extent)
-        if low != (0.0, 0.0):
-            log.say(
-                f"cut reaches {-min(extent[1], 0):.2f} mm above / {-min(extent[0], 0):.2f} mm left of the top-left "
-                f"mark: cutting area widened to {low[0]:g}, {low[1]:g} mm"
-            )
-        s.setup(job.blade, job.frame, low)
+        rounds = proof.ROUNDS if confirm else 1
+        for attempt in range(rounds):
+            if attempt:
+                s.finish()
+                s.wait_ready(60)
+            firmware = s.preflight()
+            log.say(f"connected: {firmware} via {t.name}, mat loaded")
+            s.prepare()
+            start = s.register(job.frame, starts)
+            if low != (0.0, 0.0) and attempt == 0:
+                log.say(
+                    f"cut reaches {-min(extent[1], 0):.2f} mm above / {-min(extent[0], 0):.2f} mm left of the "
+                    f"top-left mark: cutting area widened to {low[0]:g}, {low[1]:g} mm"
+                )
+            s.setup(job.blade, job.frame, low)
+            if confirm is None or prove(s, job, log, confirm, start, attempt, rescan=attempt + 1 < rounds):
+                break
         s.cut(job)
         return Result(firmware, start, extent)
     finally:
         wrap_up(s, t, log)
+
+
+def prove(
+    s: Session,
+    job: Job,
+    log: SessionLog,
+    confirm: Confirm,
+    start: tuple[float, float],
+    attempt: int,
+    rescan: bool,
+) -> bool:
+    """Score the proof cuts over the marks, park the head out of the way and ask. True: cut the
+    job; False: rescan. Anything but y or r stops the job (CutError)."""
+    kept, skipped = [], []
+    for corner, piece in proof.cuts(job.frame, start):
+        if proof.on_job(piece, job.shapes or job.lines):
+            skipped.append(corner)
+        else:
+            kept.append(piece)
+    for corner in sorted(set(skipped)):
+        log.say(
+            f"proof: {skipped.count(corner)} {corner} proof cut(s) would touch the job, so they are left out"
+        )
+    s.cut(replace(job, lines=kept))
+    s.send(protocol.move(0, job.frame.width / 2))  # the head to the top edge's middle, off every corner
+    s.wait_ready(60)
+    log("proof", round=attempt + 1, cuts=len(kept), skipped=skipped)
+    answer = ask(s, confirm, attempt, rescan)
+    log("proof_answer", round=attempt + 1, answer=answer)
+    if answer == "y":
+        return True
+    if answer == "r" and rescan:
+        log.say(f"rescanning (proof round {attempt + 2} of {proof.ROUNDS})")
+        return False
+    raise CutError("stopped at the proof cuts: nothing else was cut")
+
+
+def ask(s: Session, confirm: Confirm, attempt: int, rescan: bool, poll_s: float = 10.0) -> str:
+    """The operator's answer; meanwhile a status poll every ``poll_s`` s, so the machine hears
+    from us while they look. No answer (stdin closed) means stop."""
+    answer: list[str] = []
+
+    def wait() -> None:
+        with contextlib.suppress(Exception):  # EOF on stdin, a closed terminal: treated as q
+            answer.append(confirm(attempt, rescan))
+
+    th = threading.Thread(target=wait, name="proof-answer", daemon=True)
+    th.start()
+    while th.is_alive():
+        th.join(poll_s)
+        if th.is_alive():
+            s.status()
+    return answer[0] if answer else "q"
 
 
 def probe(frame: Frame, t: Transport, log: SessionLog, starts: list[tuple[float, float]]) -> dict:

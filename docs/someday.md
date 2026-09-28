@@ -10,8 +10,5 @@ None of these block cutting. Background: `studio-capture.md`.
 - **Unknown commands, replayed verbatim:** `FM0`, `TR0,1`/`TR0,0`, `APS30`/`APS0`, `TB0`, the
   second `TB99`, Studio's `ESC SYN` poll (its reply flips before a mat finishes loading), and
   `FQ1` (3) and `FQ5` (-64 after every successful scan, straight or tilted).
-- **A registration check.** The machine reports no mark positions: no known query changes with
-  a tilted sheet, and Studio never asks. If misregistration recurs, add proof ticks: a few short
-  cuts in the margin, then `y` to cut, `r` to rescan, `q` to quit.
 - **USB transport:** written, never run on hardware.
 - **A blog post and a standalone library** for other Cameo owners fighting Silhouette Studio.

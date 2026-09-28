@@ -275,6 +275,14 @@ def cut(
             "--probe", help="scan the marks and log what the machine reports before and after; cut nothing"
         ),
     ] = False,
+    proof: Annotated[
+        bool,
+        typer.Option(
+            "--proof",
+            help="after the scan, score each mark's L over the print and wait: y cuts, r rescans, q stops "
+            "(four L-marks only)",
+        ),
+    ] = False,
     scan_start: Annotated[
         list[str] | None,
         typer.Option(
@@ -314,7 +322,7 @@ def cut(
         svg=svg, dry_run=dry_run,
         reg_length=reg_length, reg_thickness=reg_thickness, reg_inset=reg_inset,
         label=info.name if info else None,
-        probe=probe, scan_starts=[parse_start(v) for v in scan_start or []] or None,
+        probe=probe, proof=proof, scan_starts=[parse_start(v) for v in scan_start or []] or None,
     )  # fmt: skip
     try:
         rc = cutting.run_cut(o)
