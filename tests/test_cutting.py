@@ -129,6 +129,6 @@ def test_run_cut_fails_instead_of_reporting_done_when_nothing_was_sent(tmp_path,
         return subprocess.CompletedProcess(argv, 0)
 
     monkeypatch.setattr(cutting.subprocess, "run", fake_driver)
-    o = cutting.CutOptions(svg=svg, out_dir=tmp_path)
+    o = cutting.CutOptions(svg=svg, out_dir=tmp_path, legacy=True)
     with pytest.raises(cutting.CutError, match="NOTHING WAS CUT over ble: No Graphtec"):
         cutting.run_cut(o)

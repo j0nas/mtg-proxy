@@ -8,10 +8,12 @@ requires-python = ">=3.12,<3.13"
 # The vendored silhouette-card-maker engine is imported in-process, so its pinned
 # requirements.txt is mirrored here (same versions) plus the CLI framework.
 dependencies = [
+    "bleak==3.0.2",
     "click==8.4.2",
     "cloudscraper==1.2.71",
     "ezdxf==1.4.4",
     "filetype==1.2.0",
+    "libusb1==3.4.0",
     "matplotlib==3.11.1",
     "mtg_parser==0.0.1a55",
     "natsort==8.4.0",
@@ -22,6 +24,7 @@ dependencies = [
     "pypdfium2==5.12.1",
     "requests==2.34.2",
     "split-image==2.0.5",
+    "svgelements==1.9.6",
     "typer==0.21.1",
 ]
 

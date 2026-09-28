@@ -171,9 +171,9 @@ Stored in `data/offset_data.json`, tracked, applied to every double-sided PDF.
 
 `cut-proxies` skips Silhouette Studio. Studio with Alpha firmware 1.05 mis-detects the machine
 as a plain Cameo 5 and picks the registration scan on its own, which is how a working sheet
-turns into a morning of failed scans. This drives the Cameo over Bluetooth LE (`--usb` for the
-cable) with [inkscape-silhouette](https://github.com/fablabnbg/inkscape-silhouette) and sends the
-scan command explicitly: `-r 4` is the four-L-mark scan, `-r 3` the square plus two L's.
+turns into a morning of failed scans. It drives the Cameo over Bluetooth LE (`--usb` for the
+cable) with its own driver, `src/mtgproxy/cameo/`, and sends the scan command explicitly: `-r 4`
+is the four-L-mark scan, `-r 3` the square plus two L's.
 
 ```sh
 cd mydeck && cut-proxies   # reads run.json: paper, card size, mark pattern
@@ -181,29 +181,48 @@ cut-proxies --run mydeck   # same, from the parent folder
 cut-proxies --usb          # over the cable instead of Bluetooth LE
 cut-proxies --scan         # list the Bluetooth devices in range
 cut-proxies --passes 4     # also --force/--speed/--depth, --x-off/--y-off
-cut-proxies --dry-run      # simulates a found scan, runs the whole cut, fails if anything is clipped
-cut-proxies --preview
-cut-proxies --svg job.svg --reg-length 9.4 --reg-thickness 1 --cut-beyond 12   # any page-sized SVG
+cut-proxies --dry-run      # no machine: runs the whole job against a stand-in, checks the bounds
+cut-proxies --probe        # scans the marks, logs what the machine reports, cuts nothing
+cut-proxies --svg job.svg --reg-inset 5   # any page-sized SVG
+cut-proxies --legacy-driver               # the vendored inkscape-silhouette, as a fallback
 ```
 
-Registration flags, learned on the first real driver cut (2026-09-28, the silhouette-deckbox
-print-and-cut job). All three go through `src/mtgproxy/regmark_launch.py`, a thin wrapper around
-the unmodified driver:
+Why our own driver (2026-09-28): registration was inconsistent under identical conditions, and
+inkscape-silhouette made it worse. The job now follows Studio's recorded conversation with this
+machine (`docs/studio-capture.md`). It ended every job by moving the machine's origin below the
+cut (`SO0`), so the next scan on that mat started from the wrong place. It started the search
+on the paper's corner, where the paper edge reads like a mark line. It hard-coded a 20 × 0.5 mm
+mark description, and it treated the first reply after a scan as final. `mtgproxy.cameo`:
 
-- `--reg-length` / `--reg-thickness` (mm) announce the size of the marks actually printed.
-  Before each scan the driver sends a hard-coded mark description of 20 × 0.5 mm (`TB51,400` /
-  `TB53,10`). Studio announces the real size: 9.40 × 0.99 mm for the card-maker's A4 marks.
-- `--cut-beyond MM`: with registration on, the driver clips every cut to the rectangle between
-  the marks, clamping outside points onto its edge. This widens that box right and down. The
-  Cameo 5 line receives no hardware cutting-area limit at the frame. Don't use the driver's own
-  `--sw_clipping False`: it only makes the clamped segments get cut, as straight lines along the
-  frame. Nothing may sit above or left of the top-left mark. The margin must also cover the
-  +1 mm y-offset.
+- `geometry`: the SVG → polylines in page mm. Everything inside an outline is cut before it,
+  nearest start first. Closed loops are cut as continuous laps with a 0.5 mm overcut.
+- `protocol`: the GP-GL strings. The blade setup is byte for byte what worked before; the tests
+  pin it.
+- `transport`: Bluetooth LE (bleak), USB (libusb1), or a recording stand-in for dry runs.
+- `session`: preflight (refuses without a loaded mat), blade setup, mark description and scan,
+  and the cut in ≤1 KB pieces with a status wait between them. After anything moved, it always
+  returns to the origin, and it never moves the origin.
+
+Registration:
+
+- `--reg-length` / `--reg-thickness` (mm, default 9.4 × 1, the card-maker's A4 marks) describe
+  the printed marks before the scan.
+- `--scan-start TOP,LEFT` (mm from the loaded origin, repeatable) sets where the sensor starts
+  searching. The default is Studio's own geometry, read from a recording of Studio driving this
+  machine (`docs/studio-capture.md`): above the top-left mark's horizontal leg, just past its
+  vertical leg, so the sensor crosses a mark line and not the paper edge. That is (2.5, 11.5) at
+  a 10 mm inset. The scan is tried twice, and each attempt is logged.
 - `--reg-inset MM` moves the expected marks from the layout's 10 mm toward the paper edge,
   which gives a design more height. It must match the printed marks.
+- Nothing may be cut above or left of the top-left mark (negative coordinates are untested), and
+  nothing off the paper. Keep 6 mm around every mark free of print (Graphtec's guidance): anything
+  near a mark can be read as one.
 
-`--dry-run` now answers the scan itself and reports the cut's extent and any clipped points. A
-plain dry run used to stop at the scan, which hid the clipping.
+Every run writes `output/cut/<name>.session.jsonl`: each byte sent and received, with
+timestamps, plus the Bluetooth movement events. `--probe` asks every query that might report the
+detected marks (FQ5, the GP-GL O* outputs, `[`, `U`, …) before and after a scan. Run it twice
+with the sheet moved a known distance; a reply that moves with it is a readback we can check
+against tolerances.
 
 Run it on the Mac. On Windows, libusb means replacing Silhouette's driver with WinUSB, which
 breaks Studio.

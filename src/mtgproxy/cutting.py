@@ -62,6 +62,11 @@ class CutOptions:
     reg_inset: float | None = None
     out_dir: Path = field(default_factory=lambda: ROOT / "output" / "cut")
     label: str | None = None  # deck name, for log/transcript file names
+    # Our own driver (mtgproxy.cameo) unless this is set; the vendored inkscape-silhouette stays
+    # available as a fallback until ours has cut real sheets.
+    legacy: bool = False
+    probe: bool = False  # scan and query the machine, cut nothing (see cameo.driver.probe)
+    scan_starts: list[tuple[float, float]] | None = None  # (top, left) mm; None = the driver's defaults
 
 
 def driver_argv(o: CutOptions, geom: layout.Geometry, x_off: float, y_off: float, name: str) -> list[str]:
@@ -173,19 +178,18 @@ def ensure_driver() -> None:
 
 
 def ble_scan() -> int:
-    ensure_driver()
-    argv = [
-        str(DRV_PY), str(DRV / "sendto_silhouette.py"),
-        "--connection_type=ble", "--bluetooth_scan=True", "--preview", "False",
-        str(DRV / "examples" / "testcut_square_triangle.svg"),
-    ]  # fmt: skip
-    return subprocess.call(argv)
+    from .cameo.transport import BleTransport
+
+    found = BleTransport.discover()
+    print(f"Found {len(found)} Bluetooth LE device(s):")
+    for address, name in found:
+        print(f"    {address}   {name or '(unnamed)'}")
+    return 0
 
 
 def run_cut(o: CutOptions) -> int:
     if o.registration not in SCAN_COMMAND:
         raise CutError("--registration must be 3 or 4")
-    ensure_driver()
     o.out_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Cut geometry from the card-maker's own layout engine (same source as the PDF).
@@ -206,6 +210,9 @@ def run_cut(o: CutOptions) -> int:
     x_off = cfg_x if o.x_off is None else o.x_off
     y_off = cfg_y if o.y_off is None else o.y_off
 
+    if not o.legacy:
+        return run_ours(o, svg, name, geom, (x_off, y_off))
+    ensure_driver()
     argv = command(o, driver_argv(o, geom, x_off, y_off, name), svg)
     what = f"{geom.cards} cards" if o.svg is None else svg.name
     print(
@@ -295,3 +302,72 @@ def run_cut(o: CutOptions) -> int:
         f"cut-proxies: done — {what} cut. Don't eject yet: lift a corner and rerun with more --passes if needed."
     )
     return 0
+
+
+def run_ours(o: CutOptions, svg: Path, name: str, geom: layout.Geometry, bias: tuple[float, float]) -> int:
+    """cut-proxies on mtgproxy.cameo: our geometry, our protocol, our registration."""
+    from .cameo import driver, protocol, session
+    from .cameo.transport import TransportError
+
+    frame = session.Frame(
+        page_w=geom.page_w_mm,
+        page_h=geom.page_h_mm,
+        inset=geom.reg_inset_mm,
+        width=geom.reg_x_mm,
+        height=geom.reg_y_mm,
+        length=9.4 if o.reg_length is None else o.reg_length,
+        thickness=1.0 if o.reg_thickness is None else o.reg_thickness,
+        marks=int(o.registration),
+    )
+    try:
+        blade = protocol.Blade(o.force, o.speed, o.depth)
+        job = driver.plan(svg, frame, blade, o.passes, bias)
+    except (ValueError, session.CutError) as e:
+        raise CutError(str(e)) from e
+    starts = o.scan_starts or driver.default_starts(frame)
+    what = f"{geom.cards} cards" if o.svg is None else svg.name
+    via = "nothing (dry run)" if o.dry_run else o.connection
+    print(
+        f"cut-proxies: {name} — {what}, {o.registration}-mark registration "
+        f"(marks inset {frame.inset:g} mm, {frame.width:g} x {frame.height:g} mm apart, "
+        f"{frame.length:g} x {frame.thickness:g} mm)"
+    )
+    print(
+        f"cut-proxies: force {o.force} · speed {o.speed} · depth {o.depth} · passes {o.passes} · "
+        f"offset x={bias[0]:g}mm y={bias[1]:g}mm · via {via}"
+    )
+    if o.cut_beyond:
+        print("cut-proxies: (--cut-beyond is for --legacy-driver only; ours checks the paper edge instead)")
+    log_path = o.out_dir / f"{name}.session.jsonl"
+    log = session.SessionLog(log_path, echo=lambda m: print(f"cut-proxies: {m}"))
+    try:
+        t = driver.open_transport(o.connection, o.ble_name, log, o.dry_run)
+        if o.probe:
+            report = driver.probe(frame, t, log, starts)
+            print(probe_table(report["replies"]))
+            print(f"cut-proxies: probe done; log {log_path}")
+            return 0
+        result = driver.cut(job, t, log, starts)
+    except (session.CutError, TransportError) as e:
+        raise CutError(f"{e}\ncut-proxies: session log: {log_path}") from e
+    finally:
+        log.close()
+    x0, y0, x1, y1 = result.extent
+    print(f"cut-proxies: cut spans x {x0:.2f}..{x1:.2f}, y {y0:.2f}..{y1:.2f} mm from the top-left mark")
+    if o.dry_run:
+        transcript = o.out_dir / f"{name}.cmds"
+        transcript.write_bytes(bytes(t.sent))
+        print(f"cut-proxies: dry run OK — transcript {transcript}, session log {log_path}")
+        return 0
+    print(
+        f"cut-proxies: done — {what} cut. Don't eject yet: lift a corner and rerun with more --passes if needed."
+    )
+    return 0
+
+
+def probe_table(replies: dict[str, list[str | None]]) -> str:
+    rows = [f"{'query':6} {'before scan':24} {'after scan':24}"]
+    for q, (before, after) in replies.items():
+        mark = "  <- changed" if before != after else ""
+        rows.append(f"{q:6} {before!s:24} {after!s:24}{mark}")
+    return "\n".join(rows)

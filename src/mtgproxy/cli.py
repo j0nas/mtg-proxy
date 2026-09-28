@@ -28,6 +28,14 @@ app = typer.Typer(
 )
 
 
+def parse_start(value: str) -> tuple[float, float]:
+    try:
+        top, left = (float(v) for v in value.split(","))
+    except ValueError:
+        fail(f"--scan-start wants TOP,LEFT in mm, got {value!r}")
+    return top, left
+
+
 def fail(msg: str, code: int = 1) -> None:
     typer.echo(f"error: {msg}", err=True)
     raise typer.Exit(code)
@@ -275,8 +283,29 @@ def cut(
         ),
     ] = None,
     preview: Annotated[
-        bool, typer.Option("--preview", help="matplotlib preview window before sending")
+        bool, typer.Option("--preview", help="matplotlib preview window before sending (--legacy-driver)")
     ] = False,
+    legacy_driver: Annotated[
+        bool,
+        typer.Option(
+            "--legacy-driver", help="cut with the vendored inkscape-silhouette instead of our own driver"
+        ),
+    ] = False,
+    probe: Annotated[
+        bool,
+        typer.Option(
+            "--probe", help="scan the marks and log what the machine reports before and after; cut nothing"
+        ),
+    ] = False,
+    scan_start: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--scan-start",
+            metavar="TOP,LEFT",
+            help="where the mark search starts, mm from the loaded origin; repeat to retry in order "
+            "(default: Studio's start, above the top-left mark's horizontal leg; tried twice)",
+        ),
+    ] = None,
 ) -> None:
     if scan:
         raise typer.Exit(cutting.ble_scan())
@@ -302,6 +331,7 @@ def cut(
         reg_length=reg_length, reg_thickness=reg_thickness, cut_beyond=cut_beyond, reg_inset=reg_inset,
         extra=list(ctx.args),
         label=info.name if info else None,
+        legacy=legacy_driver, probe=probe, scan_starts=[parse_start(v) for v in scan_start or []] or None,
     )  # fmt: skip
     try:
         rc = cutting.run_cut(o)
