@@ -169,6 +169,9 @@ def test_cli_cut_takes_geometry_from_sidecar(tmp_path, monkeypatch):
     r = runner.invoke(app, ["cut", "--run", str(tmp_path), "-r", "4"])
     assert captured["registration"] == "4"  # explicit flag wins
     assert isinstance(captured["out_dir"], Path)
+    assert captured["connection"] == "ble"  # Bluetooth unless asked otherwise
+    r = runner.invoke(app, ["cut", "--run", str(tmp_path), "--usb"])
+    assert captured["connection"] == "usb"
 
 
 def test_move_tokens_last_reindexes_by_token_name(tmp_path, monkeypatch):

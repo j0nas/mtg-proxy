@@ -91,6 +91,7 @@ def main(argv: list[str]) -> None:
     beyond = opts.get("beyond", 0.0)
     simulate = os.environ.get("MTGPROXY_SIMULATE_SCAN") == "1"
     seen: set[str] = set()
+    scanned = False
 
     sys.path.insert(0, driver_dir)
     # The driver's package is only importable once driver_dir is on the path.
@@ -100,6 +101,8 @@ def main(argv: list[str]) -> None:
     original_send, original_clip = cameo.send_command, cameo.clip_point
 
     def send_command(self, cmd, *args, **kwargs):
+        nonlocal scanned
+        scanned = scanned or is_scan(cmd)
         result = original_send(self, rewrite(cmd, repl, seen), *args, **kwargs)
         if simulate and self.transport is None and is_scan(cmd):
             self.mock_response = SCAN_FOUND  # dry run only: pretend all marks were found
@@ -114,7 +117,12 @@ def main(argv: list[str]) -> None:
     cameo.clip_point = clip_point
 
     def report() -> None:
-        if "--regmark" in driver_args and driver_args[driver_args.index("--regmark") + 1] == "True":
+        # No scan, no cut (the driver stopped earlier, e.g. no machine found): nothing to report.
+        if (
+            scanned
+            and "--regmark" in driver_args
+            and driver_args[driver_args.index("--regmark") + 1] == "True"
+        ):
             missing = [c for c in repl if c not in seen]
             if missing:
                 print(

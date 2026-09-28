@@ -101,7 +101,7 @@ Generated: {c.today} | paper: {c.paper} | card: {c.card_size} | registration: {c
 - Feed the sealed edge first. Re-laminate cut cards once more at the end to seal edges.
 
 ## Cut (Cameo 5 Alpha)
-**Preferred — no Studio:** with the Cameo on USB or Bluetooth from the Mac, `cd` into this
+**Preferred — no Studio:** with the Cameo on and in Bluetooth range of the Mac (`--usb` for the cable), `cd` into this
 folder and run `cut-proxies` (it reads run.json here: {c.registration}-mark scan, {c.paper} paper;
 see README §5). Explicit form: `cut-proxies -r {c.registration}{paper_flag}`.
 Studio fallback:

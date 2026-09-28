@@ -44,7 +44,7 @@ class CutOptions:
     passes: int = 3
     x_off: float | None = None
     y_off: float | None = None
-    connection: str = "usb"  # usb | ble
+    connection: str = "ble"  # ble | usb
     ble_name: str = "CAMEO 5 ALPHA"
     svg: Path | None = None
     dry_run: bool = False
@@ -80,7 +80,9 @@ def driver_argv(o: CutOptions, geom: layout.Geometry, x_off: float, y_off: float
         "--logfile", str(o.out_dir / f"{name}.log"),
         "--cmdfile", str(o.out_dir / f"{name}.cmds"),
     ]  # fmt: skip
-    if o.connection == "ble":
+    if o.connection == "ble" and not o.dry_run:
+        # A dry run stays off the air: with a BLE name the driver would find and connect to the
+        # machine even then, and the simulated scan needs no device at all.
         args += ["--connection_type", "ble", "--bluetooth_name", o.ble_name]
     if o.dry_run:
         # No device to answer the firmware query in a dry run: pin the model so the
@@ -140,6 +142,26 @@ def mark_commands_in(transcript: str) -> tuple[str | None, str | None]:
     return (length.group(1) if length else None, thickness.group(1) if thickness else None)
 
 
+def reached_cut(log: str) -> bool:
+    """Did the driver get as far as sending the cut? It logs its final bounding box after the mark
+    scan, right before the cut paths go out. Failing to connect or finding no media loaded happen
+    earlier: the driver reports them, swallows them and still exits 0."""
+    return "Final bounding box and point counts:" in log
+
+
+DRIVER_ERRORS = re.compile(
+    r"^(No Graphtec Silhouette devices found\.|Could not open Bluetooth.*|Could not query cutter status.*"
+    r"|No media is loaded.*|Cannot determine whether media is loaded.*)$",
+    re.M,
+)
+
+
+def driver_error(log: str) -> str | None:
+    """The driver's own reason for stopping before the cut, if it logged a known one."""
+    m = DRIVER_ERRORS.search(log)
+    return m.group(1) if m else None
+
+
 def scan_command_in(transcript: str) -> str | None:
     m = re.search(r"TB12[34],[0-9,]*", transcript)
     return m.group(0) if m else None
@@ -185,8 +207,9 @@ def run_cut(o: CutOptions) -> int:
     y_off = cfg_y if o.y_off is None else o.y_off
 
     argv = command(o, driver_argv(o, geom, x_off, y_off, name), svg)
+    what = f"{geom.cards} cards" if o.svg is None else svg.name
     print(
-        f"cut-proxies: {name} — {geom.cards} cards, {o.registration}-mark registration "
+        f"cut-proxies: {name} — {what}, {o.registration}-mark registration "
         f"(marks inset {geom.reg_inset_mm}mm, {geom.reg_x_mm}x{geom.reg_y_mm}mm apart)"
     )
     print(
@@ -249,7 +272,26 @@ def run_cut(o: CutOptions) -> int:
         except OSError:
             pass
         raise CutError(msg)
+    try:
+        log = (o.out_dir / f"{name}.log").read_text(errors="replace")
+    except OSError:
+        log = ""
+    if not reached_cut(log):
+        reason = driver_error(log) or "the driver stopped before the cut"
+        if "media" in reason:
+            hint = "Load the mat (the Cameo's load button), then rerun."
+        elif o.connection == "ble":
+            hint = (
+                "Is the Cameo on, in range, and not connected to Studio or a phone? "
+                "`cut-proxies --scan` lists what's advertising."
+            )
+        else:
+            hint = "Is the cable plugged in and the Cameo on? Drop --usb to cut over Bluetooth."
+        raise CutError(
+            f"NOTHING WAS CUT over {o.connection}: {reason}\ncut-proxies: {hint}\n"
+            f"cut-proxies: log: {o.out_dir / f'{name}.log'}"
+        )
     print(
-        f"cut-proxies: done — {geom.cards} cards cut. Don't eject yet: lift a corner and rerun with more --passes if needed."
+        f"cut-proxies: done — {what} cut. Don't eject yet: lift a corner and rerun with more --passes if needed."
     )
     return 0

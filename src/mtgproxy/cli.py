@@ -229,8 +229,12 @@ def cut(
     x_off: Annotated[
         float | None, typer.Option("--x-off", help="shift cuts right by MM (default: data/cut_offset.json)")
     ] = None,
-    ble: Annotated[bool, typer.Option("--ble", help="connect over Bluetooth LE (default USB)")] = False,
-    ble_name: Annotated[str, typer.Option("--ble-name", help="advertised BLE name")] = "CAMEO 5 ALPHA",
+    ble: Annotated[
+        bool, typer.Option("--ble/--usb", help="connect over Bluetooth LE (default) or the USB cable")
+    ] = True,
+    ble_name: Annotated[
+        str, typer.Option("--ble-name", help="advertised BLE name; a substring is enough")
+    ] = "CAMEO 5 ALPHA",
     scan: Annotated[bool, typer.Option("--scan", help="list nearby BLE devices, then stop")] = False,
     svg: Annotated[
         Path | None, typer.Option("--svg", help="cut this SVG instead of generating one (page-sized, mm)")

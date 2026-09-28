@@ -171,14 +171,15 @@ Stored in `data/offset_data.json`, tracked, applied to every double-sided PDF.
 
 `cut-proxies` skips Silhouette Studio. Studio with Alpha firmware 1.05 mis-detects the machine
 as a plain Cameo 5 and picks the registration scan on its own, which is how a working sheet
-turns into a morning of failed scans. This drives the Cameo over USB or Bluetooth LE with
-[inkscape-silhouette](https://github.com/fablabnbg/inkscape-silhouette) and sends the scan
-command explicitly: `-r 4` is the four-L-mark scan, `-r 3` the square plus two L's.
+turns into a morning of failed scans. This drives the Cameo over Bluetooth LE (`--usb` for the
+cable) with [inkscape-silhouette](https://github.com/fablabnbg/inkscape-silhouette) and sends the
+scan command explicitly: `-r 4` is the four-L-mark scan, `-r 3` the square plus two L's.
 
 ```sh
 cd mydeck && cut-proxies   # reads run.json: paper, card size, mark pattern
 cut-proxies --run mydeck   # same, from the parent folder
-cut-proxies --ble          # Bluetooth, no cable
+cut-proxies --usb          # over the cable instead of Bluetooth LE
+cut-proxies --scan         # list the Bluetooth devices in range
 cut-proxies --passes 4     # also --force/--speed/--depth, --x-off/--y-off
 cut-proxies --dry-run      # simulates a found scan, runs the whole cut, fails if anything is clipped
 cut-proxies --preview
