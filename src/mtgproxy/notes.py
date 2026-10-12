@@ -79,8 +79,9 @@ form: `cut-proxies -r {c.registration}{paper_flag}`.
    laminate edge.
 2. Laminate settings by default: **Force {lam.force} · Speed {lam.speed} · Depth {lam.depth} · Passes {lam.passes}**.
    Plain paper: `--preset paper` (Force {paper.force} · Speed {paper.speed} · Depth {paper.depth} · Passes {paper.passes}).
-3. Don't eject yet: lift a corner. If a cut isn't through, rerun with `--passes 1` (it rescans
-   the marks). Rippled or torn edges mean too much force or a dull blade.
+3. Don't eject yet: lift a corner. If a cut isn't through, answer "one more pass" when
+   cut-proxies asks what's next (it rescans the marks and cuts once). Rippled or torn edges
+   mean too much force or a dull blade.
 """
 
 

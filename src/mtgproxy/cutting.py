@@ -170,9 +170,7 @@ def run_cut(o: CutOptions) -> int:
         transcript.write_bytes(bytes(t.sent))
         print(f"cut-proxies: dry run OK — transcript {transcript}, session log {log_path}")
         return 0
-    print(
-        f"cut-proxies: done — {what} cut. Don't eject yet: lift a corner and rerun with more --passes if needed."
-    )
+    print(f"cut-proxies: done — {what} cut. Don't eject yet: lift a corner and check it's through.")
     return 0
 
 

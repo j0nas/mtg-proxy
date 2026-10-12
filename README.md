@@ -157,8 +157,14 @@ Stored in `data/offset_data.json`, tracked, applied to every double-sided PDF.
 `src/mtgproxy/cameo/`, and sends the scan command explicitly: `-r 4` is the four-L-mark scan,
 `-r 3` the square plus two L's.
 
+Run bare at a terminal, `cut-proxies` asks first. Enter cuts the default: this folder's
+`run.json`, or a plain A4 sheet (standard cards, four L-marks) when there is none, with the
+laminate preset over Bluetooth LE. "Choose…" picks another run below this folder, the preset, and
+cut, proof first, dry run or probe. `--usb` and `--ble-name` keep the menu; any other flag, or a
+pipe, skips it and cuts as told.
+
 ```sh
-cd mydeck && cut-proxies   # reads run.json: paper, card size, mark pattern
+cd mydeck && cut-proxies   # menu; Enter cuts this run (paper, card size, mark pattern from run.json)
 cut-proxies --run mydeck   # same, from the parent folder
 cut-proxies --preset paper # plain paper instead of laminate
 cut-proxies --passes 4     # also --force/--speed/--depth, --x-off/--y-off
@@ -177,9 +183,13 @@ Settings, AutoBlade only (the Kraft blade can't turn the 3 mm corners):
 | `laminate` (default): 130–135 gsm glossy in 80 µm pouches | 20 | 25 | 4 | 3 |
 | `paper`: plain copier paper, cut through | 10 | 5 | 1 | 1 |
 
-Explicit flags override the preset. Run one sheet, don't eject, lift a corner, and rerun with
-`--passes 1` if a cut isn't through (it rescans the marks). Rippled edges mean too much force or
-a dull blade. Max force or speed makes the machine skip; power-cycle to rehome.
+Explicit flags override the preset. Don't eject after a cut: lift a corner. At a terminal,
+cut-proxies then asks what's next. "Next sheet" runs the same job again after you swap the sheet,
+counting sheets as it goes. "One more pass" rescans the marks and cuts this sheet once more, for a
+cut that isn't through. "Done" stops. When a job fails (marks not found, proof stopped, the
+connection lost), it offers to try the same job again. From a script, a failure exits, and
+`--passes 1` is the extra pass.
+Rippled edges mean too much force or a dull blade. Max force or speed makes the machine skip; power-cycle to rehome.
 
 The job follows Silhouette Studio's own conversation with this machine, recorded over Bluetooth
 (`docs/studio-capture.md`). `mtgproxy.cameo`:

@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import shutil
 import sys
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Annotated
 
 import typer
+from click.core import ParameterSource
 
-from . import __version__, build, cutting, engine, manifest, notes, printing, trim
+from . import __version__, build, cutmenu, cutting, engine, manifest, notes, printing, trim
 from . import backlog as backlog_mod
 from .backlog import Backlog, BacklogError, Entry
 from .cache import ImageCache
@@ -213,10 +215,12 @@ def notes_cmd(
 @app.command(
     help=(
         "Cut a printed sheet on the Cameo 5 Alpha. Reads run.json from the current directory (or --run) "
-        "for paper/card/registration; flags override."
+        "for paper/card/registration; flags override. With no flags at a terminal, asks first "
+        "(Enter cuts the default)."
     ),
 )
 def cut(
+    ctx: typer.Context,
     run: Annotated[
         Path | None, typer.Option("--run", help="run.json (or its folder) of the sheet to cut")
     ] = None,
@@ -297,9 +301,16 @@ def cut(
         raise typer.Exit(cutting.ble_scan())
     if preset not in cutting.PRESETS:
         fail(f"--preset must be one of {', '.join(cutting.PRESETS)}, got {preset!r}")
+    plain = False
+    if _cut_menu_wanted(ctx):
+        picked = cutmenu.ask(Path.cwd(), "Bluetooth" if ble else "USB")
+        if picked is None:
+            raise typer.Exit()
+        run, plain, preset = picked.run, picked.run is None, picked.preset
+        dry_run, proof, probe = (picked.mode == m for m in ("dry-run", "proof", "probe"))
     blade = cutting.PRESETS[preset]
     info: RunInfo | None = None
-    sidecar = find_sidecar(run)
+    sidecar = None if plain else find_sidecar(run)
     if sidecar is not None:
         info = RunInfo.read(sidecar)
         typer.echo(
@@ -307,7 +318,7 @@ def cut(
         )
     elif run is not None:
         fail(f"no run.json at {run}")
-    else:
+    elif not plain:
         typer.echo("cut-proxies: no run.json in the current directory — using flags/defaults", err=True)
     o = cutting.CutOptions(
         paper=paper or (info.paper if info else "a4"),
@@ -324,11 +335,47 @@ def cut(
         label=info.name if info else None,
         probe=probe, proof=proof, scan_starts=[parse_start(v) for v in scan_start or []] or None,
     )  # fmt: skip
-    try:
-        rc = cutting.run_cut(o)
-    except (cutting.CutError, engine.EngineMissing, LayoutError, RuntimeError) as e:
-        fail(str(e))
+    job, sheet = o, 1
+    while True:
+        try:
+            rc = cutting.run_cut(o)
+        except cutting.CutError as e:
+            if not _at_terminal():
+                fail(str(e))
+            typer.echo(f"error: {e}", err=True)
+            if cutmenu.after_error(sheet) == "retry":
+                continue
+            raise typer.Exit(1) from None
+        except (engine.EngineMissing, LayoutError, RuntimeError) as e:
+            fail(str(e))
+        if rc or o.dry_run or o.probe:
+            break
+        if not _at_terminal():
+            typer.echo("cut-proxies: not through? Rerun with --passes 1 (it rescans the marks).")
+            break
+        then = cutmenu.after_cut(sheet)
+        if then == "next":
+            o, sheet = job, sheet + 1
+        elif then == "pass":
+            o = replace(job, passes=1, proof=False)  # same sheet, marks already proven
+        else:
+            break
     raise typer.Exit(rc)
+
+
+# The connection is never asked in the menu, only set by flag, so these keep it.
+CUT_MENU_KEEPS = {"ble", "ble_name"}
+
+
+def _at_terminal() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _cut_menu_wanted(ctx: typer.Context) -> bool:
+    """A bare `cut` at a terminal asks first; any other flag, or a pipe, cuts as told."""
+    return _at_terminal() and all(
+        ctx.get_parameter_source(p) is ParameterSource.DEFAULT for p in ctx.params if p not in CUT_MENU_KEEPS
+    )
 
 
 @app.command(
