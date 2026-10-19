@@ -140,3 +140,18 @@ def test_an_oversized_command_still_goes_out_whole():
     finally:
         session.CHUNK_BYTES = old
     assert b"D320,1100,1120,1100\x03" in t.sent  # longer than a chunk, sent intact
+
+
+# --- watching the mat between sheets ------------------------------------------------
+def test_a_reload_is_the_mat_going_out_then_coming_back_ready():
+    statuses = [b"0\x03", b"0\x03", b"2\x03", b"2\x03", b"0\x03"]  # in, out, back in
+    t = machine({b"\x1b\x05": statuses})
+    waits = []
+    assert driver.wait_for_reload(t, log(), lambda s: waits.append(s) or False)
+    assert len(waits) == 4 and sent(t) == "\x1b\x05" * 5  # only the status query, nothing moves
+
+
+def test_a_mat_that_never_leaves_is_no_reload():
+    t = machine()  # "ready" throughout: the sheet just cut is still in
+    polls = iter([False, False, True])  # the operator gives up on the third wait
+    assert not driver.wait_for_reload(t, log(), lambda s: next(polls))

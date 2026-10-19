@@ -32,18 +32,33 @@ DRY_ANSWERS = {
 PROBE_QUERIES = ("FQ0", "FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6", "FQ7", "FQ8", "FQ9", "[", "U", "TB71", "FA")
 
 
+POUCH_BORDER = 4.0  # mm: how far in the paper can sit when a pouch's edge is on the grid
+
+
 def default_starts(frame: Frame) -> list[tuple[float, float]]:
     """Where the mark search starts, (top, left) mm from the origin, tried twice.
 
-    Studio's start for its 10 mm inset is (2.5, 11.5) on this machine (PacketLogger capture,
-    docs/studio-capture.md): 7.5 mm above the top-left mark's horizontal leg, 0.5 mm past its
-    vertical leg, so the sensor travels down onto a mark line. The old driver started at the
-    paper's corner (0, 0), running the sensor along the paper edge instead. For a smaller inset
-    the top stays on the paper (at most 2.5 mm, and never more than halfway to the mark), and the
-    left stays at 11.5 mm, further along the leg: at a 5 mm inset, starting 1.5 mm past the
-    vertical leg skewed the cut; starting at 11.5 did not (calibration sheets, 2026-09-28)."""
-    top = max(frame.inset - 7.5, min(2.5, frame.inset / 2))
-    left = max(frame.inset + frame.thickness + 0.5, min(11.5, frame.inset + frame.length - 1))
+    The sensor travels down from here onto the top-left mark's horizontal leg, and its baseline
+    is seeded from whatever is under the start. So the start must be on paper, with room on every
+    side of the mark, wherever the sheet really sits: a laminated sheet placed by the pouch's
+    edge has its paper about 3 mm further in, by however far it slid in the pouch.
+
+    The top is 6 mm into the paper, past a pouch border, or halfway to the mark when the inset is
+    too small for 4 mm above the leg. The left keeps 2 mm from the vertical leg with the paper up
+    to POUCH_BORDER further right, and 2.4 mm from the horizontal leg's end with it on the grid.
+    That gives (6, 17) at the card sheets' 10 mm inset; the deck box keeps its proven (2.5, 11.5)
+    at 5 mm.
+
+    Studio starts at (2.5, 11.5) at its 10 mm inset (docs/studio-capture.md): 0.5 mm past the
+    vertical leg, and off the paper whenever the pouch border above it is wider than 2.5 mm. On
+    laminate that failed now and then (2026-10-20). (6, 15) fixed the top, then missed once on a
+    sheet whose left border was 4.08 mm: the start sat on the vertical leg's edge. At a 5 mm
+    inset, starting 0.5 mm past the vertical leg skewed the cut; 11.5 did not (calibration
+    sheets, 2026-09-28)."""
+    top = max(min(6.0, frame.inset - 4), frame.inset / 2)
+    near = frame.inset + frame.thickness  # the vertical leg's inner edge, paper on the grid
+    far = frame.inset + frame.length  # the horizontal leg's end
+    left = min(11.5, far - 2) if frame.inset <= 5 else min(near + POUCH_BORDER + 2, far - 2.4)
     return [(top, left), (top, left)]
 
 
@@ -186,6 +201,28 @@ def probe(frame: Frame, t: Transport, log: SessionLog, starts: list[tuple[float,
         return {"firmware": firmware, "start": start, "replies": replies}
     finally:
         wrap_up(s, t, log)
+
+
+def wait_for_reload(
+    t: Transport, log: SessionLog, interrupted: Callable[[float], bool], poll_s: float = 0.5
+) -> bool:
+    """Poll the status until the mat has gone out ("unloaded") and come back in ("ready"): True.
+    ``interrupted(poll_s)`` waits between polls and returns True to give up (False is returned).
+    Only the status query is sent, so nothing moves and nothing needs undoing.
+
+    On the machine (2026-10-20) a reload reads unloaded → CONTROL "0" → ready, with no "moving"
+    in between at this poll rate."""
+    s = Session(t, log)
+    gone = False
+    while True:
+        state = s.status()
+        if state == "unloaded":
+            gone = True
+        elif state == "ready" and gone:
+            log("reloaded")
+            return True
+        if interrupted(poll_s):
+            return False
 
 
 def wrap_up(s: Session, t: Transport, log: SessionLog) -> None:

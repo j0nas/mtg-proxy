@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import select
 import shutil
 import sys
 from dataclasses import replace
@@ -293,7 +294,8 @@ def cut(
             "--scan-start",
             metavar="TOP,LEFT",
             help="where the mark search starts, mm from the loaded origin; repeat to retry in order "
-            "(default: 2.5,11.5, on the top-left mark's horizontal leg; tried twice)",
+            "(default: 6,17 at a 10 mm inset, 2.5,11.5 at 5 mm: on the paper above the top-left "
+            "mark's horizontal leg; tried twice)",
         ),
     ] = None,
 ) -> None:
@@ -353,14 +355,53 @@ def cut(
         if not _at_terminal():
             typer.echo("cut-proxies: not through? Rerun with --passes 1 (it rescans the marks).")
             break
-        then = cutmenu.after_cut(sheet)
-        if then == "next":
+        then = _await_next_sheet(o, sheet)
+        if then == "menu":
+            then = cutmenu.after_cut(sheet, proof=job.proof)
+        if then == "next":  # a batch is proofed once: its first sheet's marks passed
+            o, sheet = replace(job, proof=False), sheet + 1
+        elif then == "next-proof":
             o, sheet = job, sheet + 1
         elif then == "pass":
             o = replace(job, passes=1, proof=False)  # same sheet, marks already proven
         else:
             break
     raise typer.Exit(rc)
+
+
+COUNTDOWN_S = 5  # between the mat coming back in and the next sheet's scan
+
+
+def _await_next_sheet(o: cutting.CutOptions, sheet: int) -> str:
+    """Watch the mat after a sheet: "next" once it went out and came back and the countdown ran
+    out, "menu" when the operator pressed Enter or the mat can't be watched."""
+    typer.echo(
+        f"cut-proxies: sheet {sheet} done. Lift a corner. Through? Unload, load the next sheet and it "
+        "starts by itself. Enter: menu (one more pass, done). Ctrl-C: stop."
+    )
+    try:
+        if not cutting.wait_for_next_sheet(o, _enter_within):
+            return "menu"
+    except cutting.CutError as e:
+        typer.echo(f"cut-proxies: {e}; choose from the menu", err=True)
+        return "menu"
+    for left in range(COUNTDOWN_S, 0, -1):
+        typer.echo(
+            f"\rcut-proxies: mat loaded: sheet {sheet + 1} starts in {left} s (Enter: menu) ", nl=False
+        )
+        if _enter_within(1.0):
+            typer.echo()
+            return "menu"
+    typer.echo()
+    return "next"
+
+
+def _enter_within(seconds: float) -> bool:
+    """True when the operator pressed Enter within ``seconds`` (the line is consumed)."""
+    ready, _, _ = select.select([sys.stdin], [], [], seconds)
+    if ready:
+        sys.stdin.readline()
+    return bool(ready)
 
 
 # The connection is never asked in the menu, only set by flag, so these keep it.

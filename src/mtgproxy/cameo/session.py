@@ -217,7 +217,9 @@ class Session:
             self.wait_ready(60)
         raise CutError(
             f"the Cameo couldn't find the marks ({len(starts)} scan start(s) tried). Check: printed at "
-            f"100 %, sheet top-left on the mat grid, nothing printed within 6 mm of a mark, no glare."
+            f"100 %, sheet top-left on the mat grid, nothing printed within 6 mm of a mark, no glare. "
+            "If the head started its search off the paper, the sheet sits too far in: move it up "
+            "and left, or pass --scan-start."
         )
 
     def cut(self, job: Job) -> None:

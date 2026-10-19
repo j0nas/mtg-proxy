@@ -1,6 +1,7 @@
 """cut-proxies' options: the mark frame, the stored offset, the blade presets, and the menu."""
 
 import json
+from dataclasses import replace
 
 import pytest
 from typer.testing import CliRunner
@@ -87,6 +88,7 @@ def menu(monkeypatch, *answers):
 
     monkeypatch.setattr(cli, "_at_terminal", lambda: True)
     monkeypatch.setattr(cutmenu.questionary, "select", select)
+    monkeypatch.setattr(cutting, "wait_for_next_sheet", lambda o, interrupted: False)  # Enter: menu
     return asked
 
 
@@ -161,10 +163,22 @@ def cut_jobs(monkeypatch, *args: str) -> tuple[list[cutting.CutOptions], str]:
 def test_next_sheet_repeats_the_job_and_one_more_pass_cuts_once(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     asked = menu(monkeypatch, "next", "pass", "next", "done")
-    jobs, _ = cut_jobs(monkeypatch, "--proof")
+    jobs, _ = cut_jobs(monkeypatch, "--preset", "laminate")  # any flag skips the first menu
     assert [m for m, _ in asked] == [f"Sheet {n} done. Lift a corner:" for n in (1, 2, 2, 3)]
-    assert jobs[0] == jobs[1] == jobs[3] and (jobs[0].passes, jobs[0].proof) == (3, True)
+    assert jobs[0] == jobs[1] == jobs[3] and (jobs[0].passes, jobs[0].proof) == (3, False)
     assert (jobs[2].passes, jobs[2].proof, jobs[2].force) == (1, False, 20)
+
+
+def test_a_proofed_batch_proofs_its_first_sheet_only_unless_asked(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    asked = menu(monkeypatch, "next", "next-proof", "next", "done")
+    jobs, _ = cut_jobs(monkeypatch, "--proof")
+    assert [j.proof for j in jobs] == [True, False, True, False]
+    assert all(j.passes == 3 for j in jobs)
+    assert asked[0][1][:2] == [
+        "next sheet: it's loaded, cut it now, same job, no proof cuts",
+        "next sheet, proof cuts first",
+    ]
 
 
 def test_the_menu_flows_into_whats_next(monkeypatch, tmp_path):
@@ -181,6 +195,47 @@ def test_dry_runs_and_probes_dont_ask_whats_next(monkeypatch, tmp_path):
         jobs, _ = cut_jobs(monkeypatch, flag)
         assert len(jobs) == 1
     assert asked == []
+
+
+def watch(monkeypatch, *reloads, enter=False):
+    """Script the mat watcher: each call returns the next of ``reloads`` (True: reloaded, an
+    exception: raised); Enter is pressed during the countdown when ``enter``."""
+    script = iter(reloads)
+
+    def wait(o, interrupted):
+        r = next(script)
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+    monkeypatch.setattr(cutting, "wait_for_next_sheet", wait)
+    monkeypatch.setattr(cli, "_enter_within", lambda s: enter)
+
+
+def test_reloading_the_mat_starts_the_next_sheet_without_a_proof(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    asked = menu(monkeypatch, "done")
+    watch(monkeypatch, True, False)  # sheet 1: reloaded; sheet 2: Enter
+    jobs, output = cut_jobs(monkeypatch, "--proof")
+    assert [j.proof for j in jobs] == [True, False] and jobs[1].passes == 3
+    assert [m for m, _ in asked] == ["Sheet 2 done. Lift a corner:"]  # no menu after sheet 1
+    assert "sheet 2 starts in 1 s" in output
+
+
+def test_enter_during_the_countdown_holds_the_next_sheet(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    asked = menu(monkeypatch, "done")
+    watch(monkeypatch, True, enter=True)
+    jobs, _ = cut_jobs(monkeypatch, "--proof")
+    assert len(jobs) == 1 and [m for m, _ in asked] == ["Sheet 1 done. Lift a corner:"]
+
+
+def test_a_mat_that_cant_be_watched_falls_back_to_the_menu(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    asked = menu(monkeypatch, "done")
+    watch(monkeypatch, cutting.CutError("can't watch the mat (Cameo disconnected)"))
+    jobs, output = cut_jobs(monkeypatch, "--proof")
+    assert len(jobs) == 1 and len(asked) == 1 and "choose from the menu" in output
 
 
 def test_from_a_script_one_cut_and_the_passes_hint(monkeypatch, tmp_path):
@@ -210,7 +265,8 @@ def test_a_failed_job_can_be_retried(monkeypatch, tmp_path):
     assert result.exit_code == 0, result.output
     assert "registration marks not found" in result.output
     assert [m.split(".")[0] for m, _ in asked] == ["Sheet 1 failed", "Sheet 1 done", "Sheet 2 done"]
-    assert jobs[0] == jobs[1] == jobs[2]
+    assert jobs[0] == jobs[1] and jobs[1].proof  # the retry proofs again: no sheet has passed yet
+    assert replace(jobs[2], proof=True) == jobs[0]
 
 
 def test_done_after_a_failure_exits_with_an_error(monkeypatch, tmp_path):

@@ -5,8 +5,10 @@ Enter on the first question cuts the default: this folder's run.json, or a plain
 which run, which preset and what to do (cut, proof first, dry run, probe). The connection is
 never asked: Bluetooth LE unless ``--usb`` is given.
 
-After every cut at a terminal, however it was started, ``after_cut`` asks what's next: the
-same job on a new sheet, one more pass on this one, or done; ``after_error`` offers a retry
+After every cut at a terminal, however it was started, cut-proxies watches the mat: unloading
+it and loading the next sheet starts that sheet by itself (cli._await_next_sheet). Enter instead
+brings up ``after_cut``: the same job on a new sheet (without proof cuts once a first sheet
+passed them, unless asked), one more pass on this one, or done. ``after_error`` offers a retry
 when a job fails.
 """
 
@@ -25,7 +27,7 @@ from .sidecar import RunInfo
 PLAIN = "plain A4 sheet: standard cards, 4-mark"
 MODES = {
     "cut": "cut",
-    "proof": "proof cuts on the marks first, then y cuts / r rescans / q stops",
+    "proof": "proof cuts on the marks first, then y cuts / r rescans / q stops (first sheet only)",
     "dry-run": "dry run: no machine, checks the job",
     "probe": "probe: scan the marks, log what the machine reports, cut nothing",
 }
@@ -88,12 +90,17 @@ def ask(where: Path, via: str) -> Picked | None:
     return Picked(Path(run) if run else None, preset, mode)
 
 
-def after_cut(sheet: int) -> str:
-    """What's next: "next" (same job, new sheet), "pass" (one more pass on this sheet) or "done"."""
+def after_cut(sheet: int, proof: bool = False) -> str:
+    """What's next: "next" (same job, new sheet), "pass" (one more pass on this sheet) or "done".
+    A proofed job's next sheet skips the proof cuts; "next-proof" asks for them again."""
+    nxt = "next sheet: it's loaded, cut it now, same job"
+    choices = [Choice(f"{nxt}, no proof cuts" if proof else nxt, "next")]
+    if proof:
+        choices.append(Choice("next sheet, proof cuts first", "next-proof"))
     return _select(
         f"Sheet {sheet} done. Lift a corner:",
         [
-            Choice("next sheet: unload, load the next one, same job", "next"),
+            *choices,
             Choice("one more pass: not quite through (rescans, cuts once, no proof)", "pass"),
             Choice("done", "done"),
         ],

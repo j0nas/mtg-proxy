@@ -57,10 +57,10 @@ during the scan; `mtgproxy.cameo` accepts only the padded form.
   2.5 mm and left **11.5 mm** from the origin. That is 7.5 mm above the top-left mark's
   horizontal leg and 0.5 mm past its vertical leg: the sensor starts on white paper and travels
   down onto a mark line.
-  `mtgproxy.cameo` uses top = max(inset − 7.5, min(2.5, inset / 2)) and left = max(inset +
-  thickness + 0.5, min(11.5, inset + length − 1)): Studio's (2.5, 11.5) for any inset from 5 to
-  10 mm. Calibration sheets (2026-09-28): at a 5 mm inset, left 6.5 skewed the cut and 11.5 did
-  not. With that start our cuts land 0.5 mm high, the `driver` offset in `data/cut_offset.json`.
+  `mtgproxy.cameo` used it at every inset until 2026-10-20. Calibration sheets (2026-09-28): at
+  a 5 mm inset, left 6.5 skewed the cut and 11.5 did not. On laminate at the 10 mm inset,
+  Studio's start sat on the paper's edge inside the pouch and failed on some sheets; the driver
+  now starts at (6, 17) there and keeps (2.5, 11.5) at 5 mm (`driver.default_starts`). With that start our cuts land 0.5 mm high, the `driver` offset in `data/cut_offset.json`.
 - **The order.** Marks are described and scanned before the blade is set up; the blade setup and
   cutting area come after, in the registered frame.
 - **Mark description** `TB51,188 TB53,20` = 9.4 mm legs, 1 mm lines (length and thickness, in

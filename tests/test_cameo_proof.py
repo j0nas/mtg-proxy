@@ -47,7 +47,7 @@ def pts(line):
 def test_each_leg_is_cut_along_its_centre_line_except_where_the_sensor_crosses_it():
     assert proof.pieces(9.4, [4.5]) == [(0, 3), (6, 9.4)]
     assert proof.pieces(9.4, [4.5, 6.5]) == [(0, 3), (8, 9.4)]  # the top-left's first search too
-    assert proof.pieces(9.4, [4.5, 1.5]) == [(6, 9.4)]  # a 10 mm inset's start: no corner piece
+    assert proof.pieces(9.4, [4.5, 1.5]) == [(6, 9.4)]  # a start 1.5 mm along: no corner piece
 
 
 def test_the_cuts_trace_every_mark_a_corner_l_and_the_legs_ends():

@@ -8,6 +8,7 @@ settings come from a preset (laminate or plain paper), each overridable by a pla
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -146,7 +147,8 @@ def run_cut(o: CutOptions) -> int:
         f"cut-proxies: force {o.force} · speed {o.speed} · depth {o.depth} · passes {o.passes} · "
         f"offset x={bias[0]:g}mm y={bias[1]:g}mm · via {via}"
     )
-    log_path = o.out_dir / f"{name}.session.jsonl"
+    # One log per run: a batch of sheets used to overwrite it, losing the runs before a bad one.
+    log_path = o.out_dir / f"{name}.{time.strftime('%Y%m%d-%H%M%S')}.session.jsonl"
     log = session.SessionLog(log_path, echo=lambda m: print(f"cut-proxies: {m}"))
     try:
         t = driver.open_transport(o.connection, o.ble_name, log, o.dry_run)
@@ -172,6 +174,23 @@ def run_cut(o: CutOptions) -> int:
         return 0
     print(f"cut-proxies: done — {what} cut. Don't eject yet: lift a corner and check it's through.")
     return 0
+
+
+def wait_for_next_sheet(o: CutOptions, interrupted) -> bool:
+    """Connect and watch the mat: True once it has been unloaded and loaded again, False when
+    ``interrupted`` (called between polls with the wait in seconds) returns True."""
+    from .cameo import driver, session
+    from .cameo.transport import TransportError
+
+    log = session.SessionLog(None)
+    try:
+        t = driver.open_transport(o.connection, o.ble_name, log, o.dry_run)
+        try:
+            return driver.wait_for_reload(t, log, interrupted)
+        finally:
+            t.close()
+    except TransportError as e:
+        raise CutError(f"can't watch the mat ({e})") from e
 
 
 PROOF_HELP = """\

@@ -184,11 +184,16 @@ Settings, AutoBlade only (the Kraft blade can't turn the 3 mm corners):
 | `paper`: plain copier paper, cut through | 10 | 5 | 1 | 1 |
 
 Explicit flags override the preset. Don't eject after a cut: lift a corner. At a terminal,
-cut-proxies then asks what's next. "Next sheet" runs the same job again after you swap the sheet,
-counting sheets as it goes. "One more pass" rescans the marks and cuts this sheet once more, for a
-cut that isn't through. "Done" stops. When a job fails (marks not found, proof stopped, the
-connection lost), it offers to try the same job again. From a script, a failure exits, and
-`--passes 1` is the extra pass.
+cut-proxies then watches the mat. Unload it, load the next sheet, and five seconds after the mat
+is back in, the same job starts on it, counting sheets as it goes. It only starts after it has
+seen the mat leave, and Enter during the countdown holds it. A batch started with proof cuts has
+them on its first sheet only.
+
+Enter while it watches brings up the menu instead: "next sheet" cuts a sheet that's already
+loaded, "next sheet, proof cuts first" asks for proof cuts again, "one more pass" rescans the
+marks and cuts this sheet once more, for a cut that isn't through, and "done" stops. Ctrl-C stops
+at any point. When a job fails (marks not found, proof stopped, the connection lost), it offers to
+try the same job again. From a script, a failure exits, and `--passes 1` is the extra pass.
 Rippled edges mean too much force or a dull blade. Max force or speed makes the machine skip; power-cycle to rehome.
 
 The job follows Silhouette Studio's own conversation with this machine, recorded over Bluetooth
@@ -208,10 +213,17 @@ Registration:
 
 - `--reg-length` / `--reg-thickness` (mm, default 9.4 × 1, the card-maker's A4 marks) describe
   the printed marks before the scan.
-- The scan starts at (2.5, 11.5) mm from the paper's corner, Studio's own start: on white
-  paper above the top-left mark's horizontal leg, well past its vertical leg. At a 5 mm inset,
-  starting 1.5 mm past the vertical leg skewed cuts differently on every sheet; this start
-  never did (calibration sheets, 2026-09-28). `--scan-start TOP,LEFT` overrides it.
+- The scan starts on white paper above the top-left mark's horizontal leg, with room on every
+  side: (6, 17) mm from the mat's origin at a 10 mm inset, (2.5, 11.5) at 5 mm. The sensor's
+  baseline is seeded from the start, so it must land on paper wherever the sheet really sits. A
+  laminated sheet placed by the pouch's edge has its paper 3–4 mm further in, depending on how it
+  slid in the pouch, and the marks move with it. Studio's (2.5, 11.5) at a 10 mm inset sat right
+  on the paper's top edge: some laminated sheets registered and some hunted at the paper's
+  corners and failed. (6, 15) registered the same sheet dead on, then missed once on a sheet with
+  a 4.08 mm left border, where the start sat on the mark's vertical leg; (6, 17) keeps 2 mm from
+  it for a border up to 4 mm (2026-10-20). At a 5 mm inset,
+  starting 0.5 mm past the vertical leg skewed cuts; 11.5 never did (calibration sheets,
+  2026-09-28). `--scan-start TOP,LEFT` overrides it.
 - `--reg-inset MM` moves the expected marks from the layout's 10 mm toward the paper edge (5 mm
   is proven). It must match the printed marks.
 - Cuts may reach above or left of the top-left mark, as long as they stay on the paper: the
@@ -227,8 +239,9 @@ black and ends where the leg ends; a misread corner's cuts sit beside its lines,
 the misread. Each leg is left uncut for 1.5 mm either side of where the sensor crosses it, so a
 rescan reads clean ink: what stays is an L at each corner and a piece at each leg's end. `y`
 cuts the job, `r` goes home and scans again (the new cuts go on the same marks; up to three
-rounds), `q` stops with nothing more cut. Every run writes `output/cut/<name>.session.jsonl`:
-each byte sent and received, with timestamps, plus the Bluetooth movement events.
+rounds), `q` stops with nothing more cut. Every run writes its own
+`output/cut/<name>.<date>-<time>.session.jsonl`: each byte sent and received, with timestamps,
+plus the Bluetooth movement events.
 
 Placement: sheet top-left on the mat grid, aligned to the paper edge, not the laminate edge.
 Standard 12x12" mat against the left notch, pinch rollers on the mat, lid closed, room neither
