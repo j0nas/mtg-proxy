@@ -20,13 +20,20 @@ def test_the_job_speaks_studios_sequence_byte_for_byte():
     assert "SO0" not in p.RETURN_TO_ORIGIN  # never move the origin
 
 
-def test_the_scan_starts_on_the_paper_with_room_around_the_mark():
+def test_the_scan_starts_where_the_laminated_sheets_registered():
     cards = session.Frame(page_w=297, page_h=210, inset=10, width=277, height=190)
-    assert driver.default_starts(cards)[0] == (6, 17)  # on the leg for a 0–4 mm pouch border
+    assert driver.default_start(cards) == (7.5, 18)  # 2026-10-20: found from (7.5, 18/20), (9.5, 18)
     deckbox = session.Frame(page_w=297, page_h=210, inset=5, width=287, height=200)
-    assert driver.default_starts(deckbox)[0] == (2.5, 11.5)  # halfway to the mark, left as Studio's
-    wide = session.Frame(page_w=297, page_h=210, inset=20, width=257, height=170)
-    assert driver.default_starts(wide)[0] == (10, 27)
+    assert driver.default_start(deckbox) == (2.5, 11.5)  # halfway to the mark, left as Studio's
+    assert driver.default_starts(deckbox)[0] == (2.5, 11.5)
+
+
+def test_a_miss_tries_the_starts_2_mm_around_the_first_across_before_up_and_down():
+    assert driver.search_starts((7.5, 18)) == [
+        (7.5, 18), (7.5, 16), (7.5, 20), (9.5, 18), (5.5, 18),
+        (9.5, 16), (9.5, 20), (5.5, 16), (5.5, 20),
+    ]  # fmt: skip
+    assert driver.search_starts((2.5, 11.5))[4] == (1.0, 11.5)  # never above 1 mm
 
 
 def test_only_a_padded_reply_is_a_scan_result():

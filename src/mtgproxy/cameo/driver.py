@@ -32,34 +32,55 @@ DRY_ANSWERS = {
 PROBE_QUERIES = ("FQ0", "FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6", "FQ7", "FQ8", "FQ9", "[", "U", "TB71", "FA")
 
 
-POUCH_BORDER = 4.0  # mm: how far in the paper can sit when a pouch's edge is on the grid
+SEARCH_STEP = 2.0  # mm between neighbouring scan starts: about the width of the window that works
+# The 3 x 3 neighbourhood of the first start, likeliest first: across, then down and up, then the
+# diagonals. On 2026-10-20 the sheets that registered needed 2 mm across or 2 mm down.
+SEARCH_ORDER = ((0, 0), (0, -1), (0, 1), (1, 0), (-1, 0), (1, -1), (1, 1), (-1, -1), (-1, 1))
+LOWEST = 1.0  # mm: no start above or left of this
+
+
+def default_start(frame: Frame) -> tuple[float, float]:
+    """Where a sheet's mark search starts, (top, left) mm from the origin, before any sheet with
+    these marks has registered (``cutting`` remembers the last start that did).
+
+    The sensor travels down from here onto the top-left mark's horizontal leg. It registers only
+    from a window about 2 mm wide each way, and from one load to the next the marks move about
+    that much: the hand's millimetre on the mat, and where the machine takes the mat in. So no
+    single start always works, and ``search_starts`` tries the ones around it.
+
+    At the card sheets' 10 mm inset the start is (7.5, 18), from the laminated sheets of
+    2026-10-20: they registered from (7.5, 20), (7.5, 18) and (9.5, 18) and missed from
+    (7.5, 22), (7.5, 16), (5.5, 18) and, on most sheets that night, from the old default
+    (6, 17). Studio's (2.5, 11.5) failed on laminate now and then. The 5 mm deck box keeps its
+    proven (2.5, 11.5): starting 0.5 mm past the vertical leg skewed its cut and 11.5 did not
+    (calibration sheets, 2026-09-28).
+
+    A 3-mark sheet (TB123) starts 4 mm above and left of its square's corner. The machine finds
+    the square by an area search, not one line down: rows 3 mm apart from the start to 30 mm
+    below it, each sweeping 30 mm to its right, for a dark run 3.5-9 mm long (firmware V1.04,
+    cameo-re NOTES.md). The square is caught anywhere from 5 mm above the start to 30 mm below it
+    and from about 1 mm to 24 mm right of it, and the start stays on the paper. Untested on the
+    machine."""
+    if frame.marks == 3:
+        corner = max(LOWEST, frame.inset - 4)
+        return corner, corner
+    if frame.inset <= 5:
+        return frame.inset / 2, min(11.5, frame.inset + frame.length - 2)
+    return frame.inset - 2.5, frame.inset + 8
+
+
+def search_starts(first: tuple[float, float]) -> list[tuple[float, float]]:
+    """``first``, then the starts SEARCH_STEP around it, in SEARCH_ORDER: each one the machine
+    tries in turn until it finds the marks (a miss costs 15-20 s)."""
+    top, left = first
+    return [
+        (max(LOWEST, top + dy * SEARCH_STEP), max(LOWEST, left + dx * SEARCH_STEP)) for dy, dx in SEARCH_ORDER
+    ]
 
 
 def default_starts(frame: Frame) -> list[tuple[float, float]]:
-    """Where the mark search starts, (top, left) mm from the origin, tried twice.
-
-    The sensor travels down from here onto the top-left mark's horizontal leg, and its baseline
-    is seeded from whatever is under the start. So the start must be on paper, with room on every
-    side of the mark, wherever the sheet really sits: a laminated sheet placed by the pouch's
-    edge has its paper about 3 mm further in, by however far it slid in the pouch.
-
-    The top is 6 mm into the paper, past a pouch border, or halfway to the mark when the inset is
-    too small for 4 mm above the leg. The left keeps 2 mm from the vertical leg with the paper up
-    to POUCH_BORDER further right, and 2.4 mm from the horizontal leg's end with it on the grid.
-    That gives (6, 17) at the card sheets' 10 mm inset; the deck box keeps its proven (2.5, 11.5)
-    at 5 mm.
-
-    Studio starts at (2.5, 11.5) at its 10 mm inset (docs/studio-capture.md): 0.5 mm past the
-    vertical leg, and off the paper whenever the pouch border above it is wider than 2.5 mm. On
-    laminate that failed now and then (2026-10-20). (6, 15) fixed the top, then missed once on a
-    sheet whose left border was 4.08 mm: the start sat on the vertical leg's edge. At a 5 mm
-    inset, starting 0.5 mm past the vertical leg skewed the cut; 11.5 did not (calibration
-    sheets, 2026-09-28)."""
-    top = max(min(6.0, frame.inset - 4), frame.inset / 2)
-    near = frame.inset + frame.thickness  # the vertical leg's inner edge, paper on the grid
-    far = frame.inset + frame.length  # the horizontal leg's end
-    left = min(11.5, far - 2) if frame.inset <= 5 else min(near + POUCH_BORDER + 2, far - 2.4)
-    return [(top, left), (top, left)]
+    """The search around ``default_start``: what a sheet tries when no start is remembered."""
+    return search_starts(default_start(frame))
 
 
 def plan(svg: Path, frame: Frame, blade: protocol.Blade, passes: int, bias: tuple[float, float]) -> Job:
@@ -101,8 +122,11 @@ def cut(
     else is cut until the operator says so. A rescan returns to the origin and repeats a fresh run's start."""
     s = Session(t, log)
     try:
-        extent = check_bounds(job)
-        low = low_corner(extent)
+        extent = reach = check_bounds(job)
+        if confirm:  # the area must hold the proof cuts too: a 3-mark square's outline is 0.5 mm out
+            marks = [cut for _, cut in proof.cuts(job.frame, starts[0])]
+            reach = check_bounds(replace(job, lines=[*job.lines, *marks]))
+        low = low_corner(reach)
         rounds = proof.ROUNDS if confirm else 1
         for attempt in range(rounds):
             if attempt:
@@ -114,7 +138,7 @@ def cut(
             start = s.register(job.frame, starts)
             if low != (0.0, 0.0) and attempt == 0:
                 log.say(
-                    f"cut reaches {-min(extent[1], 0):.2f} mm above / {-min(extent[0], 0):.2f} mm left of the "
+                    f"cut reaches {max(0.0, -reach[1]):.2f} mm above / {max(0.0, -reach[0]):.2f} mm left of the "
                     f"top-left mark: cutting area widened to {low[0]:g}, {low[1]:g} mm"
                 )
             s.setup(job.blade, job.frame, low)

@@ -34,6 +34,41 @@ def test_the_stored_offset_is_the_calibrated_one():
     assert cutting.read_cut_offset() == (0.0, 0.5)
 
 
+def frame(marks=4, inset=10.0):
+    from mtgproxy.cameo import session
+
+    return session.Frame(
+        page_w=297, page_h=210, inset=inset, width=297 - 2 * inset, height=210 - 2 * inset, marks=marks
+    )
+
+
+def test_the_next_sheet_searches_around_where_the_last_one_registered(tmp_path):
+    o = cutting.CutOptions(out_dir=tmp_path)
+    starts, origin = cutting.scan_starts(o, frame())
+    assert (starts[0], len(starts), origin) == ((7.5, 18), 9, "the default")
+    cutting.remember_start(tmp_path, frame(), (9.5, 18))
+    starts, origin = cutting.scan_starts(o, frame())
+    assert starts[:3] == [(9.5, 18), (9.5, 16), (9.5, 20)] and origin == "where the last sheet registered"
+    assert len(starts) == 9  # the default (7.5, 18) is already one of the neighbours
+    cutting.remember_start(tmp_path, frame(), (11.5, 24))
+    assert cutting.scan_starts(o, frame())[0][-1] == (7.5, 18)  # far off: the default comes last
+    # A 3-mark sheet's square is found by an area search: one start, nothing remembered.
+    assert cutting.scan_starts(o, frame(marks=3)) == ([(6, 6)], "the area search's corner")
+
+
+def test_given_starts_are_tried_as_given(tmp_path):
+    cutting.remember_start(tmp_path, frame(), (9.5, 18))
+    o = cutting.CutOptions(out_dir=tmp_path, scan_starts=[(6.0, 17.0)])
+    assert cutting.scan_starts(o, frame()) == ([(6.0, 17.0)], "--scan-start")
+
+
+def test_a_damaged_memory_falls_back_to_the_default(tmp_path):
+    (tmp_path / cutting.SCAN_START_FILE).write_text("{not json")
+    assert cutting.remembered_start(tmp_path, frame()) is None
+    cutting.remember_start(tmp_path, frame(), (7.5, 20))  # and is replaced
+    assert cutting.remembered_start(tmp_path, frame()) == (7.5, 20)
+
+
 def cut_options(monkeypatch, *args: str) -> cutting.CutOptions:
     seen: list[cutting.CutOptions] = []
     monkeypatch.setattr(cutting, "run_cut", lambda o: seen.append(o) or 0)

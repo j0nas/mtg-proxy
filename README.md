@@ -155,7 +155,8 @@ Stored in `data/offset_data.json`, tracked, applied to every double-sided PDF.
 
 `cut-proxies` drives the Cameo over Bluetooth LE (`--usb` for the cable) with its own driver,
 `src/mtgproxy/cameo/`, and sends the scan command explicitly: `-r 4` is the four-L-mark scan,
-`-r 3` the square plus two L's.
+`-r 3` the square plus two L's (untested on the machine; see Registration). Both follow the
+sheet's `run.json`, which `make-proxies -r 3|4` writes.
 
 Run bare at a terminal, `cut-proxies` asks first. Enter cuts the default: this folder's
 `run.json`, or a plain A4 sheet (standard cards, four L-marks) when there is none, with the
@@ -213,17 +214,27 @@ Registration:
 
 - `--reg-length` / `--reg-thickness` (mm, default 9.4 × 1, the card-maker's A4 marks) describe
   the printed marks before the scan.
-- The scan starts on white paper above the top-left mark's horizontal leg, with room on every
-  side: (6, 17) mm from the mat's origin at a 10 mm inset, (2.5, 11.5) at 5 mm. The sensor's
-  baseline is seeded from the start, so it must land on paper wherever the sheet really sits. A
-  laminated sheet placed by the pouch's edge has its paper 3–4 mm further in, depending on how it
-  slid in the pouch, and the marks move with it. Studio's (2.5, 11.5) at a 10 mm inset sat right
-  on the paper's top edge: some laminated sheets registered and some hunted at the paper's
-  corners and failed. (6, 15) registered the same sheet dead on, then missed once on a sheet with
-  a 4.08 mm left border, where the start sat on the mark's vertical leg; (6, 17) keeps 2 mm from
-  it for a border up to 4 mm (2026-10-20). At a 5 mm inset,
-  starting 0.5 mm past the vertical leg skewed cuts; 11.5 never did (calibration sheets,
-  2026-09-28). `--scan-start TOP,LEFT` overrides it.
+- The scan starts on white paper above the top-left mark's horizontal leg, and the sensor
+  travels down onto it. It registers only from a window about 2 mm wide each way, and from one
+  load to the next the marks move about that much (the hand's millimetre on the mat, and where
+  the machine takes the mat in). So each sheet starts where the last sheet with the same marks
+  registered (`output/cut/scan-start.json`), and a miss tries the starts 2 mm around it, across
+  first, then down and up, then the diagonals: up to 9 starts, 15–20 s per miss. With nothing
+  remembered it starts at (7.5, 18) mm at a 10 mm inset, from the laminated sheets of
+  2026-10-20, and (2.5, 11.5) at 5 mm, where starting 0.5 mm past the vertical leg skewed cuts
+  and 11.5 never did (calibration sheets, 2026-09-28). `--scan-start TOP,LEFT` (repeatable)
+  replaces the search with exactly those starts. Coordinates are from the job's own origin, which
+  the job's first command (`TG1`) moves 16.5 mm in once per mat load: anything that measures
+  positions on the machine must send it first.
+- 3-mark sheets (`make-proxies -r 3`, then `cut-proxies` reads it from `run.json`) are scanned
+  with `TB123`, which finds the top-left square by an area search instead of one line down:
+  rows 3 mm apart from the start to 30 mm below it, each sweeping 30 mm to its right, for a
+  dark run 3.5–9 mm long. The card-maker's square prints 6 mm wide (5 mm plus its outline), and
+  the machine takes its centre less 2.5 mm as the edge, which lands on the L marks' centre lines:
+  the frame and the cut are the same as a 4-mark sheet's. The search starts at (6, 6) mm and
+  should catch the square several millimetres off where the 4-mark search needs 2 mm, but no
+  bottom-right mark is read, so a stretched sheet's far corner goes unchecked. Not yet tried on
+  the machine: `output/test-sheet-3mark/` is a plain-paper test sheet for it.
 - `--reg-inset MM` moves the expected marks from the layout's 10 mm toward the paper edge (5 mm
   is proven). It must match the printed marks.
 - Cuts may reach above or left of the top-left mark, as long as they stay on the paper: the
@@ -233,8 +244,8 @@ Registration:
 
 The machine reports no mark positions (FQ5 reads -64 after every successful scan, straight or
 tilted; its firmware keeps them to itself), so a misread can't be caught from the replies. It can
-be caught by eye: `--proof` (four L-marks only) scores every mark's L along its centre lines
-after the scan, then waits. Lift the lid: registered right, every cut runs down the middle of the
+be caught by eye: `--proof` scores every mark's L along its centre lines after the scan (a
+3-mark sheet's square: its outline, along the edge of the black), then waits. Lift the lid: registered right, every cut runs down the middle of the
 black and ends where the leg ends; a misread corner's cuts sit beside its lines, by the size of
 the misread. Each leg is left uncut for 1.5 mm either side of where the sensor crosses it, so a
 rescan reads clean ink: what stays is an L at each corner and a piece at each leg's end. `y`

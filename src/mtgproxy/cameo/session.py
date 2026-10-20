@@ -215,11 +215,12 @@ class Session:
                 f"scan {n}/{len(starts)} from ({top:g}, {left:g}) mm: {result or 'no reply'} after {took:.0f} s"
             )
             self.wait_ready(60)
+        top, left = starts[0]
         raise CutError(
-            f"the Cameo couldn't find the marks ({len(starts)} scan start(s) tried). Check: printed at "
-            f"100 %, sheet top-left on the mat grid, nothing printed within 6 mm of a mark, no glare. "
-            "If the head started its search off the paper, the sheet sits too far in: move it up "
-            "and left, or pass --scan-start."
+            f"the Cameo couldn't find the marks from {len(starts)} scan start(s), the first at "
+            f"({top:g}, {left:g}) mm. Check: printed at 100 %, the paper's top-left corner on the mat "
+            "grid's, nothing printed within 6 mm of a mark, no glare. Or pass --scan-start TOP,LEFT "
+            "(mm from the origin, above the top-left mark's horizontal leg)."
         )
 
     def cut(self, job: Job) -> None:

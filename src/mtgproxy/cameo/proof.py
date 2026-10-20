@@ -13,6 +13,12 @@ the sensor crosses it (firmware V1.04, docs in cameo-re): half the machine's leg
 every leg (it keeps whole millimetres), plus, on the top-left mark, the first search's line down
 from the scan start and the 4 mm step it then takes down the vertical leg. What stays is an L at
 each corner and a piece at each leg's end. A piece that would touch the job is left out.
+
+A 3-mark sheet (TB123) has L marks top-right and bottom-left, crossed half a leg from their
+corners as on a 4-mark sheet, and a filled square top-left with no mark bottom-right. The square
+is scored along its outline: the machine locates it by the centre of its dark run, and a cut
+across the black could split that run below the 3.5 mm the search accepts, while one along its
+edge leaves the run whole. Registered right, the outline traces the edge of the black.
 """
 
 from __future__ import annotations
@@ -34,6 +40,16 @@ CORNERS = (  # name, which frame corner, the legs' directions (x, y) from it
     ("bottom-right", (1, 1), (-1, -1)),
     ("bottom-left", (0, 1), (1, -1)),
 )
+L_MARKS = {4: ("top-left", "top-right", "bottom-right", "bottom-left"), 3: ("top-right", "bottom-left")}
+SQUARE = 5.0  # mm: the card-maker's 3-mark square, drawn with a stroke as thick as the L's lines
+
+
+def square(frame: Frame) -> Polyline:
+    """The 3-mark square's printed outline, page mm: SQUARE from the inset plus half the stroke
+    on every side, so 9.5-15.5 mm at a 10 mm inset with 1 mm lines."""
+    lo = frame.inset - frame.thickness / 2
+    hi = frame.inset + SQUARE + frame.thickness / 2
+    return Polyline(((lo, lo), (hi, lo), (hi, hi), (lo, hi), (lo, lo)))
 
 
 def crossings(frame: Frame, start: tuple[float, float]) -> dict[tuple[str, str], list[float]]:
@@ -55,11 +71,14 @@ def pieces(length: float, cross: list[float]) -> list[tuple[float, float]]:
 
 
 def cuts(frame: Frame, start: tuple[float, float]) -> list[tuple[str, Polyline]]:
-    """(corner, cut) along every mark's centre lines, in page mm, the legs' pieces from
-    ``pieces``; where both legs' first pieces reach the corner they join into one L."""
+    """(corner, cut) along every L mark's centre lines, in page mm, the legs' pieces from
+    ``pieces``; where both legs' first pieces reach the corner they join into one L. A 3-mark
+    sheet's square comes first, as its outline."""
     cross = crossings(frame, start)
-    out = []
+    out = [("top-left", square(frame))] if frame.marks == 3 else []
     for name, (i, j), (sx, sy) in CORNERS:
+        if name not in L_MARKS[frame.marks]:
+            continue
         cx = frame.inset + i * frame.width
         cy = frame.inset + j * frame.height
 

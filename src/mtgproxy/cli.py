@@ -285,7 +285,7 @@ def cut(
         typer.Option(
             "--proof",
             help="after the scan, score each mark's L over the print and wait: y cuts, r rescans, q stops "
-            "(four L-marks only)",
+            "(a 3-mark sheet's square: its outline)",
         ),
     ] = False,
     scan_start: Annotated[
@@ -294,8 +294,8 @@ def cut(
             "--scan-start",
             metavar="TOP,LEFT",
             help="where the mark search starts, mm from the loaded origin; repeat to retry in order "
-            "(default: 6,17 at a 10 mm inset, 2.5,11.5 at 5 mm: on the paper above the top-left "
-            "mark's horizontal leg; tried twice)",
+            "(default: where the last sheet with these marks registered, else 7.5,18 at a 10 mm "
+            "inset and 2.5,11.5 at 5 mm, then the starts 2 mm around it)",
         ),
     ] = None,
 ) -> None:

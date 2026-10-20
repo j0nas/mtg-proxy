@@ -64,6 +64,52 @@ class CutOptions:
     scan_starts: list[tuple[float, float]] | None = None  # (top, left) mm; None = the driver's defaults
 
 
+SCAN_START_FILE = "scan-start.json"  # in out_dir: where each kind of sheet last registered
+
+
+def start_key(frame) -> str:
+    return f"{frame.marks}-mark, inset {frame.inset:g} mm, legs {frame.length:g} mm"
+
+
+def remembered_start(out_dir: Path, frame) -> tuple[float, float] | None:
+    """The scan start that last found these marks, or None. Sheets and loads move the marks by
+    a millimetre or two, so the next sheet is likeliest to register near the last one."""
+    try:
+        top, left = json.loads((out_dir / SCAN_START_FILE).read_text())[start_key(frame)]
+        return float(top), float(left)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def remember_start(out_dir: Path, frame, start: tuple[float, float]) -> None:
+    path = out_dir / SCAN_START_FILE
+    try:
+        known = json.loads(path.read_text())
+    except (OSError, ValueError):
+        known = {}
+    known[start_key(frame)] = [round(start[0], 2), round(start[1], 2)]
+    path.write_text(json.dumps(known, indent=2) + "\n")
+
+
+def scan_starts(o: CutOptions, frame) -> tuple[list[tuple[float, float]], str]:
+    """The starts to try in order, and where the first came from. ``--scan-start`` is taken as
+    given; otherwise the search goes around the remembered start, then tries the default."""
+    from .cameo import driver
+
+    if o.scan_starts:
+        return o.scan_starts, "--scan-start"
+    default = driver.default_start(frame)
+    if frame.marks == 3:  # TB123's area search covers the drift a 4-mark search has to step around
+        return [default], "the area search's corner"
+    last = remembered_start(o.out_dir, frame)
+    if last is None:
+        return driver.search_starts(default), "the default"
+    starts = driver.search_starts(last)
+    if default not in starts:
+        starts.append(default)
+    return starts, "where the last sheet registered"
+
+
 def read_cut_offset(path: Path = CUT_OFFSET_FILE) -> tuple[float, float]:
     """(x_mm, y_mm) from data/cut_offset.json; (0, 0) when absent. Positive shifts cuts right/down."""
     try:
@@ -99,8 +145,6 @@ def run_cut(o: CutOptions) -> int:
 
     if o.registration not in ("3", "4"):
         raise CutError("--registration must be 3 or 4")
-    if o.proof and o.registration != "4":
-        raise CutError("--proof needs the four L-marks (-r 4): the proof cuts trace them")
     o.out_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Cut geometry from the card-maker's own layout engine (same source as the PDF).
@@ -135,7 +179,7 @@ def run_cut(o: CutOptions) -> int:
         job = driver.plan(svg, frame, blade, o.passes, bias)
     except (ValueError, session.CutError) as e:
         raise CutError(str(e)) from e
-    starts = o.scan_starts or driver.default_starts(frame)
+    starts, origin = scan_starts(o, frame)
     what = f"{geom.cards} cards" if o.svg is None else svg.name
     via = "nothing (dry run)" if o.dry_run else o.connection
     print(
@@ -147,6 +191,9 @@ def run_cut(o: CutOptions) -> int:
         f"cut-proxies: force {o.force} · speed {o.speed} · depth {o.depth} · passes {o.passes} · "
         f"offset x={bias[0]:g}mm y={bias[1]:g}mm · via {via}"
     )
+    top, left = starts[0]
+    more = f"; a miss tries {len(starts) - 1} more around it" if len(starts) > 1 else ""
+    print(f"cut-proxies: scan starts at ({top:g}, {left:g}) mm, {origin}{more}")
     # One log per run: a batch of sheets used to overwrite it, losing the runs before a bad one.
     log_path = o.out_dir / f"{name}.{time.strftime('%Y%m%d-%H%M%S')}.session.jsonl"
     log = session.SessionLog(log_path, echo=lambda m: print(f"cut-proxies: {m}"))
@@ -161,6 +208,8 @@ def run_cut(o: CutOptions) -> int:
         if o.proof:
             confirm = dry_confirm if o.dry_run else ask_operator
         result = driver.cut(job, t, log, starts, confirm)
+        if not o.dry_run:
+            remember_start(o.out_dir, frame, result.start)
     except (session.CutError, TransportError) as e:
         raise CutError(f"{e}\ncut-proxies: session log: {log_path}") from e
     finally:
@@ -195,9 +244,10 @@ def wait_for_next_sheet(o: CutOptions, interrupted) -> bool:
 
 PROOF_HELP = """\
 cut-proxies: proof cuts are down, on the marks: each mark's L scored along its centre lines,
-with a gap across each leg where the sensor reads it. Lift the lid and look at all four
-corners. Registered right, every cut runs down the middle of the black and ends where the leg
-ends. A misread corner's cuts sit beside its lines: how far beside is the misread.
+with a gap across each leg where the sensor reads it (a 3-mark sheet's square: its outline,
+along the edge of the black). Lift the lid and look at every mark. Registered right, every cut
+runs down the middle of the black and ends where the leg ends. A misread corner's cuts sit
+beside its lines: how far beside is the misread.
     y  every cut on its mark: cut the job
     r  a cut is off its mark: scan the marks again (the new cuts go on the same marks)
     q  stop: nothing more is cut, the head goes home"""

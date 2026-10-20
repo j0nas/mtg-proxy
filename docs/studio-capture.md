@@ -60,7 +60,7 @@ during the scan; `mtgproxy.cameo` accepts only the padded form.
   `mtgproxy.cameo` used it at every inset until 2026-10-20. Calibration sheets (2026-09-28): at
   a 5 mm inset, left 6.5 skewed the cut and 11.5 did not. On laminate at the 10 mm inset,
   Studio's start sat on the paper's edge inside the pouch and failed on some sheets; the driver
-  now starts at (6, 17) there and keeps (2.5, 11.5) at 5 mm (`driver.default_starts`). With that start our cuts land 0.5 mm high, the `driver` offset in `data/cut_offset.json`.
+  then started at (6, 17) there, and later that night at (7.5, 18), or where the last sheet registered, with the starts 2 mm around it after a miss (`driver.default_start`, `cutting.scan_starts`). It keeps (2.5, 11.5) at 5 mm. With that start our cuts land 0.5 mm high, the `driver` offset in `data/cut_offset.json`.
 - **The order.** Marks are described and scanned before the blade is set up; the blade setup and
   cutting area come after, in the registered frame.
 - **Mark description** `TB51,188 TB53,20` = 9.4 mm legs, 1 mm lines (length and thickness, in
