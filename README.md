@@ -27,6 +27,7 @@ mtg-proxy doctor    check engine and data files
 
 ```
 src/mtgproxy/          engine.py (in-process engine), build.py (pipeline), decks.py (Moxfield/Archidekt),
+                       local.py (--images),
                        layout.py (cut SVG), cutting.py (cut-proxies), cameo/ (the Cameo driver)
 data/cut_offset.json   the machine's cut offset in mm, applied to every cut
 data/offset_data.json  printer duplex offset, applied to every double-sided PDF
@@ -74,6 +75,7 @@ make-proxies <deck-url> --board considering      # main | side | considering
 make-proxies decks/mydeck.txt -r 3               # 3-mark registration (see Cutting)
 make-proxies decks/mydeck.txt --backs            # double-sided; default is fronts only
 make-proxies decks/mydeck.txt --basics           # include basic lands; skipped by default
+make-proxies decks/mydeck.txt --images cards/    # your own card images where you have them
 make-proxies decks/mydeck.txt -t 2               # 2 of each distinct token at the end
 make-proxies decks/mydeck.txt --skip-fetch       # reuse fetched images
 make-proxies decks/mydeck.txt --dry-run
@@ -103,6 +105,32 @@ Every output folder gets a `CUT-NOTES.md` for that run and a `run.json` that `cu
 so the registration pattern you printed is the one it scans for. `run.json` also holds the
 manifest: which printing sits on which page and slot of each PDF, which is what `redo` uses.
 
+### Your own card images
+
+`--images DIR` prints your own card images in the same run as the fetched cards. Name each image
+after the card's front face, lower case, with dashes for anything that isn't a letter or digit:
+`fell-the-profane.jpg` for `Fell the Profane // Fell Mire`, `norn-s-annex.png` for `Norn's
+Annex`. Case, punctuation and the line's set and number don't matter; .jpg and .png both work.
+
+```sh
+make-proxies decks/aminatou.txt -f moxfield --basics --images cards/
+make-proxies decks/aminatou.txt -f moxfield --images cards/ --dry-run   # how many from cards/, how many fetched
+```
+
+- Every deck line with an image prints from it, as many copies as the line asks for, and is never
+  looked up. The rest is fetched as usual. The sheet keeps the decklist's order.
+- An image is one face: a double-faced name prints as a single-sided card, never on the duplex
+  sheet, and gets the plain back with `--backs`.
+- Basics follow `--basics` like fetched ones: skipped unless you ask for them.
+- Images should be the whole card at 63 × 88 mm, full bleed, at any resolution. The engine scales
+  them to the card and builds the bleed from their edge, as it does for scans. `--trim all` leaves
+  them alone; naming one in `--trim` still trims it.
+- An image that matches no deck line is ignored; `--dry-run` counts them.
+- Line-by-line formats only (mtga, moxfield, archidekt, mtgo, deckstats, simple) and deck URLs.
+  The moxfield and archidekt formats skip a line without `(SET) number` unless it has an image;
+  `-f mtga` reads both kinds.
+- A card from an image brings no tokens with `-t`, since it is never looked up.
+
 ## Reprints and leftovers
 
 A deck rarely ends clean: a miscut or two, a card that laminated badly, and a last page that
@@ -126,6 +154,10 @@ so it can be edited by hand. `backlog build` writes the built cards into the run
 decklist and removes them from the queue; a miscut from a backlog sheet goes back in with
 `redo` like any other. Runs made before manifests existed are re-derived from their decklist
 through the image cache on the first `redo`; pass the `-t N` / `--basics` they were built with.
+
+A card printed from `--images` is queued with its image path (`image=…` in the comment), and
+`backlog build` copies those images into the run folder's `images/` and prints them again. If an
+image has moved since, the build stops and names it.
 
 The dotfiles' `make-proxies` and `cut-proxies` functions find the clone (`$MTG_PROXY_DIR`, then
 `~/Desktop/projects/mtg-proxy`) and run the shims from any shell, including WSL with Windows

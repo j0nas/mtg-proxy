@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from . import engine, manifest, mirror, notes, printing, trim
+from . import engine, local, manifest, mirror, notes, printing, trim
 from .backlog import Backlog, Entry
 from .cache import ImageCache
 from .decks import FetchedDeck, fetch_deck, is_deck_url
@@ -59,6 +59,7 @@ class BuildOptions:
     trims: list[trim.TrimSpec] = field(default_factory=list)
     defer_partial: bool = False  # partial last page of each sheet → BACKLOG.txt instead of the PDF
     front_only: list[str] = field(default_factory=list)  # DFC names to print as a single-sided front
+    images: Path | None = None  # --images: your own card images, printed instead of fetching (local.py)
 
     def recorded(self) -> dict:
         """What manifest.rebuild needs to re-derive the sheets of this run later."""
@@ -70,6 +71,7 @@ class BuildOptions:
             "token_copies": self.token_copies,
             "tokens_only": self.tokens_only,
             "fetch_args": list(self.fetch_args),
+            "images": str(self.images) if self.images else None,
         }
 
 
@@ -167,6 +169,32 @@ def fetch_args_for(opts: BuildOptions) -> list[str]:
     return args + list(opts.fetch_args)
 
 
+def local_split(opts: BuildOptions, deck: ResolvedDeck) -> local.Split | None:
+    """--images: which deck lines print from the folder and which are fetched (None without it)."""
+    if opts.images is None or opts.test_mode:
+        return None
+    if deck.fmt.lower() not in local.FORMATS:
+        raise BuildError(f"--images works with the {', '.join(local.FORMATS)} formats, not {deck.fmt!r}")
+    try:
+        images = local.LocalImages.from_dir(opts.images)
+    except local.LocalImageError as e:
+        raise BuildError(str(e)) from e
+    assert deck.path is not None
+    return local.split_deck(
+        deck.path.read_text(),
+        deck.fmt,
+        images,
+        skip_basics="--skip_basics" in fetch_args_for(opts),
+        read_lines=engine.read_deck_lines,
+    )
+
+
+def log_split(split: local.Split, fmt: str) -> None:
+    log(split.summary())
+    if note := split.unread_note(fmt):
+        warn(note)
+
+
 def stage_images(opts: BuildOptions, deck: ResolvedDeck, cache: ImageCache | None) -> None:
     if opts.test_mode:
         engine.clean_images()
@@ -181,17 +209,31 @@ def stage_images(opts: BuildOptions, deck: ResolvedDeck, cache: ImageCache | Non
     if opts.skip_fetch:
         log("--skip-fetch: reusing images already in game/front/")
         return
+    split = local_split(opts, deck)  # before clearing game/, so a bad --images keeps the last images
     engine.clean_images()
     trim.reset_state()
     if not opts.back.is_file():
         raise BuildError(f"card back image missing: {opts.back}")
     engine.set_back(opts.back)
+    scryfall = engine.scryfall_module()
     if cache is not None:
-        cache.install(engine.scryfall_module())
+        cache.install(scryfall)
     rec = manifest.Recorder()
-    rec.install(engine.scryfall_module())
+    rec.install(scryfall)
+    local.place_indices(scryfall, split.positions if split else [])
     assert deck.path is not None
-    engine.fetch_cards(deck.path, deck.fmt, fetch_args_for(opts))
+    if split is None:
+        engine.fetch_cards(deck.path, deck.fmt, fetch_args_for(opts))
+    else:
+        log_split(split, deck.fmt)
+        if split.fetched:
+            # The engine reads a copy without the local lines, in the deck's own format.
+            with tempfile.TemporaryDirectory() as tmp:
+                rest = Path(tmp) / deck.path.name
+                rest.write_text(split.fetch_text)
+                engine.fetch_cards(rest, deck.fmt, fetch_args_for(opts))
+        for card, _ in local.stage(split.local, engine.FRONT):
+            rec.record(card.pos, local.clean(card.name), card.name, "", "", image=str(card.image))
     rec.save()
     if cache is not None and (cache.hits or cache.misses):
         log(f"image cache: {cache.hits} hit(s), {cache.misses} download(s) → {cache.dir}")
@@ -410,6 +452,8 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
 def run_build(opts: BuildOptions) -> BuildResult:
     if opts.tokens_only and opts.test_mode:
         raise BuildError("--tokens-only cannot be combined with --test")
+    if opts.images and opts.test_mode:
+        raise BuildError("--images cannot be combined with --test")
     if opts.registration not in ("3", "4"):
         raise BuildError("--registration must be 3 or 4")
     engine.ensure_engine()
@@ -427,17 +471,22 @@ def run_build(opts: BuildOptions) -> BuildResult:
         warn('NOTE: A3 sheets need the 12x24" cutting mat — the standard 12x12" mat is too short.')
 
     if opts.dry_run:
+        split = local_split(opts, deck)
         log(
             f"dry run: {name} → {out} (paper {opts.paper}, {opts.registration}-mark, format {deck.fmt}, fetch args {fetch_args_for(opts)})"
         )
+        if split:
+            log_split(split, deck.fmt)
         return BuildResult(name, out, None, None, None, 0, 0)
 
     cache = ImageCache(cache_dir()) if opts.use_cache and not opts.test_mode else None
     stage_images(opts, deck, cache)
     if move_tokens_last():
         log("tokens moved to the end of the sheet order")
+    rec = manifest.Recorder.load()
+    local_files = {f.name for f in engine.images_in(engine.FRONT) if rec.lookup(f).image}
     if opts.trims:
-        trimmed, unmatched = trim.apply_trims(opts.trims)
+        trimmed, unmatched = trim.apply_trims(opts.trims, local_files)
         if unmatched:
             raise BuildError(f"--trim: no card named {', '.join(repr(n) for n in unmatched)} in this deck")
         log(
@@ -457,10 +506,14 @@ def run_build(opts: BuildOptions) -> BuildResult:
         if not engine.images_in(engine.FRONT):
             raise BuildError("this deck produces no tokens")
 
-    cards = len(engine.images_in(engine.FRONT))
+    fronts = engine.images_in(engine.FRONT)
+    cards = len(fronts)
     if cards == 0:
         raise BuildError("no card images in game/front/")
-    log(f"cards fetched: {cards}")
+    if own := sum(f.name in local_files for f in fronts):
+        log(f"cards: {cards} ({cards - own} fetched, {own} from local images)")
+    else:
+        log(f"cards fetched: {cards}")
 
     clear_stale(out, name)
     pdfs = build_pdfs(opts, out, name)
@@ -551,11 +604,12 @@ def run_build(opts: BuildOptions) -> BuildResult:
 
 
 def _trim_for(c: manifest.SlotCard, trims: dict[str, float]) -> float | None:
-    """The --trim width that applied to this card in the run (run.json keys trims by the name as typed)."""
+    """The --trim width that applied to this card in the run (run.json keys trims by the name as typed).
+    ``all`` skips tokens and local images, as trim.apply_trims does."""
     if c.token:
         return None
     by_key = {trim.clean_name(n): mm for n, mm in trims.items()}
-    return by_key.get(trim.clean_name(c.name), by_key.get("all"))
+    return by_key.get(trim.clean_name(c.name), None if c.image else by_key.get("all"))
 
 
 def print_summary(r: BuildResult, opts: BuildOptions) -> None:

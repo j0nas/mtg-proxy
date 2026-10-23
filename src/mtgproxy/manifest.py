@@ -6,7 +6,8 @@ file list alone. What the file list does not carry is the *printing* (set and
 collector number) — the deck line may have had none, or the engine may have
 picked a showcase frame. ``Recorder`` hooks the engine's ``fetch_card_art`` to
 capture that as the images are saved, and persists it in ``game/.manifest.json``
-so a ``--skip-fetch`` run still knows.
+so a ``--skip-fetch`` run still knows. Cards staged from ``--images`` are recorded
+by the build with the image they came from instead of a printing.
 
 ``mtg-proxy redo`` resolves references (``last``, ``p3.5``, a card name) against
 these sheets; older run.json files without them are rebuilt by
@@ -43,6 +44,7 @@ class Printing:
     set: str = ""
     cn: str = ""
     token: bool = False
+    image: str = ""  # printed from this local image (--images), not a Scryfall printing
 
 
 @dataclass
@@ -53,6 +55,7 @@ class SlotCard:
     cn: str = ""
     token: bool = False
     dfc: bool = False
+    image: str = ""  # the local image it was printed from (--images); a reprint uses it again
 
     @property
     def line(self) -> str:
@@ -113,10 +116,10 @@ class Recorder:
     def key(index: int | str, clean: str) -> str:
         return f"{index}:{clean}"
 
-    def record(self, index: int, clean: str, name: str, set_code: str, cn: str) -> None:
+    def record(self, index: int, clean: str, name: str, set_code: str, cn: str, image: str = "") -> None:
         with self._lock:
             self.seen[self.key(index, clean)] = Printing(
-                name, str(set_code).lower(), str(cn), clean.endswith("_token")
+                name, str(set_code).lower(), str(cn), clean.endswith("_token"), image
             )
 
     def install(self, scryfall: ModuleType) -> None:
@@ -168,7 +171,7 @@ class Recorder:
         if p is None:
             # Nothing recorded (state lost): the clean name is all we have.
             return SlotCard(file.name, clean.removesuffix("_token"), token=clean.endswith("_token"))
-        return SlotCard(file.name, p.name, p.set, p.cn, p.token)
+        return SlotCard(file.name, p.name, p.set, p.cn, p.token, image=p.image)
 
 
 # --- sheets --------------------------------------------------------------------
@@ -294,6 +297,7 @@ def rebuild(run_dir: Path, info) -> dict[str, Sheet]:
         token_copies=o.get("token_copies", 0),
         tokens_only=o.get("tokens_only", False),
         fetch_args=list(o.get("fetch_args", [])),
+        images=Path(o["images"]) if o.get("images") else None,
     )
     rec = build.stage_and_index(opts)
     main, duplex = partition(opts.fronts_only, opts.duplex_dfc)

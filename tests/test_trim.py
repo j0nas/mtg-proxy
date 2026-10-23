@@ -74,3 +74,20 @@ def test_apply_trims_matches_names_and_is_idempotent(tmp_path, monkeypatch):
     done, unmatched = apply_trims([TrimSpec("all"), TrimSpec("Nope")])
     assert "front/76SolRing1.png" in done and "front/10000Treasure_token1.png" not in done
     assert unmatched == ["Nope"]
+
+
+def test_apply_trims_all_skips_local_images_unless_named(tmp_path, monkeypatch):
+    front, ds = tmp_path / "front", tmp_path / "ds"
+    front.mkdir(), ds.mkdir()
+    monkeypatch.setattr(engine, "FRONT", front)
+    monkeypatch.setattr(engine, "DOUBLE_SIDED", ds)
+    monkeypatch.setattr(engine, "GAME", tmp_path)
+    monkeypatch.setattr(trim, "STATE_FILE", tmp_path / ".trimmed.json")
+    _card(front / "1Counterspell1.png")  # staged from --images
+    _card(front / "2SolRing1.png")
+    done, _ = apply_trims([TrimSpec("all")], local={"1Counterspell1.png"})
+    assert done == ["front/2SolRing1.png"]
+    with Image.open(front / "1Counterspell1.png") as im:
+        assert im.getpixel((300, 0)) == (0, 0, 0, 255)  # the user's own image, untouched
+    done, unmatched = apply_trims([TrimSpec("Counterspell")], local={"1Counterspell1.png"})
+    assert done == ["front/1Counterspell1.png"] and unmatched == []

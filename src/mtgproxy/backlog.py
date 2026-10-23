@@ -9,7 +9,9 @@ Plain MTGA lines, one per physical card, with the provenance in a trailing comme
 
     1 Sol Ring (CMM) 464  # deck=selesnyan ref=p3.5 date=2026-09-19 trim=0.3 dfc
 
-Edit it by hand if you like; a bare ``1 Card Name`` line resolves to current art.
+A card printed from ``make --images`` carries its image (``image=/path/card.jpg``, spaces
+as %20), and ``backlog build`` prints that image again. Edit the file by hand if you like;
+a bare ``1 Card Name`` line resolves to current art.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
+from urllib.parse import unquote
 
 from .manifest import SlotCard
 
@@ -46,6 +49,7 @@ class Entry:
     token: bool = False
     single: bool = False  # known single-sided; neither flag = not yet looked up
     front: bool = False  # double-faced printing, but print only its front as a single-sided card
+    image: str = ""  # printed from this local image (make --images); backlog build prints it again
 
     @property
     def faces_known(self) -> bool:
@@ -74,6 +78,8 @@ class Entry:
             parts.append("single")
         if self.front:
             parts.append("front")
+        if self.image:
+            parts.append(f"image={_escape(self.image)}")
         return " ".join(parts)
 
     def format(self) -> str:
@@ -112,12 +118,25 @@ class Entry:
                 e.single = True
             elif key == "front":
                 e.front = True
+            elif key == "image":
+                e.image = unquote(val)
         return e
 
     @classmethod
     def from_slot(cls, c: SlotCard, deck: str, ref: str, trim: float | None) -> Entry:
         return cls(
-            c.name, c.set, c.cn, 1, deck, ref, date.today().isoformat(), trim, c.dfc, c.token, not c.dfc
+            c.name,
+            c.set,
+            c.cn,
+            1,
+            deck,
+            ref,
+            date.today().isoformat(),
+            trim,
+            c.dfc,
+            c.token,
+            not c.dfc,
+            image=c.image,
         )
 
     def units(self) -> list[Entry]:
@@ -223,7 +242,13 @@ class Backlog:
         for i, e in enumerate(self.entries, 1):
             src = " ".join(x for x in (e.deck, e.ref, e.date) if x)
             flags = " ".join(
-                x for x in ("dfc" if e.dfc else "", f"trim {e.trim:g}" if e.trim is not None else "") if x
+                x
+                for x in (
+                    "dfc" if e.dfc else "",
+                    f"trim {e.trim:g}" if e.trim is not None else "",
+                    "local" if e.image else "",
+                )
+                if x
             )
             rows.append(f"  {i:3d}  {e.qty} {e.card:<{w}}  {src}" + (f"  [{flags}]" if flags else ""))
         return "\n".join(rows)
@@ -232,3 +257,8 @@ class Backlog:
 def decklist_text(cards: list[Entry]) -> str:
     """The clean MTGA decklist the engine builds from (no comments, one line per card)."""
     return "".join(f"1 {c.card}\n" for c in cards)
+
+
+def _escape(path: str) -> str:
+    """A path as one comment token: the line splits on whitespace and on '#'."""
+    return re.sub(r"[%# \t]", lambda m: f"%{ord(m.group()):02X}", path)

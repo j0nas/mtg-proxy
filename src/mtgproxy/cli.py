@@ -13,7 +13,7 @@ from typing import Annotated
 import typer
 from click.core import ParameterSource
 
-from . import __version__, build, cutmenu, cutting, engine, manifest, notes, printing, trim
+from . import __version__, build, cutmenu, cutting, engine, local, manifest, notes, printing, trim
 from . import backlog as backlog_mod
 from .backlog import Backlog, BacklogError, Entry
 from .cache import ImageCache
@@ -84,6 +84,18 @@ def make(
     basics: Annotated[
         bool, typer.Option("--basics", help="include basic lands (skipped by default)")
     ] = False,
+    images: Annotated[
+        Path | None,
+        typer.Option(
+            "--images",
+            help=(
+                "folder of your own card images, one per card, named by its front face "
+                "(fell-the-profane.jpg, norn-s-annex.png): those deck lines print from the image, "
+                "single-sided, the rest is fetched"
+            ),
+            file_okay=False,
+        ),
+    ] = None,
     tokens: Annotated[
         int | None, typer.Option("-t", "--tokens", help="also N of each distinct token (no emblems)", min=1)
     ] = None,
@@ -177,6 +189,7 @@ def make(
         back=back,
         trims=trim_specs,
         defer_partial=defer_partial,
+        images=images.resolve() if images else None,  # absolute: run.json keeps it for rebuilds
     )
     try:
         result = build.run_build(opts)
@@ -520,7 +533,11 @@ def redo(
             entries.append(
                 Entry.from_slot(c, info.name, manifest.locate(c, sheets), build._trim_for(c, info.trims))
             )
-            typer.echo(f"  + {c.line:<50} {entries[-1].ref}" + ("  [dfc]" if c.dfc else ""))
+            typer.echo(
+                f"  + {c.line:<50} {entries[-1].ref}"
+                + ("  [dfc]" if c.dfc else "")
+                + ("  [local]" if c.image else "")
+            )
     if not entries:
         fail("nothing matched")
     bl = Backlog.at(run_dir.parent)
@@ -662,6 +679,15 @@ def backlog_build(
         typer.echo(backlog_mod.decklist_text(cards), nl=False)
         return
     run_dir = out / run_name
+    images: Path | None = None
+    if own := [(c.name, Path(c.image)) for c in cards if c.image]:
+        # Cards printed from local images: their images go into the run folder, so the run
+        # (and a later rebuild of its manifest) reads them with --images like any deck.
+        images = run_dir / "images"
+        try:
+            local.gather(own, images)
+        except local.LocalImageError as e:
+            fail(str(e))
     run_dir.mkdir(parents=True, exist_ok=True)
     deck = run_dir / f"{run_name}.txt"
     deck.write_text(backlog_mod.decklist_text(cards))
@@ -678,6 +704,7 @@ def backlog_build(
         print_mode=print_,
         printer=printer,
         trims=[trim.TrimSpec(n, mm) for n, mm in trims.items()],
+        images=images,
     )
     try:
         result = build.run_build(opts)

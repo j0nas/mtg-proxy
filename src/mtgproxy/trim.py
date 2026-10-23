@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from PIL import Image
@@ -89,8 +90,12 @@ def reset_state() -> None:
     STATE_FILE.unlink(missing_ok=True)
 
 
-def apply_trims(specs: list[TrimSpec]) -> tuple[list[str], list[str]]:
-    """Trim matching images in game/front and game/double_sided. Returns (trimmed files, unmatched names)."""
+def apply_trims(specs: list[TrimSpec], local: Collection[str] = ()) -> tuple[list[str], list[str]]:
+    """Trim matching images in game/front and game/double_sided. Returns (trimmed files, unmatched names).
+
+    ``local``: file names staged from --images. ``all`` leaves those alone (they are the user's own
+    full-bleed images, with no scan rim to hide); naming the card still trims it.
+    """
     if not specs:
         return [], []
     by_key = {s.key: s for s in specs}
@@ -104,7 +109,7 @@ def apply_trims(specs: list[TrimSpec]) -> tuple[list[str], list[str]]:
             if not m or "_token" in f.name:
                 continue
             key = m.group(1).lower()
-            spec = by_key.get(key) or trim_all
+            spec = by_key.get(key) or (None if f.name in local else trim_all)
             if spec is None:
                 continue
             if key in by_key:

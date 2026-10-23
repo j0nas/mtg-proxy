@@ -171,6 +171,74 @@ def test_trim_for_matches_by_clean_name():
     assert build._trim_for(_card("Sol Ring"), trims) is None
     assert build._trim_for(_card("Sol Ring"), {"all": 0.2}) == 0.2
     assert build._trim_for(_card("Treasure", token=True), {"all": 0.2}) is None
+    own = SlotCard("3Counterspell1.jpg", "Counterspell", image="/cards/counterspell.jpg")
+    assert build._trim_for(own, {"all": 0.2}) is None  # `all` leaves local images alone
+    assert build._trim_for(own, {"Counterspell": 0.5, "all": 0.2}) == 0.5  # naming it still trims
+
+
+def test_local_image_cards_round_trip_through_the_backlog(tmp_path):
+    path = "/Users/me/My Cards/#1 fell-the-profane.jpg"
+    c = SlotCard("3FelltheProfaneFellMire1.jpg", "Fell the Profane // Fell Mire", image=path)
+    e = Entry.from_slot(c, "aminatou", "p1.3", None)
+    assert (e.single, e.dfc, e.image) == (True, False, path)
+    line = e.format()
+    assert line.startswith("1 Fell the Profane // Fell Mire  # deck=aminatou ref=p1.3 date=")
+    assert line.endswith(" single image=/Users/me/My%20Cards/%231%20fell-the-profane.jpg")
+    assert Entry.parse(line) == e
+    assert decklist_text([e]) == "1 Fell the Profane // Fell Mire\n"  # the line finds its image by name
+    bl = Backlog(tmp_path / "BACKLOG.txt", [e])
+    assert bl.listing().endswith("[local]")
+    sheets = {MAIN: Sheet(MAIN, "d.pdf", 8, [c])}
+    rt = manifest.sheets_from_dict({k: v.as_dict() for k, v in sheets.items()})
+    assert rt[MAIN].cards[0].image == path
+    old = manifest.sheets_from_dict(
+        {MAIN: {"pdf": "d.pdf", "per_page": 8, "cards": [{"file": "x", "name": "y"}]}}
+    )
+    assert old[MAIN].cards[0].image == ""  # run.json from before --images
+
+
+def test_cli_redo_and_backlog_build_reprint_local_images(tmp_path, monkeypatch):
+    monkeypatch.setattr("mtgproxy.cli._per_page", lambda paper, card: 8)
+    cards = tmp_path / "cards"
+    cards.mkdir()
+    (cards / "counterspell.jpg").write_bytes(b"custom counterspell")
+    deck = tmp_path / "deck"
+    deck.mkdir()
+    sheets = {
+        MAIN: Sheet(MAIN, "deck.pdf", 8, [
+            _card("Sol Ring", "cmm", "464"),
+            SlotCard("2Counterspell1.jpg", "Counterspell", image=str(cards / "counterspell.jpg")),
+        ])
+    }  # fmt: skip
+    (deck / "run.json").write_text(json.dumps({
+        "name": "deck", "paper": "a4", "card_size": "standard", "registration": "4", "cards": 2,
+        "fronts_only": True, "generated": "2026-10-23", "sheets": {k: v.as_dict() for k, v in sheets.items()},
+    }))  # fmt: skip
+    r = runner.invoke(app, ["redo", "last", "--run", str(deck)])
+    assert r.exit_code == 0, r.output
+    assert "[local]" in r.output and "image=" in (tmp_path / "BACKLOG.txt").read_text()
+    built = {}
+
+    def fake_run_build(opts):
+        built["opts"] = opts
+        built["deck"] = Path(opts.deck).read_text()
+        return build.BuildResult("b", tmp_path / "b", None, None, 0, 2)
+
+    monkeypatch.setattr(build, "run_build", fake_run_build)
+    monkeypatch.setattr(build, "print_summary", lambda r, o: None)
+    r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--name", "b"])
+    assert r.exit_code == 0, r.output
+    assert built["deck"] == "1 Sol Ring (CMM) 464\n1 Counterspell\n"
+    assert built["opts"].images == tmp_path / "b" / "images" and built["opts"].include_basics
+    assert (tmp_path / "b" / "images" / "counterspell.jpg").read_bytes() == b"custom counterspell"
+
+    # A queued local card whose image is gone fails before anything is built.
+    (tmp_path / "BACKLOG.txt").write_text(
+        "1 Counterspell  # deck=deck single image=/nowhere/counterspell.jpg\n"
+    )
+    r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--name", "c"])
+    assert r.exit_code == 1 and "local image missing: /nowhere/counterspell.jpg" in r.output
+    assert not (tmp_path / "c").exists()
 
 
 def test_cli_redo_and_backlog(tmp_path, monkeypatch):

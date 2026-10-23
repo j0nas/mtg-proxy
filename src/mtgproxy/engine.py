@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+import io
 import os
 import shutil
 import subprocess
@@ -111,6 +112,24 @@ def fetch_cards(deck_path: Path, fmt: str, args: list[str]) -> None:
     ensure_game_dirs()
     with in_engine():
         _click_main(module("plugins.mtg.fetch"), [str(deck_path), fmt, *args])
+
+
+def read_deck_lines(lines: list[str], fmt: str) -> list[tuple[str, str, str, int] | None]:
+    """How the engine's ``fmt`` parser reads each decklist line on its own: (name, set, collector
+    number, quantity), or None for a line it skips (headers, comments, a moxfield line without
+    ``(SET) number``). Only the parser runs; nothing is looked up or fetched."""
+    deck_formats = module("plugins.mtg.deck_formats")
+    out: list[tuple[str, str, str, int] | None] = []
+    with contextlib.redirect_stdout(io.StringIO()):  # it prints every line it reads or skips
+        for line in lines:
+            got: list[tuple[str, str, str, int]] = []
+            deck_formats.parse_deck(
+                line,
+                fmt.lower(),
+                lambda _i, name, set_code, cn, qty, got=got: got.append((name, set_code, cn, qty)),
+            )
+            out.append(got[0] if got else None)
+    return out
 
 
 def create_pdf(args: list[str]) -> None:
