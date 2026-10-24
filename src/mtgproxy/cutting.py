@@ -70,7 +70,8 @@ SCAN_START_FILE = "scan-start.json"  # in out_dir: where each kind of sheet last
 
 
 def start_key(frame) -> str:
-    return f"{frame.marks}-mark, inset {frame.inset:g} mm, legs {frame.length:g} mm"
+    top = "" if frame.inset_y is None else f", {frame.inset_y:g} mm top and bottom"
+    return f"{frame.marks}-mark, inset {frame.inset:g} mm{top}, legs {frame.length:g} mm"
 
 
 def remembered_start(out_dir: Path, frame) -> tuple[float, float] | None:
@@ -128,6 +129,7 @@ def with_inset(geom: layout.Geometry, inset: float) -> layout.Geometry:
         reg_inset_mm=inset,
         reg_x_mm=round(geom.page_w_mm - 2 * inset, 3),
         reg_y_mm=round(geom.page_h_mm - 2 * inset, 3),
+        reg_inset_y_mm=None,
     )
 
 
@@ -186,6 +188,7 @@ def run_cut(o: CutOptions) -> int:
         length=geom.reg_length_mm if o.reg_length is None else o.reg_length,
         thickness=o.reg_thickness,
         marks=int(o.registration),
+        inset_y=geom.reg_inset_y_mm,
     )
     try:
         blade = protocol.Blade(o.force, o.speed, o.depth)
@@ -197,7 +200,9 @@ def run_cut(o: CutOptions) -> int:
     via = "nothing (dry run)" if o.dry_run else o.connection
     print(
         f"cut-proxies: {name} — {what}, {o.registration}-mark registration "
-        f"(marks inset {frame.inset:g} mm, {frame.width:g} x {frame.height:g} mm apart, "
+        f"(marks inset {frame.inset:g} mm"
+        + ("" if frame.inset_y is None else f", {frame.inset_y:g} mm top and bottom")
+        + f", {frame.width:g} x {frame.height:g} mm apart, "
         f"{frame.length:g} x {frame.thickness:g} mm)"
     )
     print(

@@ -42,10 +42,12 @@ def test_a4_standard_geometry_and_svg(tmp_path):
 
 # The 3x3 sheet's printed marks (page mm, portrait), from page_manager.generate_reg_mark: the square
 # is 5 mm from the inset with no stroke; an L's legs are 1 mm lines centred on the inset, running
-# 10.5 mm from the corner's centre lines to their (square-capped) ends.
-SQUARE_3X3 = (3.5, 3.5, 8.5, 8.5)  # 5 mm from the inset, no stroke (engine fork cd4166a)
-TOP_RIGHT_L = [(196.0, 3.0, 207.0, 4.0), (206.0, 3.0, 207.0, 14.0)]
-BOTTOM_LEFT_L = [(3.0, 293.0, 14.0, 294.0), (3.0, 283.0, 4.0, 294.0)]
+# 10.5 mm from the corner's centre lines to their (square-capped) ends. The inset is 3.5 mm from the
+# sides and 7 mm from the top and bottom (inset_y): at 3.5 mm all round, the bottom-left L read
+# 1-2 mm left on a laminated sheet, three scans out of three (2026-10-24).
+SQUARE_3X3 = (3.5, 7.0, 8.5, 12.0)  # 5 mm from the inset, no stroke (engine fork cd4166a)
+TOP_RIGHT_L = [(196.0, 6.5, 207.0, 7.5), (206.0, 6.5, 207.0, 17.5)]
+BOTTOM_LEFT_L = [(3.0, 289.5, 14.0, 290.5), (3.0, 279.5, 4.0, 290.5)]
 
 
 def _gap(a, b) -> float:
@@ -61,7 +63,13 @@ def test_a4_standard_3x3_geometry_and_svg(tmp_path):
     svg = tmp_path / "cut.svg"
     g = build_cut_svg("a4", "standard", svg, "3x3")
     assert (g.cards, g.page_w_mm, g.page_h_mm) == (9, 210.0, 297.0)  # portrait
-    assert (g.reg_inset_mm, g.reg_x_mm, g.reg_y_mm, g.reg_length_mm) == (3.5, 203.0, 290.0, 10.5)
+    assert (g.reg_inset_mm, g.reg_inset_y_mm, g.reg_x_mm, g.reg_y_mm, g.reg_length_mm) == (
+        3.5,
+        7.0,
+        203.0,
+        283.0,
+        10.5,
+    )
     text = svg.read_text()
     assert text.count("<path ") == 9 and "a4/standard 3x3: 9 cards" in text
     assert len(re.findall(r"\bA[0-9.]+,[0-9.]+ 0 [01] [01]", text)) == 9 * 4
@@ -69,16 +77,17 @@ def test_a4_standard_3x3_geometry_and_svg(tmp_path):
     assert len(outlines) == 9
     for x0, y0, x1, y1 in outlines:
         assert (round(x1 - x0, 2), round(y1 - y0, 2)) == (63.0, 88.0)
-        assert x0 > 3.5 and x1 < 206.5 and y0 > 3.5 and y1 < 293.5  # inside the mark frame
+        assert x0 > 3.5 and x1 < 206.5 and y0 > 7.0 and y1 < 290.0  # inside the mark frame
     marks = {"square": [SQUARE_3X3], "top-right": TOP_RIGHT_L, "bottom-left": BOTTOM_LEFT_L}
     clear = {k: min(_gap(o, m) for o in outlines for m in parts) for k, parts in marks.items()}
-    # Every cut is more than 5 mm from every mark's ink: the square 6.3, the L's 5.4 (a 4x2 sheet's
-    # L's: 6.1). Card print runs 0.7 mm past the cut, so it comes within about 4.7 mm of an L.
-    assert clear == pytest.approx({"square": 6.78, "top-right": 5.42, "bottom-left": 5.42}, abs=0.05)
+    # Cut to ink: the L's 5.2 mm (a 4x2 sheet's: 6.1), the square 3.3 mm: at 7 mm from the top it
+    # sits beside the top-left card's top edge. None of TB123's passes over the square cross a card:
+    # its rows run above them, and it measures the square down at x 7 and across at y 9.5.
+    assert clear == pytest.approx({"square": 3.32, "top-right": 5.25, "bottom-left": 5.23}, abs=0.05)
     # The corner a fourth mark would take is as clear as the others: -r 4 is refused for its scan
     # start (layout.registration), not for room.
-    bottom_right = [(196.0, 293.0, 207.0, 294.0), (206.0, 283.0, 207.0, 294.0)]
-    assert min(_gap(o, m) for o in outlines for m in bottom_right) == pytest.approx(5.42, abs=0.05)
+    bottom_right = [(196.0, 289.5, 207.0, 290.5), (206.0, 279.5, 207.0, 290.5)]
+    assert min(_gap(o, m) for o in outlines for m in bottom_right) == pytest.approx(5.25, abs=0.05)
 
 
 @needs_engine
@@ -92,7 +101,9 @@ def test_the_marks_the_engine_prints_are_the_frame_cut_proxies_scans():
     from enums import Registration
     from page_manager import generate_reg_mark
 
-    with generate_reg_mark("210mm", "297mm", "3.5mm", "1mm", "10.5mm", 300, Registration.THREE) as im:
+    with generate_reg_mark(
+        "210mm", "297mm", "3.5mm", "1mm", "10.5mm", 300, Registration.THREE, inset_y="7mm"
+    ) as im:
         dark = np.asarray(im.convert("L")) < 128
     px = 300 / 25.4
 
@@ -103,10 +114,10 @@ def test_the_marks_the_engine_prints_are_the_frame_cut_proxies_scans():
 
     assert dark.shape == (3507, 2480)  # portrait A4 at 300 ppi
     assert ink(0, 0, 14, 14) == SQUARE_3X3
-    assert ink(190, 0, 210, 14.5) == (196.0, 3.0, 207.0, 14.0)  # the top-right L's two legs
-    assert ink(0, 282.5, 20, 297) == (3.0, 283.0, 14.0, 294.0)  # the bottom-left L's
-    assert not dark[int(282 * px) :, int(190 * px) :].any()  # nothing bottom-right
-    assert not dark[int(15 * px) : int(282 * px)].any()  # and nothing else on the page
+    assert ink(190, 0, 210, 18) == (196.0, 6.5, 207.0, 17.5)  # the top-right L's two legs
+    assert ink(0, 279, 20, 297) == (3.0, 279.5, 14.0, 290.5)  # the bottom-left L's
+    assert not dark[int(279 * px) :, int(190 * px) :].any()  # nothing bottom-right
+    assert not dark[int(18 * px) : int(279 * px)].any()  # and nothing else on the page
 
     # The frame cut-proxies describes to the machine for this layout. TB123 takes the square's
     # centre less 2.5 mm as its edges, which must land on the L's centre lines, the frame's corners.
@@ -114,13 +125,22 @@ def test_the_marks_the_engine_prints_are_the_frame_cut_proxies_scans():
 
     g = build_cut_svg("a4", "standard", None, "3x3")
     f = session.Frame(
-        g.page_w_mm, g.page_h_mm, g.reg_inset_mm, g.reg_x_mm, g.reg_y_mm, g.reg_length_mm, 1.0, 3
+        g.page_w_mm,
+        g.page_h_mm,
+        g.reg_inset_mm,
+        g.reg_x_mm,
+        g.reg_y_mm,
+        g.reg_length_mm,
+        1.0,
+        3,
+        g.reg_inset_y_mm,
     )
-    centre = (SQUARE_3X3[0] + SQUARE_3X3[2]) / 2
-    assert centre - 2.5 == f.inset == (TOP_RIGHT_L[0][1] + TOP_RIGHT_L[0][3]) / 2
+    cx, cy = (SQUARE_3X3[0] + SQUARE_3X3[2]) / 2, (SQUARE_3X3[1] + SQUARE_3X3[3]) / 2
+    assert cx - 2.5 == f.inset == (BOTTOM_LEFT_L[1][0] + BOTTOM_LEFT_L[1][2]) / 2  # left corners, x
+    assert cy - 2.5 == f.top == (TOP_RIGHT_L[0][1] + TOP_RIGHT_L[0][3]) / 2  # top corners, y
     assert f.inset + f.width == (TOP_RIGHT_L[1][0] + TOP_RIGHT_L[1][2]) / 2  # top-right corner, x
-    assert f.inset + f.height == (BOTTOM_LEFT_L[0][1] + BOTTOM_LEFT_L[0][3]) / 2  # bottom-left, y
-    assert f.inset + f.height - f.length == BOTTOM_LEFT_L[1][1]  # TB51's leg: corner line to inked end
+    assert f.top + f.height == (BOTTOM_LEFT_L[0][1] + BOTTOM_LEFT_L[0][3]) / 2  # bottom-left, y
+    assert f.top + f.height - f.length == BOTTOM_LEFT_L[1][1]  # TB51's leg: corner line to inked end
     xs, ys = zip(*proof.square(f).points, strict=True)
     assert (min(xs), min(ys), max(xs), max(ys)) == SQUARE_3X3  # the proof cut traces the ink's edge
 

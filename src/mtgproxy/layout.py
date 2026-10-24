@@ -47,6 +47,7 @@ class Geometry:
     cut_bbox_mm: tuple[float, float, float, float]
     reg_length_mm: float = 9.4  # the printed L marks' legs, from the corner line to the leg's end
     layout: str = DEFAULT
+    reg_inset_y_mm: float | None = None  # marks' distance from the top and bottom, when not reg_inset_mm
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -172,12 +173,21 @@ def registration_mm(paper: str, card_size: str, name: str = DEFAULT) -> tuple[fl
     return engine.size_to_mm(inset), engine.size_to_mm(length)
 
 
+def registration_inset_y_mm(paper: str, card_size: str, name: str = DEFAULT) -> float | None:
+    """The marks' distance from the top and bottom edges when the layout sets its own (``inset_y``,
+    the engine fork's 3x3 layout), else None: the same as the sides."""
+    own = layout_def(paper, card_size, name).get("registration") or {}
+    return engine.size_to_mm(own["inset_y"]) if own.get("inset_y") else None
+
+
 def build_cut_svg(paper: str, card_size: str, out: Path | None, name: str = DEFAULT) -> Geometry:
     """Write the cut-path SVG (unless ``out`` is None) and return the geometry."""
     import ezdxf
 
     page_w, page_h = page_size_mm(paper, card_size, name)
     inset, leg = registration_mm(paper, card_size, name)
+    inset_y = registration_inset_y_mm(paper, card_size, name)
+    top = inset if inset_y is None else inset_y
     args = ["--card_size", card_size, "--paper_size", paper]
     if name != DEFAULT:
         # generate_dxf.py picks the orientation that fits the most cards unless told; create_pdf.py
@@ -203,7 +213,7 @@ def build_cut_svg(paper: str, card_size: str, out: Path | None, name: str = DEFA
             ys.append(-(loc.y if hasattr(loc, "y") else loc[1]))
     if not paths:
         raise LayoutError("DXF contained no card outlines")
-    if min(xs) < inset or min(ys) < inset or max(xs) > page_w - inset or max(ys) > page_h - inset:
+    if min(xs) < inset or min(ys) < top or max(xs) > page_w - inset or max(ys) > page_h - top:
         raise LayoutError("card outlines fall outside the registration-mark frame")
 
     if out is not None:
@@ -229,8 +239,9 @@ def build_cut_svg(paper: str, card_size: str, out: Path | None, name: str = DEFA
         page_h_mm=round(page_h, 3),
         reg_inset_mm=round(inset, 3),
         reg_x_mm=round(page_w - 2 * inset, 3),
-        reg_y_mm=round(page_h - 2 * inset, 3),
+        reg_y_mm=round(page_h - 2 * top, 3),
         cut_bbox_mm=(round(min(xs), 3), round(min(ys), 3), round(max(xs), 3), round(max(ys), 3)),
         reg_length_mm=round(leg, 3),
         layout=name,
+        reg_inset_y_mm=None if inset_y is None else round(inset_y, 3),
     )

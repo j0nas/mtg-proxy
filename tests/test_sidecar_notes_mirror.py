@@ -50,7 +50,11 @@ def test_notes_for_a_3x3_sheet():
     ctx = notes.NotesContext("t", "a4", "standard", "3", 9, True, True, 0, today="2026-10-24", layout="3x3")
     text = notes.render(ctx)
     assert "card: standard | layout: 3x3 | registration: 3-mark | cards: 9" in text
-    assert "**portrait A4**" in text and "**3.0 mm** from the paper's edges" in text and "2.96 mm" in text
+    assert (
+        "**portrait A4**" in text
+        and "**3.0 mm** from the paper's sides (6.5 mm from the top and" in text
+        and "2.96 mm" in text
+    )
     assert "**Actual size / 100%** scale, borderless **OFF**" in text
     assert "**portrait, the black square top-left**" in text and "masking tape" in text
     assert "It reads run.json here: 3-mark scan, a4 paper, 3x3 layout." in text

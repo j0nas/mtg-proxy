@@ -62,15 +62,15 @@ def default_start(frame: Frame) -> tuple[float, float]:
     NOTES.md). The sweep has to cross the square's left edge from white paper: starts 2-6 mm in
     from the left all found it that night, and starts at 11-13 mm, on or past the square, never
     did (reply 1). The square must print exactly 5 mm (the engine fork's cd4166a): at 6 mm the
-    machine found it and then failed to measure it (reply -1) from every start. On the 3x3
-    layout's 3.5 mm inset the start clamps to (1.5, 1), 2 mm above and 2.5 mm left of a square
-    printed at 3.5-8.5 mm, with only that much paper between the start and the edge. Untested on
-    the machine."""
+    machine found it and then failed to measure it (reply -1) from every start. A 3x3 sheet's
+    marks sit 3.5 mm from the sides and 7 mm from the top and bottom: the start is (5, 1), 2 mm
+    above and 2.5 mm left of a square printed 3.5-8.5 mm across and 7-12 mm down. With 3.5 mm all
+    round, (1.5, 1) registered on plain A4 and on laminate (2026-10-24)."""
     if frame.marks == 3:
-        return max(LOWEST, frame.inset - 2), max(LOWEST, frame.inset - 6)
+        return max(LOWEST, frame.top - 2), max(LOWEST, frame.inset - 6)
     if frame.inset <= 5:
-        return frame.inset / 2, min(11.5, frame.inset + frame.length - 2)
-    return frame.inset - 2.5, frame.inset + 8
+        return frame.top / 2, min(11.5, frame.inset + frame.length - 2)
+    return frame.top - 2.5, frame.inset + 8
 
 
 def search_starts(first: tuple[float, float]) -> list[tuple[float, float]]:
@@ -91,7 +91,7 @@ def plan(svg: Path, frame: Frame, blade: protocol.Blade, passes: int, bias: tupl
     lines = geometry.load_svg(svg)
     if not lines:
         raise CutError(f"{svg} has no paths to cut")
-    ordered = geometry.order(lines, start=(frame.inset, frame.inset))
+    ordered = geometry.order(lines, start=(frame.inset, frame.top))
     job = Job(geometry.passes(ordered, passes), frame, blade, bias, shapes=ordered)
     check_bounds(job)
     return job

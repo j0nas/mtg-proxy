@@ -136,15 +136,16 @@ make-proxies decks/aminatou.txt -f moxfield --images cards/ --dry-run   # how ma
 ### Nine to a sheet
 
 `--layout 3x3` puts nine standard cards on portrait A4, one more than the default 4x2. It is the
-card-maker's tighter layout: the marks sit 3.5 mm from the paper's edges, with 10.5 mm legs. It
+card-maker's tighter layout with 10.5 mm legs. The marks sit 3.5 mm from the paper's sides and 7 mm
+from the top and bottom (the engine fork's `inset_y`): at 3.5 mm all round the bottom-left L read
+1–2 mm left on a laminated sheet, three scans out of three (2026-10-24). It
 prints 3-mark registration only, the square top-left and L marks top-right and bottom-left, and
-refuses `-r 4`: the four-mark scan would have to start in the 3 mm of paper above the top-left
-mark. It is A4 with standard cards and fronts only. `--backs` is refused, and so is a deck whose
+refuses `-r 4`, which hasn't been tried at these insets. It is A4 with standard cards and fronts only. `--backs` is refused, and so is a deck whose
 double-faced cards would need a duplex sheet; `--split-faces` prints their faces on the 3x3 sheet.
 `run.json` records the layout, so `cut-proxies` scans the right frame and cuts the right outlines;
 `redo`, `backlog --layout 3x3` and `backlog build --layout 3x3` count nine to a sheet.
 
-The marks' outer edges are 3.0 mm from the paper's edges, and the ET-8550 prints to 2.96 mm from
+The marks' outer edges are 3.0 mm from the paper's sides, and the ET-8550 prints to 2.96 mm from
 every edge (its CUPS ImageableArea), so the sheet must print at 100 %. The PDF page is landscape like
 every sheet's: print it as you print a 4x2 sheet, and put it on the mat portrait with the square at
 the top-left. Card print comes within 4.7 mm of the L marks and 5.7 mm of the square (5.3 mm on a
@@ -225,7 +226,7 @@ cut-proxies --scan         # list the Bluetooth devices in range
 cut-proxies --dry-run      # no machine: runs the whole job against a stand-in, checks the bounds
 cut-proxies --probe        # scans the marks, logs what the machine reports, cuts nothing
 cut-proxies --proof        # scores each mark's L after the scan; y cuts, r rescans, q stops
-cut-proxies --layout 3x3   # a 3x3 sheet without its run.json (3-mark, 3.5 mm inset)
+cut-proxies --layout 3x3   # a 3x3 sheet without its run.json (3-mark; 3.5 mm sides, 7 mm top/bottom)
 cut-proxies --svg job.svg --reg-inset 5   # any page-sized SVG
 ```
 
@@ -289,8 +290,9 @@ Registration:
   that. The search must cross the square's left edge from white paper: it starts at (8, 4) mm at
   a 10 mm inset, which registered first time on plain A4 (2026-10-24); starts on or past the
   square never find it (`1`). No bottom-right mark is read, so a stretched sheet's far corner
-  goes unchecked. A 3x3 sheet's search starts at (1.5, 1) mm, 2 mm above and 2.5 mm left of a
-  square printed at 3.5–8.5 mm; not yet tried on the machine.
+  goes unchecked. A 3x3 sheet's search starts at (5, 1) mm, 2 mm above and 2.5 mm left of its
+  square (3.5–8.5 mm across, 7–12 mm down). At 3.5 mm all round it registered from (1.5, 1) on
+  plain A4 and laminate (2026-10-24); the 7 mm top and bottom are untested on the machine.
 - `--reg-inset MM` moves the expected marks from the layout's inset (10 mm; 3.5 mm on a 3x3 sheet)
   toward the paper edge (5 mm is proven). It must match the printed marks.
 - Cuts may reach above or left of the top-left mark, as long as they stay on the paper: the

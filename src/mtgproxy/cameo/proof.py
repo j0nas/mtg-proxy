@@ -48,9 +48,9 @@ def square(frame: Frame) -> Polyline:
     """The 3-mark square's printed outline, page mm: SQUARE from the inset, so 10-15 mm at a
     10 mm inset. TB123 measures a 5 mm square; the 6 mm one the card-maker drew with a 1 mm
     stroke until cd4166a was found and never measured (2026-10-24)."""
-    lo = frame.inset
-    hi = frame.inset + SQUARE
-    return Polyline(((lo, lo), (hi, lo), (hi, hi), (lo, hi), (lo, lo)))
+    x0, y0 = frame.inset, frame.top
+    x1, y1 = x0 + SQUARE, y0 + SQUARE
+    return Polyline(((x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)))
 
 
 def crossings(frame: Frame, start: tuple[float, float]) -> dict[tuple[str, str], list[float]]:
@@ -81,7 +81,7 @@ def cuts(frame: Frame, start: tuple[float, float]) -> list[tuple[str, Polyline]]
         if name not in L_MARKS[frame.marks]:
             continue
         cx = frame.inset + i * frame.width
-        cy = frame.inset + j * frame.height
+        cy = frame.top + j * frame.height
 
         def at_h(d: float, cx=cx, cy=cy, sx=sx) -> Point:
             return (cx + sx * d, cy)

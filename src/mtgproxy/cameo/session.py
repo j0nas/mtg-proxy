@@ -35,12 +35,18 @@ class Frame:
 
     page_w: float
     page_h: float
-    inset: float  # mark corners' distance from the top and left paper edges
+    inset: float  # mark corners' distance from the left and right paper edges (and top/bottom, see inset_y)
     width: float  # top-left → top-right mark corner
     height: float  # top-left → bottom-left mark corner
     length: float = 9.4  # leg length
     thickness: float = 1.0
     marks: int = 4  # 4 = L-marks in all four corners; 3 = square top-left + two L's
+    inset_y: float | None = None  # from the top and bottom edges, when it differs from inset (3x3)
+
+    @property
+    def top(self) -> float:
+        """The mark corners' distance from the top (and bottom) paper edge."""
+        return self.inset if self.inset_y is None else self.inset_y
 
 
 @dataclass
@@ -55,7 +61,7 @@ class Job:
 def registered(job: Job) -> list[list[tuple[float, float]]]:
     """Every polyline in the machine's registered frame (x, y mm from the top-left mark)."""
     f, (bx, by) = job.frame, job.bias
-    return [[(x - f.inset + bx, y - f.inset + by) for x, y in pl.points] for pl in job.lines]
+    return [[(x - f.inset + bx, y - f.top + by) for x, y in pl.points] for pl in job.lines]
 
 
 def check_bounds(job: Job) -> tuple[float, float, float, float]:
@@ -177,7 +183,7 @@ class Session:
     def setup(self, blade: p.Blade, frame: Frame, low: tuple[float, float] = (0.0, 0.0)) -> None:
         """The blade, inside a cutting area reaching the paper's far edges (+2 mm for the bias)
         and, when a cut reaches above or left of the top-left mark, back to ``low`` (y, x)."""
-        area_y = frame.page_h - frame.inset + 2
+        area_y = frame.page_h - frame.top + 2
         area_x = frame.page_w - frame.inset + 2
         self.send(*p.blade_setup(blade, area_y, area_x, *low))
 
