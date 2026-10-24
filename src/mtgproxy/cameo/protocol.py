@@ -77,16 +77,20 @@ def scan(kind: int, height_mm: float, width_mm: float, top_mm: float, left_mm: f
     return f"TB{kind},{su(height_mm)},{su(width_mm)},{su(top_mm)},{su(left_mm)}", "TB99"
 
 
-SCAN_REPLY = re.compile(r"^ {4}([01])\x03$")
+SCAN_REPLY = re.compile(r"^(?=.{5}\x03$) *(-?\d+)\x03$")
 
 
 def scan_result(reply: bytes | None) -> str | None:
-    """'found' ("    0") or 'not found' ("    1"); None for anything else. Scan results are
-    padded to five characters; a status reply ("1" = moving) is not a scan result."""
+    """'found' ("    0") or 'not found' ("    1"; TB123 answers "   -1" when its area search
+    finds no square, 2026-10-24); None for anything else. Scan results are padded to five
+    characters; a status reply ("1" = moving) is not a scan result."""
     if reply is None:
         return None
     m = SCAN_REPLY.match(reply.decode("latin1"))
-    return None if m is None else ("found" if m.group(1) == "0" else "not found")
+    if m is None:
+        return None
+    code = int(m.group(1))
+    return "found" if code == 0 else "not found" if code == 1 else f"not found (reply {code})"
 
 
 def blade_setup(

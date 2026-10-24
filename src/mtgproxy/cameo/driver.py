@@ -55,15 +55,16 @@ def default_start(frame: Frame) -> tuple[float, float]:
     proven (2.5, 11.5): starting 0.5 mm past the vertical leg skewed its cut and 11.5 did not
     (calibration sheets, 2026-09-28).
 
-    A 3-mark sheet (TB123) starts 4 mm above and left of its square's corner. The machine finds
-    the square by an area search, not one line down: rows 3 mm apart from the start to 30 mm
-    below it, each sweeping 30 mm to its right, for a dark run 3.5-9 mm long (firmware V1.04,
-    cameo-re NOTES.md). The square is caught anywhere from 5 mm above the start to 30 mm below it
-    and from about 1 mm to 24 mm right of it, and the start stays on the paper. Untested on the
-    machine."""
+    A 3-mark sheet (TB123) starts 2 mm above and 6 mm left of its square's corner: (8, 4) at a
+    10 mm inset, which registered first time on 2026-10-24. The machine finds the square by an
+    area search, not one line down: rows 3 mm apart from the start to 30 mm below it, each
+    sweeping 30 mm to its right, for a dark run 3.5-9 mm long (firmware V1.04, cameo-re
+    NOTES.md). The sweep has to cross the square's left edge from white paper: starts 2-6 mm in
+    from the left all found it that night, and starts at 11-13 mm, on or past the square, never
+    did (reply 1). The square must print exactly 5 mm (the engine fork's cd4166a): at 6 mm the
+    machine found it and then failed to measure it (reply -1) from every start."""
     if frame.marks == 3:
-        corner = max(LOWEST, frame.inset - 4)
-        return corner, corner
+        return max(LOWEST, frame.inset - 2), max(LOWEST, frame.inset - 6)
     if frame.inset <= 5:
         return frame.inset / 2, min(11.5, frame.inset + frame.length - 2)
     return frame.inset - 2.5, frame.inset + 8
@@ -123,7 +124,7 @@ def cut(
     s = Session(t, log)
     try:
         extent = reach = check_bounds(job)
-        if confirm:  # the area must hold the proof cuts too: a 3-mark square's outline is 0.5 mm out
+        if confirm:  # the area must hold the proof cuts too, which may reach past the job's own
             marks = [cut for _, cut in proof.cuts(job.frame, starts[0])]
             reach = check_bounds(replace(job, lines=[*job.lines, *marks]))
         low = low_corner(reach)

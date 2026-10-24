@@ -41,14 +41,15 @@ CORNERS = (  # name, which frame corner, the legs' directions (x, y) from it
     ("bottom-left", (0, 1), (1, -1)),
 )
 L_MARKS = {4: ("top-left", "top-right", "bottom-right", "bottom-left"), 3: ("top-right", "bottom-left")}
-SQUARE = 5.0  # mm: the card-maker's 3-mark square, drawn with a stroke as thick as the L's lines
+SQUARE = 5.0  # mm: the card-maker's 3-mark square, filled, no outline (engine fork cd4166a)
 
 
 def square(frame: Frame) -> Polyline:
-    """The 3-mark square's printed outline, page mm: SQUARE from the inset plus half the stroke
-    on every side, so 9.5-15.5 mm at a 10 mm inset with 1 mm lines."""
-    lo = frame.inset - frame.thickness / 2
-    hi = frame.inset + SQUARE + frame.thickness / 2
+    """The 3-mark square's printed outline, page mm: SQUARE from the inset, so 10-15 mm at a
+    10 mm inset. TB123 measures a 5 mm square; the 6 mm one the card-maker drew with a 1 mm
+    stroke until cd4166a was found and never measured (2026-10-24)."""
+    lo = frame.inset
+    hi = frame.inset + SQUARE
     return Polyline(((lo, lo), (hi, lo), (hi, hi), (lo, hi), (lo, lo)))
 
 

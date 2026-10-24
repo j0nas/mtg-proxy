@@ -53,7 +53,7 @@ def test_the_next_sheet_searches_around_where_the_last_one_registered(tmp_path):
     cutting.remember_start(tmp_path, frame(), (11.5, 24))
     assert cutting.scan_starts(o, frame())[0][-1] == (7.5, 18)  # far off: the default comes last
     # A 3-mark sheet's square is found by an area search: one start, nothing remembered.
-    assert cutting.scan_starts(o, frame(marks=3)) == ([(6, 6)], "the area search's corner")
+    assert cutting.scan_starts(o, frame(marks=3)) == ([(8, 4)], "the area search's corner")
 
 
 def test_given_starts_are_tried_as_given(tmp_path):

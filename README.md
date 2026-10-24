@@ -261,12 +261,15 @@ Registration:
 - 3-mark sheets (`make-proxies -r 3`, then `cut-proxies` reads it from `run.json`) are scanned
   with `TB123`, which finds the top-left square by an area search instead of one line down:
   rows 3 mm apart from the start to 30 mm below it, each sweeping 30 mm to its right, for a
-  dark run 3.5–9 mm long. The card-maker's square prints 6 mm wide (5 mm plus its outline), and
-  the machine takes its centre less 2.5 mm as the edge, which lands on the L marks' centre lines:
-  the frame and the cut are the same as a 4-mark sheet's. The search starts at (6, 6) mm and
-  should catch the square several millimetres off where the 4-mark search needs 2 mm, but no
-  bottom-right mark is read, so a stretched sheet's far corner goes unchecked. Not yet tried on
-  the machine: `output/test-sheet-3mark/` is a plain-paper test sheet for it.
+  dark run 3.5–9 mm long. It then measures the square down and across and takes its centre less
+  2.5 mm as the edge, which lands on the L marks' centre lines: the frame and the cut are the
+  same as a 4-mark sheet's. The square must print exactly 5 mm. The card-maker drew it with a
+  1 mm outline until the engine fork's cd4166a; at 6 mm the machine found it, its sideways pass
+  ran past it and the scan failed (`-1`) from every start. Regenerate 3-mark sheets made before
+  that. The search must cross the square's left edge from white paper: it starts at (8, 4) mm at
+  a 10 mm inset, which registered first time on plain A4 (2026-10-24); starts on or past the
+  square never find it (`1`). No bottom-right mark is read, so a stretched sheet's far corner
+  goes unchecked.
 - `--reg-inset MM` moves the expected marks from the layout's 10 mm toward the paper edge (5 mm
   is proven). It must match the printed marks.
 - Cuts may reach above or left of the top-left mark, as long as they stay on the paper: the

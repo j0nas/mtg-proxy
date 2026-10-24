@@ -39,6 +39,7 @@ def test_a_miss_tries_the_starts_2_mm_around_the_first_across_before_up_and_down
 def test_only_a_padded_reply_is_a_scan_result():
     assert p.scan_result(b"    0\x03") == "found"
     assert p.scan_result(b"    1\x03") == "not found"
+    assert p.scan_result(b"   -1\x03") == "not found (reply -1)"  # TB123: no square in its area search
     assert p.scan_result(b"1\x03") is None  # a status reply: "moving"
     assert p.scan_result(None) is None
 

@@ -150,12 +150,12 @@ def test_a_3_mark_sheet_scores_the_squares_outline_and_its_two_ls():
     for corner, cut in proof.cuts(CARDS3, driver.default_start(CARDS3)):
         got.setdefault(corner, []).append(pts(cut))
     assert set(got) == {"top-left", "top-right", "bottom-left"}  # no bottom-right mark
-    assert got["top-left"] == [[(9.5, 9.5), (15.5, 9.5), (15.5, 15.5), (9.5, 15.5), (9.5, 9.5)]]
+    assert got["top-left"] == [[(10, 10), (15, 10), (15, 15), (10, 15), (10, 10)]]  # the 5 mm square's edge
     assert got["bottom-left"][0] == [(13, 200), (10, 200), (10, 197)]  # an L, crossed half a leg in
 
 
-def test_a_3_mark_job_scans_tb123_from_above_left_of_the_square_and_widens_the_area_for_its_outline():
-    assert driver.default_start(CARDS3) == (6, 6)
+def test_a_3_mark_job_scans_tb123_from_left_of_the_square_and_traces_its_outline_on_the_corner():
+    assert driver.default_start(CARDS3) == (8, 4)  # registered first time, 2026-10-24
     t = RecordingTransport(
         lambda *a, **k: None, {b"\x1b\x05": b"0\x03", b"FG": driver.FIRMWARE, b"TB123": FOUND}
     )
@@ -164,9 +164,9 @@ def test_a_3_mark_job_scans_tb123_from_above_left_of_the_square_and_widens_the_a
     confirm, _ = answers("y")
     driver.cut(job3, t, log(), [driver.default_start(CARDS3)], confirm)
     out = t.sent.decode("latin1")
-    assert "TB123,3800,5540,120,120\x03" in out and "TB124" not in out
-    assert "\\0,-20\x03" in out  # the square's left edge is 0.5 mm left of the corner line: area 1 mm out
-    assert "M0,-10\x03" in out  # the outline starts at page (9.5, 9.5): y 0 with the 0.5 mm bias
+    assert "TB123,3800,5540,160,80\x03" in out and "TB124" not in out
+    assert "\\0,0\x03" in out  # the 5 mm square's outline starts on the corner line: no wider area
+    assert "M10,0\x03" in out  # the outline starts at page (10, 10), 0.5 mm down with the bias
 
 
 def test_no_answer_on_the_terminal_means_stop():
