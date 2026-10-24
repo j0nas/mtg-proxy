@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
@@ -39,7 +39,7 @@ class BuildOptions:
     out_parent: Path = field(default_factory=Path.cwd)
     paper: str = "a4"
     card_size: str = "standard"
-    layout: str = "4x2"  # 4x2 | 3x3, see layout.py
+    layout: str | None = None  # 3x3 | 4x2, see layout.py; None: layout.default for the paper and card
     board: str = "main"
     fronts_only: bool = True
     duplex_dfc: bool = True
@@ -458,8 +458,9 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
 
 # --- the whole thing ---------------------------------------------------------
 def resolve_layout(opts: BuildOptions) -> BuildOptions:
-    """``opts`` as given; raises BuildError for a layout this paper, card size or --backs can't
-    have."""
+    """``opts`` with its layout settled (None: the default for the paper and card); raises
+    BuildError for a layout this paper, card size or --backs can't have."""
+    opts = replace(opts, layout=opts.layout or layout.default(opts.paper, opts.card_size))
     try:
         layout.check(opts.layout, opts.paper, opts.card_size)
     except layout.LayoutError as e:

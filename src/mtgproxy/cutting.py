@@ -52,7 +52,9 @@ class CutOptions:
     ble_name: str = "CAMEO 5 ALPHA"
     svg: Path | None = None
     dry_run: bool = False
-    layout: str = "4x2"  # 4x2 | 3x3 (layout.py): which of the engine's layouts the sheet was printed in
+    layout: str = (
+        layout.DEFAULT
+    )  # 3x3 | 4x2 (layout.py): which of the engine's layouts the sheet was printed in
     # The printed marks (mm). Leg length None = the layout's: 9.4 on the card-maker's 4x2 A4 (and
     # deckbox's), 6 on its 3x3.
     reg_length: float | None = None
@@ -126,7 +128,7 @@ def run_cut(o: CutOptions) -> int:
 
     # 1. Cut geometry from the card-maker's own layout engine (same source as the PDF).
     if o.svg is None:
-        name = o.label or f"{o.paper}-{o.card_size}" + ("" if o.layout == layout.DEFAULT else f"-{o.layout}")
+        name = o.label or f"{o.paper}-{o.card_size}-{o.layout}"
         svg = o.out_dir / f"{name}.svg"
         geom = layout.build_cut_svg(o.paper, o.card_size, svg, o.layout)
     else:

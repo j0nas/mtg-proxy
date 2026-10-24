@@ -27,7 +27,6 @@ from types import ModuleType
 from natsort import natsorted
 
 from . import engine
-from .layout import DEFAULT as DEFAULT_LAYOUT
 from .layout import layout_def
 from .trim import clean_name
 
@@ -101,7 +100,7 @@ def sheets_from_dict(raw: dict | None) -> dict[str, Sheet]:
     return {k: Sheet.from_dict(k, v) for k, v in (raw or {}).items()}
 
 
-def cards_per_page(paper: str, card_size: str, layout: str = DEFAULT_LAYOUT) -> int:
+def cards_per_page(paper: str, card_size: str, layout: str) -> int:
     d = layout_def(paper, card_size, layout)
     return int(d["num_rows"]) * int(d["num_cols"])
 

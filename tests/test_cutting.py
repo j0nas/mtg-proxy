@@ -65,8 +65,9 @@ def test_laminate_is_the_default_preset(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)  # no run.json here
     o = cut_options(monkeypatch)
     assert (o.force, o.speed, o.depth, o.passes) == (20, 25, 5, 3)
-    assert (o.reg_length, o.reg_thickness) == (None, 1.0)  # legs: the layout's, 9.4 on a 4x2 A4
-    assert o.layout == "4x2"
+    assert (o.reg_length, o.reg_thickness) == (None, 1.0)  # legs: the layout's, 6 on a 3x3 A4
+    assert o.layout == "3x3"  # a plain sheet is the default layout, on A4
+    assert cut_options(monkeypatch, "-p", "letter").layout == "4x2"  # 3x3 is A4 only
 
 
 def test_the_paper_preset_and_explicit_flags_override_it(monkeypatch, tmp_path):
@@ -196,7 +197,7 @@ def test_with_no_run_here_the_default_is_a_plain_a4_sheet(monkeypatch, tmp_path)
     asked = menu(monkeypatch, "default", "done")
     o = cut_options(monkeypatch)
     assert asked[0][1][0].startswith("Cut plain A4 sheet")
-    assert (o.label, o.paper, o.card_size, o.layout) == (None, "a4", "standard", "4x2")
+    assert (o.label, o.paper, o.card_size, o.layout) == (None, "a4", "standard", "3x3")
 
 
 def test_choose_picks_a_run_below_a_preset_and_a_mode(monkeypatch, tmp_path):

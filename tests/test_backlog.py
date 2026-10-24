@@ -363,9 +363,9 @@ def test_redo_and_the_backlog_count_sheets_of_the_runs_layout(tmp_path, monkeypa
     assert "ref=p2.1" in (tmp_path / "BACKLOG.txt").read_text()  # the tenth card is page 2's first
     assert "fronts: 10 → 1 full sheet(s) of 9 + 1 waiting" in r.output
     r = runner.invoke(app, ["backlog", "-o", str(tmp_path)])
+    assert "fronts: 10 → 1 full sheet(s) of 9 + 1 waiting" in r.output  # 3x3 unless told
+    r = runner.invoke(app, ["backlog", "-o", str(tmp_path), "--layout", "4x2"])
     assert "fronts: 10 → 1 full sheet(s) of 8 + 2 waiting" in r.output
-    r = runner.invoke(app, ["backlog", "-o", str(tmp_path), "--layout", "3x3"])
-    assert "fronts: 10 → 1 full sheet(s) of 9 + 1 waiting" in r.output
 
     built = []
     monkeypatch.setattr(build, "run_build", lambda opts: built.append(opts))

@@ -10,11 +10,12 @@ Registration marks are NOT drawn: the cutter finds the printed ones itself. The
 mark geometry it needs (inset from the page edge, mark-to-mark distances, leg
 length) is derived from the same assets/layouts.json entries create_pdf.py uses.
 
-A sheet has one of two layouts, both printed with 3-mark registration. ``4x2`` is the
-engine's default layout for the paper (four by two standard cards on landscape A4, marks 10 mm
-in). ``3x3`` is nine standard cards on portrait A4 with the marks 3.5 mm from the sides and 9 mm
-from the top and bottom: the engine's ``borderless`` variant, its name for the tighter inset,
-which has nothing to do with borderless printing (that stays off).
+A sheet has one of two layouts, both printed with 3-mark registration. ``3x3``, the default
+on A4 with standard cards, is nine cards on portrait A4 with the marks 3.5 mm from the sides and
+9 mm from the top and bottom: the engine's ``borderless`` variant, its name for the tighter inset,
+which has nothing to do with borderless printing (that stays off). ``4x2`` is the engine's own
+layout for the paper (four by two standard cards on landscape A4, marks 10 mm in), and the
+default for every other paper and card size.
 """
 
 from __future__ import annotations
@@ -25,9 +26,9 @@ from pathlib import Path
 
 from . import engine
 
-DEFAULT = "4x2"
+DEFAULT = "3x3"  # on the paper and card it is built for (ONLY); see ``default``
 # Our layout names → the engine's layout variant (layouts.json: layouts[paper][card][variant]).
-VARIANTS = {"4x2": "default", "3x3": "borderless"}
+VARIANTS = {"3x3": "borderless", "4x2": "default"}
 ONLY = {"3x3": ("a4", "standard")}  # the one paper and card a layout is built for; others: any
 SINGLE_SIDED = {"3x3"}  # no --backs or duplex sheet: never printed double-sided here
 NOMINAL_CARDS = {"4x2": 8, "3x3": 9}  # on A4, for messages when layouts.json can't be read
@@ -108,13 +109,19 @@ def check(name: str, paper: str, card_size: str) -> None:
         )
 
 
+def default(paper: str, card_size: str) -> str:
+    """The layout a sheet gets unless told: 3x3 on A4 with standard cards, else 4x2, the engine's
+    own layout for the paper."""
+    return DEFAULT if ONLY[DEFAULT] == (paper, card_size) else "4x2"
+
+
 def engine_flags(name: str) -> list[str]:
     """create_pdf.py's flags for this layout. A 3x3 sheet gets no page label: the engine prints
     it 1.5 mm from the bottom edge, clipped by the printer, below the bottom-left mark."""
     return ["--borderless", "--label", ""] if VARIANTS[name] == "borderless" else []
 
 
-def layout_def(paper: str, card_size: str, name: str = DEFAULT) -> dict:
+def layout_def(paper: str, card_size: str, name: str) -> dict:
     """layouts.json's entry for this paper, card size and layout."""
     layouts = engine.layouts()
     if paper not in layouts["paper_sizes"]:
@@ -132,7 +139,7 @@ def layout_def(paper: str, card_size: str, name: str = DEFAULT) -> dict:
     return sizes[card_size][variant]
 
 
-def page_size_mm(paper: str, card_size: str, name: str = DEFAULT) -> tuple[float, float]:
+def page_size_mm(paper: str, card_size: str, name: str) -> tuple[float, float]:
     layout = layout_def(paper, card_size, name)
     paper_def = engine.layouts()["paper_sizes"][paper]
     w, h = engine.size_to_mm(paper_def["width"]), engine.size_to_mm(paper_def["height"])
@@ -144,7 +151,7 @@ def page_size_mm(paper: str, card_size: str, name: str = DEFAULT) -> tuple[float
     return w, h
 
 
-def registration_mm(paper: str, card_size: str, name: str = DEFAULT) -> tuple[float, float]:
+def registration_mm(paper: str, card_size: str, name: str) -> tuple[float, float]:
     """(inset, leg length) of the printed marks in mm, resolved as create_pdf.py does: the layout's
     own registration settings, else the defaults (the variant's inset, the default's length)."""
     own = layout_def(paper, card_size, name).get("registration") or {}
@@ -154,14 +161,14 @@ def registration_mm(paper: str, card_size: str, name: str = DEFAULT) -> tuple[fl
     return engine.size_to_mm(inset), engine.size_to_mm(length)
 
 
-def registration_inset_y_mm(paper: str, card_size: str, name: str = DEFAULT) -> float | None:
+def registration_inset_y_mm(paper: str, card_size: str, name: str) -> float | None:
     """The marks' distance from the top and bottom edges when the layout sets its own (``inset_y``,
     the engine fork's 3x3 layout), else None: the same as the sides."""
     own = layout_def(paper, card_size, name).get("registration") or {}
     return engine.size_to_mm(own["inset_y"]) if own.get("inset_y") else None
 
 
-def build_cut_svg(paper: str, card_size: str, out: Path | None, name: str = DEFAULT) -> Geometry:
+def build_cut_svg(paper: str, card_size: str, out: Path | None, name: str) -> Geometry:
     """Write the cut-path SVG (unless ``out`` is None) and return the geometry."""
     import ezdxf
 
@@ -170,9 +177,9 @@ def build_cut_svg(paper: str, card_size: str, out: Path | None, name: str = DEFA
     inset_y = registration_inset_y_mm(paper, card_size, name)
     top = inset if inset_y is None else inset_y
     args = ["--card_size", card_size, "--paper_size", paper]
-    if name != DEFAULT:
+    if VARIANTS[name] != "default":
         # generate_dxf.py picks the orientation that fits the most cards unless told; create_pdf.py
-        # takes the layout's, so it is passed (the default layout's pick is already its own).
+        # takes the layout's, so it is passed (the engine's default layout's pick is its own).
         orientation = layout_def(paper, card_size, name)["orientation"]
         args += ["--variant", VARIANTS[name], "--orientation", orientation]
 
@@ -205,7 +212,7 @@ def build_cut_svg(paper: str, card_size: str, out: Path | None, name: str = DEFA
         svg = (
             '<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" '
             f'width="{fmt(page_w)}mm" height="{fmt(page_h)}mm" viewBox="0 0 {fmt(page_w)} {fmt(page_h)}">\n'
-            f"  <!-- {paper}/{card_size}{'' if name == DEFAULT else ' ' + name}: {len(paths)} cards, "
+            f"  <!-- {paper}/{card_size} {name}: {len(paths)} cards, "
             "generated by mtg-proxy from silhouette-card-maker -->\n"
             f"{body}\n</svg>\n"
         )

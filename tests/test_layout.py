@@ -13,9 +13,9 @@ def test_unknown_sizes_are_clean_errors():
     from mtgproxy.layout import LayoutError, page_size_mm
 
     with pytest.raises(LayoutError, match="unknown paper size 'A4'"):
-        page_size_mm("A4", "standard")
+        page_size_mm("A4", "standard", "4x2")
     with pytest.raises(LayoutError, match="no 'poker_x' layout for 'a4'"):
-        page_size_mm("a4", "poker_x")
+        page_size_mm("a4", "poker_x", "4x2")
 
 
 def test_fmt():
@@ -25,7 +25,7 @@ def test_fmt():
 @needs_engine
 def test_a4_standard_geometry_and_svg(tmp_path):
     svg = tmp_path / "cut.svg"
-    g = build_cut_svg("a4", "standard", svg)
+    g = build_cut_svg("a4", "standard", svg, "4x2")
     assert g.cards == 8
     assert {g.page_w_mm, g.page_h_mm} == {210.0, 297.0}
     assert g.reg_inset_mm == 10.0
@@ -35,9 +35,9 @@ def test_a4_standard_geometry_and_svg(tmp_path):
     text = svg.read_text()
     assert text.count("<path ") == 8
     assert len(re.findall(r"\bA[0-9.]+,[0-9.]+ 0 [01] [01]", text)) == 8 * 4  # rounded corners as true arcs
-    assert build_cut_svg("a4", "standard", None) == g  # geometry-only mode
+    assert build_cut_svg("a4", "standard", None, "4x2") == g  # geometry-only mode
     assert (g.reg_length_mm, g.layout) == (9.4, "4x2")
-    assert build_cut_svg("a4", "standard", None, "4x2") == g
+    assert "a4/standard 4x2: 8 cards" in text
 
 
 # The 3x3 sheet's printed marks (page mm, portrait), from page_manager.generate_reg_mark: the square
@@ -144,7 +144,9 @@ def test_the_marks_the_engine_prints_are_the_frame_cut_proxies_scans():
 def test_layout_names_papers_and_marks():
     from mtgproxy import layout
 
-    layout.check("4x2", "letter", "poker")  # the default layout goes with any paper and card
+    assert layout.default("a4", "standard") == "3x3"  # nine to a sheet unless told
+    assert layout.default("letter", "standard") == layout.default("a4", "poker") == "4x2"
+    layout.check("4x2", "letter", "poker")  # the engine's own layout goes with any paper and card
     layout.check("3x3", "a4", "standard")
     with pytest.raises(layout.LayoutError, match="unknown layout '5x5'"):
         layout.check("5x5", "a4", "standard")
@@ -159,5 +161,5 @@ def test_layout_names_papers_and_marks():
 def test_cards_per_page_follows_the_layout():
     from mtgproxy import manifest
 
-    assert manifest.cards_per_page("a4", "standard") == 8
+    assert manifest.cards_per_page("a4", "standard", "4x2") == 8
     assert manifest.cards_per_page("a4", "standard", "3x3") == 9

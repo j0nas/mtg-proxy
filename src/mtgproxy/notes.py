@@ -24,7 +24,7 @@ class NotesContext:
     duplex_dfc: bool
     dfc_count: int
     today: str = ""
-    layout: str = "4x2"
+    layout: str = "3x3"
 
     def __post_init__(self) -> None:
         self.today = self.today or date.today().isoformat()

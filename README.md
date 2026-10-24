@@ -50,10 +50,10 @@ after pulling; it's idempotent.
 ```sh
 make-proxies --test                # ./test-sheet/test-sheet.pdf
 make-proxies --test --print        # and send it to the default CUPS printer at 100 %
-make-proxies --test --layout 3x3   # nine of them on portrait A4 (see Nine to a sheet)
+make-proxies --test --layout 4x2   # eight of them on landscape A4 (see Sheet layouts)
 ```
 
-One A4 of eight gauge cards: exact 63x88 mm geometry, hairline art, almost no ink. The frame sits
+One portrait A4 of nine gauge cards: exact 63x88 mm geometry, hairline art, almost no ink. The frame sits
 1.0 mm inside the cut line, so after cutting the white margin must be 1.0 mm on all four sides.
 Gray ticks at 0.5 and 1.5 mm read any offset. A crosshair on front and back checks duplex
 alignment against a light. A TOP marker catches flips.
@@ -68,12 +68,12 @@ the CUPS mapping.
 ## Real decks
 
 ```sh
-make-proxies decks/mydeck.txt                    # MTGA format, A4
+make-proxies decks/mydeck.txt                    # MTGA format, A4, nine to a sheet
 make-proxies decks/mydeck.txt -f moxfield        # also mtgo, archidekt, deckstats, simple
 make-proxies https://moxfield.com/decks/<id>     # straight from Moxfield
 make-proxies https://archidekt.com/decks/<id>    # or Archidekt
 make-proxies <deck-url> --board considering      # main | side | considering
-make-proxies decks/mydeck.txt --layout 3x3       # nine to a sheet, portrait (see below)
+make-proxies decks/mydeck.txt --layout 4x2       # eight to a sheet, landscape (see below)
 make-proxies decks/mydeck.txt --backs            # double-sided; default is fronts only
 make-proxies decks/mydeck.txt --basics           # include basic lands; skipped by default
 make-proxies decks/mydeck.txt --images cards/    # your own card images where you have them
@@ -132,19 +132,24 @@ make-proxies decks/aminatou.txt -f moxfield --images cards/ --dry-run   # how ma
   `-f mtga` reads both kinds.
 - A card from an image brings no tokens with `-t`, since it is never looked up.
 
-### Nine to a sheet
+### Sheet layouts
 
-`--layout 3x3` puts nine standard cards on portrait A4, one more than the default 4x2. It is the
-card-maker's tighter layout, with its marks set by the engine fork: 3.5 mm from the paper's sides,
-9 mm from the top and bottom (`inset_y`), legs 6 mm, and no page label. The firmware reads each L
-half a leg in from its corner and starts the bottom-left search 10 mm above it. With the card-maker's
-3.5 mm all round and 10.5 mm legs, the bottom-left L read 1–2 mm left on a laminated sheet, three
-scans out of three; at 7 mm its search began on the bottom-left card's corner and once read that
-(2026-10-24). Now every pass stays 1.2–2.6 mm clear of the card print (simulated on a real sheet).
-It is A4 with standard cards and fronts only. `--backs` is refused, and so is a deck whose
-double-faced cards would need a duplex sheet; `--split-faces` prints their faces on the 3x3 sheet.
-`run.json` records the layout, so `cut-proxies` scans the right frame and cuts the right outlines;
-`redo`, `backlog --layout 3x3` and `backlog build --layout 3x3` count nine to a sheet.
+An A4 sheet of standard cards holds nine unless told otherwise: the 3x3 layout, on portrait A4.
+It is the card-maker's tighter layout, with its marks set by the engine fork: 3.5 mm from the
+paper's sides, 9 mm from the top and bottom (`inset_y`), legs 6 mm, and no page label. The
+firmware reads each L half a leg in from its corner and starts the bottom-left search 10 mm above
+it. With the card-maker's 3.5 mm all round and 10.5 mm legs, the bottom-left L read 1–2 mm left on
+a laminated sheet, three scans out of three; at 7 mm its search began on the bottom-left card's
+corner and once read that (2026-10-24). Now every pass stays 1.2–2.6 mm clear of the card print
+(simulated on a real sheet), and four laminated sheets registered and cut in a row (2026-10-25).
+It is fronts only: `--backs` is refused, and so is a deck whose double-faced cards would need a
+duplex sheet; `--split-faces` prints their faces on the 3x3 sheet.
+
+`--layout 4x2` is the engine's own layout: eight cards on landscape A4, the marks 10 mm in. It is
+the default on every other paper and card size, since 3x3 is A4 with standard cards only.
+`run.json` records the layout, so `cut-proxies` scans the right frame and cuts the right outlines,
+and `redo` counts the run's sheets. `backlog` and `backlog build` count nine to a sheet unless
+given `--layout 4x2`.
 
 The marks' outer edges are 3.0 mm from the paper's sides, and the ET-8550 prints to 2.96 mm from
 every edge, so the sheet must print at 100 %. The PDF page is landscape like every sheet's: print it
@@ -161,7 +166,7 @@ the directory the deck folders live in, and gets printed as one well-filled shee
 make-proxies decks/mydeck.txt --defer-partial   # partial last page → BACKLOG.txt, not the PDF
 cd mydeck && mtg-proxy redo "Sol Ring" p3.5 last  # after cutting: by name, page.slot, or a whole page
 mtg-proxy redo dlast                            # d = the duplex PDF (d1, d1.2, dlast)
-cd .. && mtg-proxy backlog                      # 11 fronts = 1 full sheet + 3 waiting, 2 duplex
+cd .. && mtg-proxy backlog                      # 11 fronts = 1 full sheet + 2 waiting, 2 duplex
 mtg-proxy backlog build                         # ./backlog-<date>/ — a run folder like any deck
 mtg-proxy backlog build --full-only             # full sheets now, the rest stays queued
 mtg-proxy backlog drop "Sol Ring"               # or by the number the listing shows
@@ -226,8 +231,8 @@ cut-proxies --scan         # list the Bluetooth devices in range
 cut-proxies --dry-run      # no machine: runs the whole job against a stand-in, checks the bounds
 cut-proxies --probe        # scans the marks, logs what the machine reports, cuts nothing
 cut-proxies --proof        # scores the square and each L after the scan; y cuts, r rescans, q stops
-cut-proxies --layout 3x3   # a 3x3 sheet without its run.json (marks 3.5 mm in, 9 mm top/bottom)
-cut-proxies --svg job.svg --reg-inset 5   # any page-sized SVG
+cut-proxies --layout 4x2   # a 4x2 sheet without its run.json (a plain sheet is 3x3)
+cut-proxies --svg job.svg --layout 4x2 --reg-inset 5   # any SVG the size of that layout's page
 ```
 
 Settings, AutoBlade only (the Kraft blade can't turn the 3 mm corners):

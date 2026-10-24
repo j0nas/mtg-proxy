@@ -24,7 +24,7 @@ from .cutting import PRESETS
 from .paths import SIDECAR_NAME
 from .sidecar import RunInfo
 
-PLAIN = "plain A4 sheet: standard cards, 4x2"
+PLAIN = "plain A4 sheet: standard cards, 3x3"
 MODES = {
     "cut": "cut",
     "proof": "proof cuts on the marks first, then y cuts / r rescans / q stops (first sheet only)",

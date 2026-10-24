@@ -20,6 +20,7 @@ from .cache import ImageCache
 from .decks import DeckError, is_double_sided
 from .layout import NOMINAL_CARDS, SINGLE_SIDED, LayoutError
 from .layout import check as check_layout
+from .layout import default as default_layout
 from .manifest import ManifestError
 from .paths import DEFAULT_BACK, NOTES_NAME, SCM, cache_dir
 from .sidecar import RunInfo, find_sidecar
@@ -41,8 +42,9 @@ def parse_start(value: str) -> tuple[float, float]:
 
 
 LAYOUT_HELP = (
-    "4x2: the paper's default layout (8 cards on A4) | 3x3: 9 cards on portrait A4, marks 3.5 mm from "
-    "the sides and 9 mm from the top and bottom, fronts only"
+    "3x3 (the default on A4 with standard cards): 9 cards on portrait A4, marks 3.5 mm from the sides "
+    "and 9 mm from the top and bottom, fronts only | 4x2: 8 cards on landscape A4, the engine's own "
+    "layout (the default on any other paper or card)"
 )
 
 
@@ -83,7 +85,7 @@ def make(
         Path, typer.Option("-o", "--out", help="parent dir for <deckname>/", file_okay=False)
     ] = Path("."),
     paper: Annotated[str, typer.Option("-p", "--paper", help="a4 | letter | a3 ...")] = "a4",
-    sheet_layout: Annotated[str, typer.Option("--layout", help=LAYOUT_HELP)] = "4x2",
+    sheet_layout: Annotated[str | None, typer.Option("--layout", help=LAYOUT_HELP)] = None,
     board: Annotated[str, typer.Option(help="deck URL board: main | side | considering")] = "main",
     backs: Annotated[
         bool, typer.Option("--backs/--fronts-only", help="double-sided cards (default: fronts only)")
@@ -248,7 +250,10 @@ def cut(
     paper: Annotated[str | None, typer.Option("-p", "--paper")] = None,
     card: Annotated[str | None, typer.Option("-c", "--card")] = None,
     sheet_layout: Annotated[
-        str | None, typer.Option("--layout", help="4x2 | 3x3 — MUST match the printed sheet")
+        str | None,
+        typer.Option(
+            "--layout", help="3x3 | 4x2 — MUST match the printed sheet (default: run.json's, else 3x3 on A4)"
+        ),
     ] = None,
     preset: Annotated[
         str,
@@ -353,11 +358,12 @@ def cut(
         fail(f"no run.json at {run}")
     elif not plain:
         typer.echo("cut-proxies: no run.json in the current directory — using flags/defaults", err=True)
-    sheet_layout = sheet_layout or (info.layout if info else "4x2")
+    paper = paper or (info.paper if info else "a4")
+    card = card or (info.card_size if info else "standard")
     o = cutting.CutOptions(
-        paper=paper or (info.paper if info else "a4"),
-        card_size=card or (info.card_size if info else "standard"),
-        layout=sheet_layout,
+        paper=paper,
+        card_size=card,
+        layout=sheet_layout or (info.layout if info else default_layout(paper, card)),
         force=blade.force if force is None else force,
         speed=blade.speed if speed is None else speed,
         depth=blade.depth if depth is None else depth,
@@ -610,7 +616,8 @@ def _resolve_faces(bl: Backlog) -> None:
             )
 
 
-def _show_backlog(out: Path, paper: str, sheet_layout: str, card_size: str = "standard") -> Backlog:
+def _show_backlog(out: Path, paper: str, sheet_layout: str | None, card_size: str = "standard") -> Backlog:
+    sheet_layout = sheet_layout or default_layout(paper, card_size)
     bl = Backlog.at(out.resolve())
     if not bl.entries:
         typer.echo(f"backlog empty ({bl.path})")
@@ -621,7 +628,9 @@ def _show_backlog(out: Path, paper: str, sheet_layout: str, card_size: str = "st
     return bl
 
 
-SheetLayoutOpt = Annotated[str, typer.Option("--layout", help="4x2 | 3x3: count sheets of this layout")]
+SheetLayoutOpt = Annotated[
+    str | None, typer.Option("--layout", help="3x3 | 4x2: count sheets of this layout (default: 3x3 on A4)")
+]
 
 
 @backlog_app.callback()
@@ -629,7 +638,7 @@ def backlog_main(
     ctx: typer.Context,
     out: OutOpt = Path("."),
     paper: Annotated[str, typer.Option("-p", "--paper")] = "a4",
-    sheet_layout: SheetLayoutOpt = "4x2",
+    sheet_layout: SheetLayoutOpt = None,
 ) -> None:
     if ctx.invoked_subcommand is None:
         _show_backlog(out, paper, sheet_layout)
@@ -639,7 +648,7 @@ def backlog_main(
 def backlog_show(
     out: OutOpt = Path("."),
     paper: Annotated[str, typer.Option("-p", "--paper")] = "a4",
-    sheet_layout: SheetLayoutOpt = "4x2",
+    sheet_layout: SheetLayoutOpt = None,
 ) -> None:
     _show_backlog(out, paper, sheet_layout)
 
@@ -667,7 +676,7 @@ def backlog_drop(refs: Annotated[list[str], typer.Argument()], out: OutOpt = Pat
 def backlog_build(
     out: OutOpt = Path("."),
     paper: Annotated[str, typer.Option("-p", "--paper", help="a4 | letter | a3 ...")] = "a4",
-    sheet_layout: Annotated[str, typer.Option("--layout", help=LAYOUT_HELP)] = "4x2",
+    sheet_layout: Annotated[str | None, typer.Option("--layout", help=LAYOUT_HELP)] = None,
     backs: Annotated[
         bool, typer.Option("--backs/--fronts-only", help="double-sided (default: fronts only)")
     ] = False,
@@ -695,7 +704,10 @@ def backlog_build(
 ) -> None:
     out = out.resolve()
     try:  # before anything is looked up or written; run_build checks the same
-        build.resolve_layout(build.BuildOptions(paper=paper, layout=sheet_layout, fronts_only=not backs))
+        opts = build.resolve_layout(
+            build.BuildOptions(paper=paper, layout=sheet_layout, fronts_only=not backs)
+        )
+        sheet_layout = opts.layout
     except build.BuildError as e:
         fail(str(e))
     bl = Backlog.at(out)

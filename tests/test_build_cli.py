@@ -193,16 +193,18 @@ def test_cli_make_3x3_refuses_what_it_cant_print(decklist):
     r = runner.invoke(app, ["make", "--test", "--layout", "3x3", "--backs"])
     assert r.exit_code == 1 and "fronts only for now" in r.output
     r = runner.invoke(app, ["make", str(decklist), "--layout", "5x5", "--dry-run"])
-    assert r.exit_code == 1 and "unknown layout '5x5' (known: 4x2, 3x3)" in r.output
+    assert r.exit_code == 1 and "unknown layout '5x5' (known: 3x3, 4x2)" in r.output
 
 
 @needs_engine
-def test_cli_make_3x3_dry_run_says_nine_a_sheet(decklist, tmp_path):
-    r = runner.invoke(app, ["make", str(decklist), "-o", str(tmp_path), "--layout", "3x3", "--dry-run"])
+def test_cli_make_is_nine_a_sheet_unless_told(decklist, tmp_path):
+    r = runner.invoke(app, ["make", str(decklist), "-o", str(tmp_path), "--dry-run"])
     assert r.exit_code == 0, r.output
     assert "(paper a4, 3x3 layout of 9 cards, format" in r.output
-    r = runner.invoke(app, ["make", str(decklist), "-o", str(tmp_path), "--dry-run"])
+    r = runner.invoke(app, ["make", str(decklist), "-o", str(tmp_path), "--layout", "4x2", "--dry-run"])
     assert "(paper a4, 4x2 layout of 8 cards, format" in r.output
+    r = runner.invoke(app, ["make", str(decklist), "-o", str(tmp_path), "-p", "letter", "--dry-run"])
+    assert "(paper letter, 4x2 layout of 8 cards, format" in r.output  # 3x3 is A4 only
 
 
 def test_every_sheet_is_3_mark_and_3x3_takes_the_engines_tighter_layout():
@@ -211,6 +213,8 @@ def test_every_sheet_is_3_mark_and_3x3_takes_the_engines_tighter_layout():
     assert three[-3:] == ["--borderless", "--label", ""]
     four = build.pdf_base_args(build.resolve_layout(BuildOptions(layout="4x2")))
     assert four[four.index("--registration") + 1] == "3" and "--borderless" not in four
+    assert build.resolve_layout(BuildOptions()).layout == "3x3"
+    assert build.resolve_layout(BuildOptions(paper="letter")).layout == "4x2"
 
 
 @pytest.fixture

@@ -80,7 +80,7 @@ def test_find_sidecar(tmp_path, monkeypatch):
 def test_notes_render_covers_the_run():
     ctx = notes.NotesContext(
         name="orah", paper="letter", card_size="standard", cards=12, fronts_only=True,
-        duplex_dfc=True, dfc_count=2, today="2026-09-17",
+        duplex_dfc=True, dfc_count=2, today="2026-09-17", layout="4x2",
     )  # fmt: skip
     text = notes.render(ctx)
     assert "# orah — print & cut checklist" in text
