@@ -62,10 +62,13 @@ def default_start(frame: Frame) -> tuple[float, float]:
     NOTES.md). The sweep has to cross the square's left edge from white paper: starts 2-6 mm in
     from the left all found it that night, and starts at 11-13 mm, on or past the square, never
     did (reply 1). The square must print exactly 5 mm (the engine fork's cd4166a): at 6 mm the
-    machine found it and then failed to measure it (reply -1) from every start. A 3x3 sheet's
-    marks sit 3.5 mm from the sides and 7 mm from the top and bottom: the start is (5, 1), 2 mm
-    above and 2.5 mm left of a square printed 3.5-8.5 mm across and 7-12 mm down. With 3.5 mm all
-    round, (1.5, 1) registered on plain A4 and on laminate (2026-10-24)."""
+    machine found it and then failed to measure it (reply -1) from every start. A 3x3 sheet (its
+    own inset_y) starts 2 mm below its square's top edge and 2.5 mm left of it, so the first row
+    runs through the square: on a laminated 3x3 sheet with marks 7 mm from the top, a start 2 mm
+    above the square took the firmware's second try (28 s) and registered off the top of the sheet,
+    while (9, 1), 2 mm into the square, found the marks first time twice (13-14 s, 2026-10-25)."""
+    if frame.marks == 3 and frame.inset_y is not None:  # 3x3: the first row through the square
+        return frame.top + 2, max(LOWEST, frame.inset - 6)
     if frame.marks == 3:
         return max(LOWEST, frame.top - 2), max(LOWEST, frame.inset - 6)
     if frame.inset <= 5:

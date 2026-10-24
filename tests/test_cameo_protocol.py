@@ -34,11 +34,11 @@ def test_a_3x3_sheets_square_is_inside_the_area_searchs_window():
     """TB123 catches the square with its top-left corner from 5 mm above the start to 30 mm below,
     and from about 1 mm to 24 mm right of it (cameo-re NOTES.md)."""
     sheet = session.Frame(
-        page_w=210, page_h=297, inset=3.5, width=203, height=283, length=10.5, marks=3, inset_y=7
+        page_w=210, page_h=297, inset=3.5, width=203, height=279, length=6, marks=3, inset_y=9
     )
     top, left = driver.default_start(sheet)
-    assert (top, left) == (5.0, 1.0)  # 2 mm above the square; inset - 6 would be off the paper
-    corner_x, corner_y = 3.5, 7.0  # the square's ink: 5 mm from the insets, no stroke (cd4166a)
+    assert (top, left) == (11.0, 1.0)  # 2 mm into the square; inset - 6 would be off the paper
+    corner_x, corner_y = 3.5, 9.0  # the square's ink: 5 mm from the insets, no stroke (cd4166a)
     assert -5 <= corner_y - top <= 30 and 1 <= corner_x - left <= 24
     assert left < corner_x  # the sweep crosses the square's left edge from white paper
     flat = replace(sheet, inset=10, width=190, height=277, inset_y=None)

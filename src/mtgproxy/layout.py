@@ -112,25 +112,23 @@ def check(name: str, paper: str, card_size: str) -> None:
 def registration(name: str, asked: str | None) -> str:
     """The marks a sheet of layout ``name`` prints: ``asked`` (-r), else the layout's own.
 
-    A 3x3 sheet is 3-mark only. Its marks are 3.5 mm from the paper's edges, so the top-left
-    mark's horizontal leg starts 3 mm below the top edge, and the 4-mark scan has to start on
-    white paper above that leg (cameo.driver.default_start). The 3-mark square is found by an
-    area search that doesn't need that strip."""
+    A 3x3 sheet is 3-mark only: that is the scan registered on it (2026-10-24). A 4-mark scan of
+    its marks (3.5 mm from the sides, 9 mm from the top and bottom, 6 mm legs) is untried."""
     own = MARKS.get(name)
     if own is None or asked is None:
         return asked or own or "4"
     if asked == "4" != own:
         raise LayoutError(
-            f"--layout {name} prints {own}-mark registration only (the default with it): with the marks "
-            "3.5 mm from the edges, a 4-mark scan would have to start in the 3 mm of paper above the "
-            "top-left mark. Drop -r 4."
+            f"--layout {name} prints {own}-mark registration only (the default with it): a 4-mark scan "
+            "of its marks hasn't been tried. Drop -r 4."
         )
     return asked  # the caller refuses anything but 3 or 4
 
 
 def engine_flags(name: str) -> list[str]:
-    """create_pdf.py's flags for this layout."""
-    return ["--borderless"] if VARIANTS[name] == "borderless" else []
+    """create_pdf.py's flags for this layout. A 3x3 sheet gets no page label: the engine prints
+    it 1.5 mm from the bottom edge, clipped by the printer, below the bottom-left mark."""
+    return ["--borderless", "--label", ""] if VARIANTS[name] == "borderless" else []
 
 
 def layout_def(paper: str, card_size: str, name: str = DEFAULT) -> dict:

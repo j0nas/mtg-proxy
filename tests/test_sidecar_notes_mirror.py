@@ -52,7 +52,7 @@ def test_notes_for_a_3x3_sheet():
     assert "card: standard | layout: 3x3 | registration: 3-mark | cards: 9" in text
     assert (
         "**portrait A4**" in text
-        and "**3.0 mm** from the paper's sides (6.5 mm from the top and" in text
+        and "**3.0 mm** from the paper's sides (8.5 mm from the top and" in text
         and "2.96 mm" in text
     )
     assert "**Actual size / 100%** scale, borderless **OFF**" in text

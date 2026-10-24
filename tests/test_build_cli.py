@@ -210,7 +210,9 @@ def test_cli_make_3x3_dry_run_says_nine_a_sheet_and_three_marks(decklist, tmp_pa
 def test_3x3_takes_the_engines_tighter_layout_and_three_marks():
     opts = build.resolve_layout(BuildOptions(layout="3x3"))
     assert opts.registration == "3"
-    assert build.pdf_base_args(opts)[-1] == "--borderless" and "3" in build.pdf_base_args(opts)
+    assert build.pdf_base_args(opts)[-3:] == ["--borderless", "--label", ""] and "3" in build.pdf_base_args(
+        opts
+    )
     four = build.resolve_layout(BuildOptions())
     assert four.registration == "4" and "--borderless" not in build.pdf_base_args(four)
 

@@ -35,7 +35,7 @@ class NotesContext:
 PRINT_3X3 = """\
 1. **Actual size / 100%** scale, borderless **OFF**. The sheet is **portrait A4**; the PDF page is
    landscape like every sheet's (the engine stores them that way), so print it as you print a 4x2
-   sheet. The marks' outer edges are **3.0 mm** from the paper's sides (6.5 mm from the top and
+   sheet. The marks' outer edges are **3.0 mm** from the paper's sides (8.5 mm from the top and
    bottom), 0.04 mm inside what the ET-8550 can print (2.96 mm margin all round, its CUPS
    ImageableArea): any scaling clips or moves them."""
 MAT_3X3 = """\

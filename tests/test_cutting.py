@@ -150,13 +150,13 @@ def test_a_3x3_dry_run_scans_its_own_frame(tmp_path, capsys):
     assert cutting.run_cut(o) == 0
     out = capsys.readouterr().out
     assert (
-        "t — 9 cards (3x3), 3-mark registration (marks inset 3.5 mm, 7 mm top and bottom, 203 x 283 mm apart, 10.5 x 1 mm)"
+        "t — 9 cards (3x3), 3-mark registration (marks inset 3.5 mm, 9 mm top and bottom, 203 x 279 mm apart, 6 x 1 mm)"
         in out
     )
-    assert "scan starts at (5, 1) mm, the area search's corner" in out
+    assert "scan starts at (11, 1) mm, the area search's corner" in out
     sent = (tmp_path / "t.cmds").read_bytes().decode().split("\x03")
     # Legs 10.5 mm (TB51 in 1/20 mm), then TB123 with the frame's height and width and the start.
-    assert "TB51,210" in sent and "TB123,5660,4060,100,20" in sent
+    assert "TB51,120" in sent and "TB123,5580,4060,220,20" in sent
     assert (tmp_path / "t.svg").read_text().count("<path ") == 9
     four = cutting.CutOptions(dry_run=True, out_dir=tmp_path, label="f")
     assert cutting.run_cut(four) == 0

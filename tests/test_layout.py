@@ -42,12 +42,13 @@ def test_a4_standard_geometry_and_svg(tmp_path):
 
 # The 3x3 sheet's printed marks (page mm, portrait), from page_manager.generate_reg_mark: the square
 # is 5 mm from the inset with no stroke; an L's legs are 1 mm lines centred on the inset, running
-# 10.5 mm from the corner's centre lines to their (square-capped) ends. The inset is 3.5 mm from the
-# sides and 7 mm from the top and bottom (inset_y): at 3.5 mm all round, the bottom-left L read
-# 1-2 mm left on a laminated sheet, three scans out of three (2026-10-24).
-SQUARE_3X3 = (3.5, 7.0, 8.5, 12.0)  # 5 mm from the inset, no stroke (engine fork cd4166a)
-TOP_RIGHT_L = [(196.0, 6.5, 207.0, 7.5), (206.0, 6.5, 207.0, 17.5)]
-BOTTOM_LEFT_L = [(3.0, 289.5, 14.0, 290.5), (3.0, 279.5, 4.0, 290.5)]
+# 6 mm from the corner's centre lines to their (square-capped) ends. The inset is 3.5 mm from the
+# sides and 9 mm from the top and bottom (inset_y). At 3.5 mm all round the bottom-left L read 1-2 mm
+# left on a laminated sheet; at 7 mm with 10.5 mm legs its search began on the bottom-left card's
+# corner and once read that instead (2026-10-24).
+SQUARE_3X3 = (3.5, 9.0, 8.5, 14.0)  # 5 mm from the inset, no stroke (engine fork cd4166a)
+TOP_RIGHT_L = [(200.5, 8.5, 207.0, 9.5), (206.0, 8.5, 207.0, 15.0)]
+BOTTOM_LEFT_L = [(3.0, 287.5, 9.5, 288.5), (3.0, 282.0, 4.0, 288.5)]
 
 
 def _gap(a, b) -> float:
@@ -65,10 +66,10 @@ def test_a4_standard_3x3_geometry_and_svg(tmp_path):
     assert (g.cards, g.page_w_mm, g.page_h_mm) == (9, 210.0, 297.0)  # portrait
     assert (g.reg_inset_mm, g.reg_inset_y_mm, g.reg_x_mm, g.reg_y_mm, g.reg_length_mm) == (
         3.5,
-        7.0,
+        9.0,
         203.0,
-        283.0,
-        10.5,
+        279.0,
+        6.0,
     )
     text = svg.read_text()
     assert text.count("<path ") == 9 and "a4/standard 3x3: 9 cards" in text
@@ -77,16 +78,16 @@ def test_a4_standard_3x3_geometry_and_svg(tmp_path):
     assert len(outlines) == 9
     for x0, y0, x1, y1 in outlines:
         assert (round(x1 - x0, 2), round(y1 - y0, 2)) == (63.0, 88.0)
-        assert x0 > 3.5 and x1 < 206.5 and y0 > 7.0 and y1 < 290.0  # inside the mark frame
+        assert x0 > 3.5 and x1 < 206.5 and y0 > 9.0 and y1 < 288.0  # inside the mark frame
     marks = {"square": [SQUARE_3X3], "top-right": TOP_RIGHT_L, "bottom-left": BOTTOM_LEFT_L}
     clear = {k: min(_gap(o, m) for o in outlines for m in parts) for k, parts in marks.items()}
-    # Cut to ink: the L's 5.2 mm (a 4x2 sheet's: 6.1), the square 3.3 mm: at 7 mm from the top it
-    # sits beside the top-left card's top edge. None of TB123's passes over the square cross a card:
-    # its rows run above them, and it measures the square down at x 7 and across at y 9.5.
-    assert clear == pytest.approx({"square": 3.32, "top-right": 5.25, "bottom-left": 5.23}, abs=0.05)
+    # Cut to ink: the L's 5.2 mm (a 4x2 sheet's: 6.1), the square 1.4 mm: 9 mm from the top it sits
+    # beside the top-left card's corner. None of TB123's passes over the square reach a card: its
+    # first row runs through the square, and it measures the square down at x 7 and across at y 11.5.
+    assert clear == pytest.approx({"square": 1.44, "top-right": 5.25, "bottom-left": 5.24}, abs=0.05)
     # The corner a fourth mark would take is as clear as the others: -r 4 is refused for its scan
     # start (layout.registration), not for room.
-    bottom_right = [(196.0, 289.5, 207.0, 290.5), (206.0, 279.5, 207.0, 290.5)]
+    bottom_right = [(200.5, 287.5, 207.0, 288.5), (206.0, 282.0, 207.0, 288.5)]
     assert min(_gap(o, m) for o in outlines for m in bottom_right) == pytest.approx(5.25, abs=0.05)
 
 
@@ -102,7 +103,7 @@ def test_the_marks_the_engine_prints_are_the_frame_cut_proxies_scans():
     from page_manager import generate_reg_mark
 
     with generate_reg_mark(
-        "210mm", "297mm", "3.5mm", "1mm", "10.5mm", 300, Registration.THREE, inset_y="7mm"
+        "210mm", "297mm", "3.5mm", "1mm", "6mm", 300, Registration.THREE, inset_y="9mm"
     ) as im:
         dark = np.asarray(im.convert("L")) < 128
     px = 300 / 25.4
@@ -113,9 +114,9 @@ def test_the_marks_the_engine_prints_are_the_frame_cut_proxies_scans():
         return pytest.approx(found, abs=0.1)  # within a 300 ppi pixel
 
     assert dark.shape == (3507, 2480)  # portrait A4 at 300 ppi
-    assert ink(0, 0, 14, 14) == SQUARE_3X3
-    assert ink(190, 0, 210, 18) == (196.0, 6.5, 207.0, 17.5)  # the top-right L's two legs
-    assert ink(0, 279, 20, 297) == (3.0, 279.5, 14.0, 290.5)  # the bottom-left L's
+    assert ink(0, 0, 14, 16) == SQUARE_3X3
+    assert ink(190, 0, 210, 18) == (200.5, 8.5, 207.0, 15.0)  # the top-right L's two legs
+    assert ink(0, 279, 20, 297) == (3.0, 282.0, 9.5, 288.5)  # the bottom-left L's
     assert not dark[int(279 * px) :, int(190 * px) :].any()  # nothing bottom-right
     assert not dark[int(18 * px) : int(279 * px)].any()  # and nothing else on the page
 
@@ -161,7 +162,7 @@ def test_layout_names_papers_and_marks():
     with pytest.raises(layout.LayoutError, match=r"3-mark registration only .* Drop -r 4"):
         layout.registration("3x3", "4")
     assert layout.registration("3x3", "5") == "5"  # left for the caller's "must be 3 or 4"
-    assert layout.engine_flags("4x2") == [] and layout.engine_flags("3x3") == ["--borderless"]
+    assert layout.engine_flags("4x2") == [] and layout.engine_flags("3x3") == ["--borderless", "--label", ""]
 
 
 @needs_engine
