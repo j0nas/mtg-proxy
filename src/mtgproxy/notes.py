@@ -19,7 +19,6 @@ class NotesContext:
     name: str
     paper: str
     card_size: str
-    registration: str
     cards: int
     fronts_only: bool
     duplex_dfc: bool
@@ -80,15 +79,12 @@ def render(c: NotesContext) -> str:
     paper_flag = "" if c.paper == "a4" else f" -p {c.paper}"
     lam, paper = PRESETS["laminate"], PRESETS["paper"]
     three = c.layout == "3x3"
-    layout_note = f" | layout: {c.layout}" if c.layout != "4x2" else ""
     print1 = (
         PRINT_3X3
         if three
         else """1. **Actual size / 100%** scale, borderless **OFF** — any scaling shifts the registration
    marks off their expected positions and registration fails."""
     )
-    reads = f"{c.registration}-mark scan, {c.paper} paper" + (f", {c.layout} layout" if layout_note else "")
-    explicit = (f"--layout {c.layout} " if layout_note else "") + f"-r {c.registration}{paper_flag}"
     mat1 = (
         MAT_3X3
         if three
@@ -97,7 +93,7 @@ def render(c: NotesContext) -> str:
     )
     return f"""# {c.name} — print & cut checklist
 
-Generated: {c.today} | paper: {c.paper} | card: {c.card_size}{layout_note} | registration: {c.registration}-mark | cards: {c.cards} | sides: {sides}{dfc_note}
+Generated: {c.today} | paper: {c.paper} | card: {c.card_size} | layout: {c.layout} | registration: 3-mark | cards: {c.cards} | sides: {sides}{dfc_note}
 
 ## Print (your usual ET-8550 profile)
 {print1}
@@ -110,8 +106,8 @@ Generated: {c.today} | paper: {c.paper} | card: {c.card_size}{layout_note} | reg
 
 ## Cut (Cameo 5 Alpha)
 With the Cameo on and in Bluetooth range of the Mac (`--usb` for the cable), `cd` into this folder
-and run `cut-proxies`. It reads run.json here: {reads}. Explicit
-form: `cut-proxies {explicit}`.
+and run `cut-proxies`. It reads run.json here: {c.paper} paper, {c.layout} layout. Explicit
+form: `cut-proxies --layout {c.layout}{paper_flag}`.
 {mat1}
 2. Laminate settings by default: **Force {lam.force} · Speed {lam.speed} · Depth {lam.depth} · Passes {lam.passes}**.
    Plain paper: `--preset paper` (Force {paper.force} · Speed {paper.speed} · Depth {paper.depth} · Passes {paper.passes}).

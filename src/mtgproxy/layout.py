@@ -10,11 +10,11 @@ Registration marks are NOT drawn: the cutter finds the printed ones itself. The
 mark geometry it needs (inset from the page edge, mark-to-mark distances, leg
 length) is derived from the same assets/layouts.json entries create_pdf.py uses.
 
-A sheet has one of two layouts. ``4x2`` is the engine's default layout for the paper
-(four by two standard cards on landscape A4, marks 10 mm in). ``3x3`` is nine standard
-cards on portrait A4 with the marks 3.5 mm from the edges, 3-mark only: the engine's
-``borderless`` variant, its name for the tighter inset, which has nothing to do with
-borderless printing (that stays off).
+A sheet has one of two layouts, both printed with 3-mark registration. ``4x2`` is the
+engine's default layout for the paper (four by two standard cards on landscape A4, marks 10 mm
+in). ``3x3`` is nine standard cards on portrait A4 with the marks 3.5 mm from the sides and 9 mm
+from the top and bottom: the engine's ``borderless`` variant, its name for the tighter inset,
+which has nothing to do with borderless printing (that stays off).
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ DEFAULT = "4x2"
 # Our layout names → the engine's layout variant (layouts.json: layouts[paper][card][variant]).
 VARIANTS = {"4x2": "default", "3x3": "borderless"}
 ONLY = {"3x3": ("a4", "standard")}  # the one paper and card a layout is built for; others: any
-MARKS = {"3x3": "3"}  # the only registration a layout prints; others: -r, default 4
 SINGLE_SIDED = {"3x3"}  # no --backs or duplex sheet: never printed double-sided here
 NOMINAL_CARDS = {"4x2": 8, "3x3": 9}  # on A4, for messages when layouts.json can't be read
 
@@ -107,22 +106,6 @@ def check(name: str, paper: str, card_size: str) -> None:
             f"--layout {name} is {want_paper.upper()} paper with {want_card} cards only, "
             f"not {paper} with {card_size}"
         )
-
-
-def registration(name: str, asked: str | None) -> str:
-    """The marks a sheet of layout ``name`` prints: ``asked`` (-r), else the layout's own.
-
-    A 3x3 sheet is 3-mark only: that is the scan registered on it (2026-10-24). A 4-mark scan of
-    its marks (3.5 mm from the sides, 9 mm from the top and bottom, 6 mm legs) is untried."""
-    own = MARKS.get(name)
-    if own is None or asked is None:
-        return asked or own or "4"
-    if asked == "4" != own:
-        raise LayoutError(
-            f"--layout {name} prints {own}-mark registration only (the default with it): a 4-mark scan "
-            "of its marks hasn't been tried. Drop -r 4."
-        )
-    return asked  # the caller refuses anything but 3 or 4
 
 
 def engine_flags(name: str) -> list[str]:

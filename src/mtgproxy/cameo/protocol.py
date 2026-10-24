@@ -71,10 +71,11 @@ def mark_setup(length_mm: float, thickness_mm: float) -> tuple[str, ...]:
     )
 
 
-def scan(kind: int, height_mm: float, width_mm: float, top_mm: float, left_mm: float) -> tuple[str, str]:
-    """TB124 (four L-marks) or TB123 (square + two L's): the mark-to-mark height and width, then
-    where the sensor starts searching, from the origin. Studio follows it with TB99."""
-    return f"TB{kind},{su(height_mm)},{su(width_mm)},{su(top_mm)},{su(left_mm)}", "TB99"
+def scan(height_mm: float, width_mm: float, top_mm: float, left_mm: float) -> tuple[str, str]:
+    """TB123, the 3-mark scan (the square top-left, L marks top-right and bottom-left): the
+    mark-to-mark height and width, then where the sensor starts searching, from the origin. Studio
+    follows it with TB99."""
+    return f"TB123,{su(height_mm)},{su(width_mm)},{su(top_mm)},{su(left_mm)}", "TB99"
 
 
 SCAN_REPLY = re.compile(r"^(?=.{5}\x03$) *(-?\d+)\x03$")

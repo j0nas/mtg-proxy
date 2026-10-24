@@ -68,13 +68,12 @@ the CUPS mapping.
 ## Real decks
 
 ```sh
-make-proxies decks/mydeck.txt                    # MTGA format, A4, 4-mark registration
+make-proxies decks/mydeck.txt                    # MTGA format, A4
 make-proxies decks/mydeck.txt -f moxfield        # also mtgo, archidekt, deckstats, simple
 make-proxies https://moxfield.com/decks/<id>     # straight from Moxfield
 make-proxies https://archidekt.com/decks/<id>    # or Archidekt
 make-proxies <deck-url> --board considering      # main | side | considering
-make-proxies decks/mydeck.txt -r 3               # 3-mark registration (see Cutting)
-make-proxies decks/mydeck.txt --layout 3x3       # nine to a sheet, portrait, 3-mark (see below)
+make-proxies decks/mydeck.txt --layout 3x3       # nine to a sheet, portrait (see below)
 make-proxies decks/mydeck.txt --backs            # double-sided; default is fronts only
 make-proxies decks/mydeck.txt --basics           # include basic lands; skipped by default
 make-proxies decks/mydeck.txt --images cards/    # your own card images where you have them
@@ -104,7 +103,7 @@ replaces the outer 0.3 mm with the ring just inside first; `:0.5` sets the width
 every card.
 
 Every output folder gets a `CUT-NOTES.md` for that run and a `run.json` that `cut-proxies` reads,
-so the registration pattern you printed is the one it scans for. `run.json` also holds the
+so the layout you printed is the one it cuts. `run.json` also holds the
 manifest: which printing sits on which page and slot of each PDF, which is what `redo` uses.
 
 ### Your own card images
@@ -142,9 +141,7 @@ half a leg in from its corner and starts the bottom-left search 10 mm above it. 
 3.5 mm all round and 10.5 mm legs, the bottom-left L read 1–2 mm left on a laminated sheet, three
 scans out of three; at 7 mm its search began on the bottom-left card's corner and once read that
 (2026-10-24). Now every pass stays 1.2–2.6 mm clear of the card print (simulated on a real sheet).
-It prints 3-mark registration only, the square top-left and L marks top-right and bottom-left, and
-refuses `-r 4`, which hasn't been tried at these insets. It is A4 with standard cards and fronts
-only. `--backs` is refused, and so is a deck whose
+It is A4 with standard cards and fronts only. `--backs` is refused, and so is a deck whose
 double-faced cards would need a duplex sheet; `--split-faces` prints their faces on the 3x3 sheet.
 `run.json` records the layout, so `cut-proxies` scans the right frame and cuts the right outlines;
 `redo`, `backlog --layout 3x3` and `backlog build --layout 3x3` count nine to a sheet.
@@ -209,18 +206,18 @@ Stored in `data/offset_data.json`, tracked, applied to every double-sided PDF.
 ## Cutting
 
 `cut-proxies` drives the Cameo over Bluetooth LE (`--usb` for the cable) with its own driver,
-`src/mtgproxy/cameo/`, and sends the scan command explicitly: `-r 4` is the four-L-mark scan,
-`-r 3` the square plus two L's (untested on the machine; see Registration). Both follow the
-sheet's `run.json`, which holds the marks and layout `make-proxies` printed.
+`src/mtgproxy/cameo/`, and scans the 3-mark registration every sheet is printed with (see
+Registration). It follows the sheet's `run.json`, which holds the paper, card size and layout
+`make-proxies` printed.
 
 Run bare at a terminal, `cut-proxies` asks first. Enter cuts the default: this folder's
-`run.json`, or a plain A4 sheet (standard cards, four L-marks) when there is none, with the
+`run.json`, or a plain A4 sheet (standard cards, the default layout) when there is none, with the
 laminate preset over Bluetooth LE. "Choose…" picks another run below this folder, the preset, and
 cut, proof first, dry run or probe. `--usb` and `--ble-name` keep the menu; any other flag, or a
 pipe, skips it and cuts as told.
 
 ```sh
-cd mydeck && cut-proxies   # menu; Enter cuts this run (paper, card size, mark pattern from run.json)
+cd mydeck && cut-proxies   # menu; Enter cuts this run (paper, card size, layout from run.json)
 cut-proxies --run mydeck   # same, from the parent folder
 cut-proxies --preset paper # plain paper instead of laminate
 cut-proxies --passes 4     # also --force/--speed/--depth, --x-off/--y-off
@@ -228,8 +225,8 @@ cut-proxies --usb          # over the cable instead of Bluetooth LE
 cut-proxies --scan         # list the Bluetooth devices in range
 cut-proxies --dry-run      # no machine: runs the whole job against a stand-in, checks the bounds
 cut-proxies --probe        # scans the marks, logs what the machine reports, cuts nothing
-cut-proxies --proof        # scores each mark's L after the scan; y cuts, r rescans, q stops
-cut-proxies --layout 3x3   # a 3x3 sheet without its run.json (3-mark; 3.5 mm sides, 9 mm top/bottom)
+cut-proxies --proof        # scores the square and each L after the scan; y cuts, r rescans, q stops
+cut-proxies --layout 3x3   # a 3x3 sheet without its run.json (marks 3.5 mm in, 9 mm top/bottom)
 cut-proxies --svg job.svg --reg-inset 5   # any page-sized SVG
 ```
 
@@ -268,36 +265,31 @@ The job follows Silhouette Studio's own conversation with this machine, recorded
 
 Registration:
 
-- `--reg-length` / `--reg-thickness` (mm, default the layout's: 9.4 × 1 on the card-maker's 4x2
-  A4, 6 × 1 on its 3x3) describe the printed marks before the scan.
-- The scan starts on white paper above the top-left mark's horizontal leg, and the sensor
-  travels down onto it. It registers only from a window about 2 mm wide each way, and from one
-  load to the next the marks move about that much (the hand's millimetre on the mat, and where
-  the machine takes the mat in). So each sheet starts where the last sheet with the same marks
-  registered (`output/cut/scan-start.json`), and a miss tries the starts 2 mm around it, across
-  first, then down and up, then the diagonals: up to 9 starts, 15–20 s per miss. With nothing
-  remembered it starts at (7.5, 18) mm at a 10 mm inset, from the laminated sheets of
-  2026-10-20, and (2.5, 11.5) at 5 mm, where starting 0.5 mm past the vertical leg skewed cuts
-  and 11.5 never did (calibration sheets, 2026-09-28). `--scan-start TOP,LEFT` (repeatable)
-  replaces the search with exactly those starts. Coordinates are from the job's own origin, which
-  the job's first command (`TG1`) moves 16.5 mm in once per mat load: anything that measures
-  positions on the machine must send it first.
-- 3-mark sheets (`make-proxies -r 3`, then `cut-proxies` reads it from `run.json`) are scanned
-  with `TB123`, which finds the top-left square by an area search instead of one line down:
-  rows 3 mm apart from the start to 30 mm below it, each sweeping 30 mm to its right, for a
-  dark run 3.5–9 mm long. It then measures the square down and across and takes its centre less
-  2.5 mm as the edge, which lands on the L marks' centre lines: the frame and the cut are the
-  same as a 4-mark sheet's. The square must print exactly 5 mm. The card-maker drew it with a
-  1 mm outline until the engine fork's cd4166a; at 6 mm the machine found it, its sideways pass
-  ran past it and the scan failed (`-1`) from every start. Regenerate 3-mark sheets made before
-  that. The search must cross the square's left edge from white paper: it starts at (8, 4) mm at
-  a 10 mm inset, which registered first time on plain A4 (2026-10-24); starts on or past the
-  square never find it (`1`). No bottom-right mark is read, so a stretched sheet's far corner
-  goes unchecked. A 3x3 sheet's search starts at (11, 1) mm, 2 mm into its square (3.5–8.5 mm
-  across, 9–14 mm down) and 2.5 mm left of it, so the first row runs through the square: a start
-  above it on laminate took the firmware's retry and registered off the sheet (2026-10-25).
-- `--reg-inset MM` moves the expected marks from the layout's inset (10 mm; 3.5 mm on a 3x3 sheet)
-  toward the paper edge (5 mm is proven). It must match the printed marks.
+- Every sheet has 3-mark registration: a filled 5 mm square top-left and L marks top-right and
+  bottom-left, scanned with `TB123`. `--reg-length` / `--reg-thickness` (mm, default the layout's:
+  6 × 1 on the 3x3, 9.4 × 1 on the 4x2) describe the L marks before the scan. Older sheets printed
+  with 4-mark registration are refused (their `run.json` says so): rebuild and reprint them.
+- `TB123` finds the square by an area search: rows 3 mm apart from the start to 30 mm below it,
+  each sweeping 30 mm to its right, for a dark run 3.5–9 mm long. It then measures the square
+  down and across and takes its centre less 2.5 mm as the corner, which lands on the L marks'
+  centre lines. No bottom-right mark is read, so a stretched sheet's far corner goes unchecked.
+- The square must print exactly 5 mm. The card-maker drew it with a 1 mm outline until the
+  engine fork's cd4166a; at 6 mm the machine found it, its sideways pass ran past it and the scan
+  failed (`-1`) from every start.
+- The search starts 2 mm below the square's top edge and 6 mm left of it, or 1 mm from the paper's
+  edge: (11, 1) mm on a 3x3 sheet (the square 3.5–8.5 mm across, 9–14 mm down), (12, 4) on a 4x2
+  (10–15 mm both ways). The first row runs through the square, and the sweep crosses its left
+  edge from white paper. On laminated 3x3 sheets a start 2 mm above the square, near the paper's
+  edge, took the firmware's retry and registered off the sheet, while 2 mm into it registered
+  first time (2026-10-25). On plain A4, starts on or past the square never found it (`1`). A 4x2
+  sheet registered once from (8, 4), 2 mm above its square (2026-10-24); (12, 4) follows the 3x3
+  sheets and hasn't been tried. `--scan-start TOP,LEFT` (repeatable) replaces the start with
+  exactly those. Coordinates are from the job's own origin, which the job's first command (`TG1`)
+  moves 16.5 mm in once per mat load: anything that measures positions on the machine must send
+  it first.
+- `--reg-inset MM` puts the expected marks MM from every paper edge instead of the layout's
+  (3.5 mm from the sides and 9 mm from the top and bottom on a 3x3 sheet, 10 mm on a 4x2). The
+  deck box prints its marks 5 mm in. It must match the printed marks.
 - Cuts may reach above or left of the top-left mark, as long as they stay on the paper: the
   cutting area then starts past them (`\\-y,-x`); every other job sends Studio's `\\0,0`.
   First used on the deck box's round 4 (2026-09-28). Keep 6 mm around every mark free of print
@@ -305,10 +297,10 @@ Registration:
 
 The machine reports no mark positions (FQ5 reads -64 after every successful scan, straight or
 tilted; its firmware keeps them to itself), so a misread can't be caught from the replies. It can
-be caught by eye: `--proof` scores every mark's L along its centre lines after the scan (a
-3-mark sheet's square: its outline, along the edge of the black), then waits. Lift the lid: registered right, every cut runs down the middle of the
-black and ends where the leg ends; a misread corner's cuts sit beside its lines, by the size of
-the misread. Each leg is left uncut for 1.5 mm either side of where the sensor crosses it, so a
+be caught by eye: `--proof` scores the square's outline, along the edge of the black, and each L
+along its centre lines after the scan, then waits. Lift the lid: registered right, the outline
+traces the square's edge and every L cut runs down the middle of the black and ends where the leg
+ends; a misread mark's cuts sit beside it, by the size of the misread. Each leg is left uncut for 1.5 mm either side of where the sensor crosses it, so a
 rescan reads clean ink: what stays is an L at each corner and a piece at each leg's end. `y`
 cuts the job, `r` goes home and scans again (the new cuts go on the same marks; up to three
 rounds), `q` stops with nothing more cut. Every run writes its own

@@ -11,7 +11,7 @@ FOUND, NOT_FOUND = b"    0\x03", b"    1\x03"
 
 
 def machine(overrides=None):
-    answers = {b"\x1b\x05": b"0\x03", b"FG": driver.FIRMWARE, b"TB124": FOUND, **(overrides or {})}
+    answers = {b"\x1b\x05": b"0\x03", b"FG": driver.FIRMWARE, b"TB123": FOUND, **(overrides or {})}
     return RecordingTransport(lambda *a, **k: None, answers)
 
 
@@ -30,24 +30,24 @@ def log():
 
 def test_a_good_job_scans_cuts_and_returns_to_the_origin_without_moving_it():
     t = machine()
-    result = driver.cut(job(), t, log(), driver.default_starts(FRAME))
+    result = driver.cut(job(), t, log(), [driver.default_start(FRAME)])
     out = sent(t)
     ending = "TB0\x03L0\x03\\0,0\x03M0,0\x03TR0,0\x03J0\x03FN0\x03TB50,0\x03"
     # Studio's order: prepare, describe + scan, then the blade inside the frame, cut, go home.
-    assert out.index("TR0,1") < out.index("TB124,4000,5740,50,230\x03TB99") < out.index("FX20,1")
+    assert out.index("TR0,1") < out.index("TB123,4000,5740,140,20\x03TB99") < out.index("FX20,1")
     assert out.index("FX20,1") < out.index("D") < out.rindex(ending)
     assert "Z4140,5880\x03" in out  # the cutting area reaches the paper's far edges (+2 mm)
     assert "SO0" not in out
-    assert result.start == (2.5, 11.5)
+    assert result.start == (7, 1)  # 2 mm into the 5 mm deck box's square, 1 mm from the edge
 
 
 def test_a_status_reply_during_the_scan_is_not_mistaken_for_its_result():
-    t = machine({b"TB124": b"1\x03"})  # "moving" arrives first ...
+    t = machine({b"TB123": b"1\x03"})  # "moving" arrives first ...
     write = t.write
 
     def then_found(data):
         write(data)
-        if b"TB124" in data:
+        if b"TB123" in data:
             t.pending.append(FOUND)  # ... then the padded result
 
     t.write = then_found
@@ -55,20 +55,20 @@ def test_a_status_reply_during_the_scan_is_not_mistaken_for_its_result():
 
 
 def test_a_missed_scan_is_retried_from_the_next_start():
-    t = machine({b"TB124": [NOT_FOUND, FOUND]})
+    t = machine({b"TB123": [NOT_FOUND, FOUND]})
     result = driver.cut(job(), t, log(), [(2.5, 2.5), (0.0, 0.0)])
     out = sent(t)
-    assert out.count("TB124,") == 2 and "TB124,4000,5740,0,0\x03" in out
+    assert out.count("TB123,") == 2 and "TB123,4000,5740,0,0\x03" in out
     assert out.count("TB52,2\x03") == 2  # the mark description is re-sent before each scan
     assert result.start == (0.0, 0.0)
 
 
 def test_when_no_start_finds_the_marks_nothing_is_cut_but_the_head_still_goes_home():
-    t = machine({b"TB124": NOT_FOUND})
+    t = machine({b"TB123": NOT_FOUND})
     with pytest.raises(session.CutError, match="couldn't find the marks"):
         driver.cut(job(), t, log(), [(2.5, 2.5), (0.0, 0.0)])
     out = sent(t)
-    assert "D" not in out.split("TB124")[-1].split("L0")[0]  # no draw after the last scan
+    assert "D" not in out.split("TB123")[-1].split("L0")[0]  # no draw after the last scan
     assert out.endswith("TB0\x03L0\x03\\0,0\x03M0,0\x03TR0,0\x03J0\x03FN0\x03TB50,0\x03\x1b\x05")
 
 
@@ -96,10 +96,10 @@ def test_the_cutting_area_widens_past_the_top_left_mark_only_when_a_cut_goes_the
     assert session.low_corner((15.0, 16.0, 55.0, 56.0)) == (0.0, 0.0)  # Studio's \\0,0
     assert session.low_corner((-3.0, -2.0, 55.0, 56.0)) == (-2.5, -3.5)  # y, x: 0.5 mm past
     t = machine()
-    driver.cut(job([geometry.Polyline(((10, 2.5), (40, 2.5)))]), t, log(), driver.default_starts(FRAME))
+    driver.cut(job([geometry.Polyline(((10, 2.5), (40, 2.5)))]), t, log(), [driver.default_start(FRAME)])
     assert "\\-40,0\x03Z4140,5880\x03" in sent(t)  # page y 2.5 → -1.5 commanded (inset 5, +1 bias), 0.5 past
     t = machine()
-    driver.cut(job(), t, log(), driver.default_starts(FRAME))
+    driver.cut(job(), t, log(), [driver.default_start(FRAME)])
     assert "\\0,0\x03Z4140,5880\x03" in sent(t)
 
 

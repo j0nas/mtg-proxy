@@ -2,7 +2,7 @@
 cut, and — whatever happens after the machine was touched — a return to the origin.
 
 Coordinates: the job is in page millimetres (y down). After the scan the machine's origin is the
-top-left mark's corner, so a page point maps to (x − inset + bias_x, y − inset + bias_y). Nothing
+top-left mark's corner, so a page point maps to (x − inset + bias_x, y − top + bias_y). Nothing
 may land above or left of that corner (negative registered coordinates are untested), and
 nothing may leave the paper.
 """
@@ -24,14 +24,15 @@ class CutError(Exception):
     pass
 
 
-SCAN_TIMEOUT_S = 90.0  # a full four-mark search, including the machine's own outward search
+SCAN_TIMEOUT_S = 90.0  # a whole scan, the firmware's own second try included (28 s on 2026-10-25)
 CHUNK_BYTES = 1024
 CHUNK_TIMEOUT_S = 180.0
 
 
 @dataclass(frozen=True)
 class Frame:
-    """The printed registration marks, in page millimetres."""
+    """The printed registration marks, in page millimetres: 3-mark registration, a 5 mm square
+    top-left and L marks top-right and bottom-left."""
 
     page_w: float
     page_h: float
@@ -40,7 +41,6 @@ class Frame:
     height: float  # top-left → bottom-left mark corner
     length: float = 9.4  # leg length
     thickness: float = 1.0
-    marks: int = 4  # 4 = L-marks in all four corners; 3 = square top-left + two L's
     inset_y: float | None = None  # from the top and bottom edges, when it differs from inset (3x3)
 
     @property
@@ -190,18 +190,16 @@ class Session:
     def register(self, frame: Frame, starts: list[tuple[float, float]]) -> tuple[float, float]:
         """Scan the marks, trying each (top, left) start in mm until the machine reports them found.
 
-        The start is where the sensor begins searching, from the origin (the mat's loaded
-        position). Studio puts it on white paper above the top-left mark's horizontal leg, just
-        past its vertical leg, so the sensor crosses a mark line and not the paper edge. Every
-        attempt is logged with each reply and its timing.
+        The start is where the sensor begins its area search for the square, from the origin (the
+        mat's loaded position): see ``driver.default_start``. Every attempt is logged with each
+        reply and its timing.
         """
-        kind = 124 if frame.marks == 4 else 123
         for n, (top, left) in enumerate(starts, 1):
             stale = self.t.drain()
             if stale:
                 self.log("stale", replies=[s.decode("latin1") for s in stale])
             self.send(*p.mark_setup(frame.length, frame.thickness))
-            scan = p.scan(kind, frame.height, frame.width, top, left)
+            scan = p.scan(frame.height, frame.width, top, left)
             t0 = time.monotonic()
             self.send(*scan)
             result, others = None, []
@@ -226,7 +224,7 @@ class Session:
             f"the Cameo couldn't find the marks from {len(starts)} scan start(s), the first at "
             f"({top:g}, {left:g}) mm. Check: printed at 100 %, the paper's top-left corner on the mat "
             "grid's, nothing printed within 6 mm of a mark, no glare. Or pass --scan-start TOP,LEFT "
-            "(mm from the origin, above the top-left mark's horizontal leg)."
+            "(mm from the origin: about 2 mm below the square's top edge, a few mm left of it)."
         )
 
     def cut(self, job: Job) -> None:

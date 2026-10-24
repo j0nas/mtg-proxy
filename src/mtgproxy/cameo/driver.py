@@ -22,8 +22,7 @@ FIRMWARE = b"CAMEO 5 ALPHA V1.04    \x03"
 DRY_ANSWERS = {
     b"\x1b\x05": b"0\x03",  # ready
     b"FG": FIRMWARE,
-    b"TB124": b"    0\x03",  # marks found (a scan result is padded to five characters)
-    b"TB123": b"    0\x03",
+    b"TB123": b"    0\x03",  # marks found (a scan result is padded to five characters)
 }
 
 # Queries that might report registration state; the probe logs each reply before and after a
@@ -32,62 +31,31 @@ DRY_ANSWERS = {
 PROBE_QUERIES = ("FQ0", "FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6", "FQ7", "FQ8", "FQ9", "[", "U", "TB71", "FA")
 
 
-SEARCH_STEP = 2.0  # mm between neighbouring scan starts: about the width of the window that works
-# The 3 x 3 neighbourhood of the first start, likeliest first: across, then down and up, then the
-# diagonals. On 2026-10-20 the sheets that registered needed 2 mm across or 2 mm down.
-SEARCH_ORDER = ((0, 0), (0, -1), (0, 1), (1, 0), (-1, 0), (1, -1), (1, 1), (-1, -1), (-1, 1))
 LOWEST = 1.0  # mm: no start above or left of this
 
 
 def default_start(frame: Frame) -> tuple[float, float]:
-    """Where a sheet's mark search starts, (top, left) mm from the origin, before any sheet with
-    these marks has registered (``cutting`` remembers the last start that did).
+    """Where the mark search starts, (top, left) mm from the origin: 2 mm below the square's top
+    edge and 6 mm left of it, or as far left as LOWEST allows. (11, 1) on a 3x3 sheet (the square
+    at 3.5-8.5 mm across, 9-14 mm down), (12, 4) on a 4x2 sheet (10-15 mm both ways), (7, 1) on
+    the 5 mm deck box.
 
-    The sensor travels down from here onto the top-left mark's horizontal leg. It registers only
-    from a window about 2 mm wide each way, and from one load to the next the marks move about
-    that much: the hand's millimetre on the mat, and where the machine takes the mat in. So no
-    single start always works, and ``search_starts`` tries the ones around it.
+    The machine finds the square by an area search: rows 3 mm apart from the start to 30 mm below
+    it, each sweeping 30 mm to its right, for a dark run 3.5-9 mm long (firmware V1.04, cameo-re
+    NOTES.md). It then measures the square down and across. Starting 2 mm into the square, the
+    first row runs through it. The sweep has to cross the square's left edge from white paper:
+    on plain A4 with the square 10 mm in (2026-10-24), starts 2-6 mm in from the left found it
+    and starts at 11-13 mm, on or past the square, never did (reply 1). The square must print
+    exactly 5 mm (the engine fork's cd4166a): at 6 mm the machine found it and then failed to
+    measure it (reply -1) from every start.
 
-    At the card sheets' 10 mm inset the start is (7.5, 18), from the laminated sheets of
-    2026-10-20: they registered from (7.5, 20), (7.5, 18) and (9.5, 18) and missed from
-    (7.5, 22), (7.5, 16), (5.5, 18) and, on most sheets that night, from the old default
-    (6, 17). Studio's (2.5, 11.5) failed on laminate now and then. The 5 mm deck box keeps its
-    proven (2.5, 11.5): starting 0.5 mm past the vertical leg skewed its cut and 11.5 did not
-    (calibration sheets, 2026-09-28).
-
-    A 3-mark sheet (TB123) starts 2 mm above and 6 mm left of its square's corner: (8, 4) at a
-    10 mm inset, which registered first time on 2026-10-24. The machine finds the square by an
-    area search, not one line down: rows 3 mm apart from the start to 30 mm below it, each
-    sweeping 30 mm to its right, for a dark run 3.5-9 mm long (firmware V1.04, cameo-re
-    NOTES.md). The sweep has to cross the square's left edge from white paper: starts 2-6 mm in
-    from the left all found it that night, and starts at 11-13 mm, on or past the square, never
-    did (reply 1). The square must print exactly 5 mm (the engine fork's cd4166a): at 6 mm the
-    machine found it and then failed to measure it (reply -1) from every start. A 3x3 sheet (its
-    own inset_y) starts 2 mm below its square's top edge and 2.5 mm left of it, so the first row
-    runs through the square: on a laminated 3x3 sheet with marks 7 mm from the top, a start 2 mm
-    above the square took the firmware's second try (28 s) and registered off the top of the sheet,
-    while (9, 1), 2 mm into the square, found the marks first time twice (13-14 s, 2026-10-25)."""
-    if frame.marks == 3 and frame.inset_y is not None:  # 3x3: the first row through the square
-        return frame.top + 2, max(LOWEST, frame.inset - 6)
-    if frame.marks == 3:
-        return max(LOWEST, frame.top - 2), max(LOWEST, frame.inset - 6)
-    if frame.inset <= 5:
-        return frame.top / 2, min(11.5, frame.inset + frame.length - 2)
-    return frame.top - 2.5, frame.inset + 8
-
-
-def search_starts(first: tuple[float, float]) -> list[tuple[float, float]]:
-    """``first``, then the starts SEARCH_STEP around it, in SEARCH_ORDER: each one the machine
-    tries in turn until it finds the marks (a miss costs 15-20 s)."""
-    top, left = first
-    return [
-        (max(LOWEST, top + dy * SEARCH_STEP), max(LOWEST, left + dx * SEARCH_STEP)) for dy, dx in SEARCH_ORDER
-    ]
-
-
-def default_starts(frame: Frame) -> list[tuple[float, float]]:
-    """The search around ``default_start``: what a sheet tries when no start is remembered."""
-    return search_starts(default_start(frame))
+    On laminated 3x3 sheets (2026-10-25) a start 2 mm above the square, near the paper's edge,
+    took the firmware's second try (28 s) and registered off the top of the sheet, while a start
+    2 mm into it found the marks first time twice (13-14 s) and then registered four sheets cut in
+    a row. A 4x2 sheet's start follows that: (8, 4), 2 mm above its square, registered once, on
+    plain A4 (2026-10-24); (12, 4) has not been tried on the machine, nor has (7, 1) on the deck
+    box."""
+    return frame.top + 2, max(LOWEST, frame.inset - 6)
 
 
 def plan(svg: Path, frame: Frame, blade: protocol.Blade, passes: int, bias: tuple[float, float]) -> Job:
@@ -131,7 +99,7 @@ def cut(
     try:
         extent = reach = check_bounds(job)
         if confirm:  # the area must hold the proof cuts too, which may reach past the job's own
-            marks = [cut for _, cut in proof.cuts(job.frame, starts[0])]
+            marks = [cut for _, cut in proof.cuts(job.frame)]
             reach = check_bounds(replace(job, lines=[*job.lines, *marks]))
         low = low_corner(reach)
         rounds = proof.ROUNDS if confirm else 1
@@ -149,7 +117,7 @@ def cut(
                     f"top-left mark: cutting area widened to {low[0]:g}, {low[1]:g} mm"
                 )
             s.setup(job.blade, job.frame, low)
-            if confirm is None or prove(s, job, log, confirm, start, attempt, rescan=attempt + 1 < rounds):
+            if confirm is None or prove(s, job, log, confirm, attempt, rescan=attempt + 1 < rounds):
                 break
         s.cut(job)
         return Result(firmware, start, extent)
@@ -162,14 +130,13 @@ def prove(
     job: Job,
     log: SessionLog,
     confirm: Confirm,
-    start: tuple[float, float],
     attempt: int,
     rescan: bool,
 ) -> bool:
     """Score the proof cuts over the marks, park the head out of the way and ask. True: cut the
     job; False: rescan. Anything but y or r stops the job (CutError)."""
     kept, skipped = [], []
-    for corner, piece in proof.cuts(job.frame, start):
+    for corner, piece in proof.cuts(job.frame):
         if proof.on_job(piece, job.shapes or job.lines):
             skipped.append(corner)
         else:

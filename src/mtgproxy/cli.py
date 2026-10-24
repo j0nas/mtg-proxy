@@ -18,7 +18,7 @@ from . import backlog as backlog_mod
 from .backlog import Backlog, BacklogError, Entry
 from .cache import ImageCache
 from .decks import DeckError, is_double_sided
-from .layout import MARKS, NOMINAL_CARDS, SINGLE_SIDED, LayoutError
+from .layout import NOMINAL_CARDS, SINGLE_SIDED, LayoutError
 from .layout import check as check_layout
 from .manifest import ManifestError
 from .paths import DEFAULT_BACK, NOTES_NAME, SCM, cache_dir
@@ -41,8 +41,8 @@ def parse_start(value: str) -> tuple[float, float]:
 
 
 LAYOUT_HELP = (
-    "4x2: the paper's default layout (8 cards on A4) | 3x3: 9 cards on portrait A4, 3-mark registration "
-    "3.5 mm from the edges, fronts only (untested on the machine)"
+    "4x2: the paper's default layout (8 cards on A4) | 3x3: 9 cards on portrait A4, marks 3.5 mm from "
+    "the sides and 9 mm from the top and bottom, fronts only"
 )
 
 
@@ -83,9 +83,6 @@ def make(
         Path, typer.Option("-o", "--out", help="parent dir for <deckname>/", file_okay=False)
     ] = Path("."),
     paper: Annotated[str, typer.Option("-p", "--paper", help="a4 | letter | a3 ...")] = "a4",
-    registration: Annotated[
-        str | None, typer.Option("-r", "--registration", help="4 | 3 registration marks (default 4; 3x3: 3)")
-    ] = None,
     sheet_layout: Annotated[str, typer.Option("--layout", help=LAYOUT_HELP)] = "4x2",
     board: Annotated[str, typer.Option(help="deck URL board: main | side | considering")] = "main",
     backs: Annotated[
@@ -181,7 +178,6 @@ def make(
         fmt=fmt,
         out_parent=out,
         paper=paper,
-        registration=registration,
         layout=sheet_layout,
         board=board,
         fronts_only=not backs,
@@ -240,7 +236,7 @@ def notes_cmd(
 @app.command(
     help=(
         "Cut a printed sheet on the Cameo 5 Alpha. Reads run.json from the current directory (or --run) "
-        "for paper/card/layout/registration; flags override. With no flags at a terminal, asks first "
+        "for paper/card/layout; flags override. With no flags at a terminal, asks first "
         "(Enter cuts the default)."
     ),
 )
@@ -251,9 +247,6 @@ def cut(
     ] = None,
     paper: Annotated[str | None, typer.Option("-p", "--paper")] = None,
     card: Annotated[str | None, typer.Option("-c", "--card")] = None,
-    registration: Annotated[
-        str | None, typer.Option("-r", "--registration", help="4 | 3 — MUST match the printed marks")
-    ] = None,
     sheet_layout: Annotated[
         str | None, typer.Option("--layout", help="4x2 | 3x3 — MUST match the printed sheet")
     ] = None,
@@ -294,13 +287,14 @@ def cut(
             "--reg-inset",
             min=3,
             max=30,
-            help="mark corners' distance from the paper edges in mm (default: the layout's, 10; 3x3: 3.5)",
+            help="mark corners' distance from the paper edges in mm, all round (default: the layout's, "
+            "10; 3x3: 3.5 from the sides, 9 from the top and bottom)",
         ),
     ] = None,
     reg_length: Annotated[
         float | None,
         typer.Option(
-            "--reg-length", help="printed mark leg length in mm (default: the layout's, 9.4; 3x3: 10.5)"
+            "--reg-length", help="printed mark leg length in mm (default: the layout's, 9.4; 3x3: 6)"
         ),
     ] = None,
     reg_thickness: Annotated[
@@ -316,8 +310,8 @@ def cut(
         bool,
         typer.Option(
             "--proof",
-            help="after the scan, score each mark's L over the print and wait: y cuts, r rescans, q stops "
-            "(a 3-mark sheet's square: its outline)",
+            help="after the scan, score the square's outline and each L over the print and wait: y cuts, "
+            "r rescans, q stops",
         ),
     ] = False,
     scan_start: Annotated[
@@ -326,8 +320,8 @@ def cut(
             "--scan-start",
             metavar="TOP,LEFT",
             help="where the mark search starts, mm from the loaded origin; repeat to retry in order "
-            "(default: where the last sheet with these marks registered, else 7.5,18 at a 10 mm "
-            "inset and 2.5,11.5 at 5 mm, then the starts 2 mm around it)",
+            "(default: 2 mm into the square, 6 mm left of it or 1 mm from the edge: 11,1 on a 3x3 "
+            "sheet, 12,4 on a 4x2)",
         ),
     ] = None,
 ) -> None:
@@ -347,9 +341,13 @@ def cut(
     sidecar = None if plain else find_sidecar(run)
     if sidecar is not None:
         info = RunInfo.read(sidecar)
+        if info.registration != "3":
+            fail(
+                f"{info.name} was printed with {info.registration}-mark registration ({sidecar}). "
+                "4-mark sheets are no longer supported: rebuild and reprint"
+            )
         typer.echo(
-            f"cut-proxies: using {sidecar} ({info.name}: {info.paper}/{info.card_size}, {info.layout}, "
-            f"{info.registration}-mark)"
+            f"cut-proxies: using {sidecar} ({info.name}: {info.paper}/{info.card_size}, {info.layout})"
         )
     elif run is not None:
         fail(f"no run.json at {run}")
@@ -360,8 +358,6 @@ def cut(
         paper=paper or (info.paper if info else "a4"),
         card_size=card or (info.card_size if info else "standard"),
         layout=sheet_layout,
-        # A plain sheet's marks are the layout's own unless -r says otherwise (4; a 3x3 sheet's 3).
-        registration=registration or (info.registration if info else MARKS.get(sheet_layout, "4")),
         force=blade.force if force is None else force,
         speed=blade.speed if speed is None else speed,
         depth=blade.depth if depth is None else depth,
@@ -671,9 +667,6 @@ def backlog_drop(refs: Annotated[list[str], typer.Argument()], out: OutOpt = Pat
 def backlog_build(
     out: OutOpt = Path("."),
     paper: Annotated[str, typer.Option("-p", "--paper", help="a4 | letter | a3 ...")] = "a4",
-    registration: Annotated[
-        str | None, typer.Option("-r", "--registration", help="4 | 3 registration marks (default 4; 3x3: 3)")
-    ] = None,
     sheet_layout: Annotated[str, typer.Option("--layout", help=LAYOUT_HELP)] = "4x2",
     backs: Annotated[
         bool, typer.Option("--backs/--fronts-only", help="double-sided (default: fronts only)")
@@ -702,11 +695,7 @@ def backlog_build(
 ) -> None:
     out = out.resolve()
     try:  # before anything is looked up or written; run_build checks the same
-        build.resolve_layout(
-            build.BuildOptions(
-                paper=paper, registration=registration, layout=sheet_layout, fronts_only=not backs
-            )
-        )
+        build.resolve_layout(build.BuildOptions(paper=paper, layout=sheet_layout, fronts_only=not backs))
     except build.BuildError as e:
         fail(str(e))
     bl = Backlog.at(out)
@@ -753,7 +742,6 @@ def backlog_build(
         deck=str(deck),
         out_parent=out,
         paper=paper,
-        registration=registration,
         layout=sheet_layout,
         fronts_only=not backs,
         duplex_dfc=not split_faces,

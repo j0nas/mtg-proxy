@@ -1,24 +1,20 @@
 """Proof cuts: a registration check read by eye between the scan and the real cut.
 
 The machine never reports where it found the marks: its firmware keeps them to itself (FQ5 reads
--64 after every scan). So after the scan we score every mark's own L along its centre lines, from
-the corner to each leg's inked end. Registered right, every cut runs down the middle of the black;
-a misread corner's cuts sit beside its lines, by the size of the misread, and a cut that stops
-short of or overruns a leg's end shows the error along that leg. The operator answers y (cut the
-job), r (scan again; the new cuts go on the same marks) or q (stop).
+-64 after every scan). So after the scan we score every mark: the top-left square along its
+outline, and the L marks top-right and bottom-left along their centre lines, from the corner to
+each leg's inked end. Registered right, the outline traces the edge of the black and every L cut
+runs down the middle of it; a misread mark's cuts sit beside it, by the size of the misread, and
+a cut that stops short of or overruns a leg's end shows the error along that leg. The operator
+answers y (cut the job), r (scan again; the new cuts go on the same marks) or q (stop).
 
 A rescan reads the same marks, and a scored line inside the black would sit exactly where the
-sensor looks for the darkest point. So each leg is left uncut for EXCLUDE either side of wherever
-the sensor crosses it (firmware V1.04, docs in cameo-re): half the machine's leg length along
-every leg (it keeps whole millimetres), plus, on the top-left mark, the first search's line down
-from the scan start and the 4 mm step it then takes down the vertical leg. What stays is an L at
-each corner and a piece at each leg's end. A piece that would touch the job is left out.
-
-A 3-mark sheet (TB123) has L marks top-right and bottom-left, crossed half a leg from their
-corners as on a 4-mark sheet, and a filled square top-left with no mark bottom-right. The square
-is scored along its outline: the machine locates it by the centre of its dark run, and a cut
-across the black could split that run below the 3.5 mm the search accepts, while one along its
-edge leaves the run whole. Registered right, the outline traces the edge of the black.
+sensor looks for the darkest point. The machine locates the square by the centre of its dark
+run, and a cut across the black could split that run below the 3.5 mm the search accepts, while
+one along its edge leaves the run whole. It crosses each L half its leg length from the corner
+(it keeps whole millimetres; firmware V1.04, docs in cameo-re), so each leg is left uncut for
+EXCLUDE either side of that: what stays is an L at each corner and a piece at each leg's end. A
+piece that would touch the job is left out.
 """
 
 from __future__ import annotations
@@ -30,17 +26,13 @@ from .session import Frame
 
 EXCLUDE = 1.5  # mm left uncut either side of a sensor crossing
 MIN_PIECE = 1.0  # mm; shorter pieces are left out
-FIRST_STEP = 4.0  # mm the first search steps down the top-left vertical leg before its X scan
 ROUNDS = 3  # proof rounds; the last one offers no rescan
 CLEARANCE = 0.5  # mm a cut keeps from every job path
 
-CORNERS = (  # name, which frame corner, the legs' directions (x, y) from it
-    ("top-left", (0, 0), (1, 1)),
+L_MARKS = (  # name, which frame corner, the legs' directions (x, y) from it
     ("top-right", (1, 0), (-1, 1)),
-    ("bottom-right", (1, 1), (-1, -1)),
     ("bottom-left", (0, 1), (1, -1)),
 )
-L_MARKS = {4: ("top-left", "top-right", "bottom-right", "bottom-left"), 3: ("top-right", "bottom-left")}
 SQUARE = 5.0  # mm: the card-maker's 3-mark square, filled, no outline (engine fork cd4166a)
 
 
@@ -53,33 +45,23 @@ def square(frame: Frame) -> Polyline:
     return Polyline(((x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)))
 
 
-def crossings(frame: Frame, start: tuple[float, float]) -> dict[tuple[str, str], list[float]]:
-    """Where the sensor crosses each leg, in mm from its corner: {(corner, "h" | "v"): [...]}."""
-    half = min(20, max(5, math.floor(frame.length))) / 2  # TB51 keeps whole mm, 5..20
-    out = {(name, leg): [half] for name, _, _ in CORNERS for leg in ("h", "v")}
-    out[("top-left", "h")].append(start[1] - frame.inset)  # the first search, down from the start
-    out[("top-left", "v")].append(FIRST_STEP)
-    return out
+def crossing(frame: Frame) -> float:
+    """Where the sensor crosses each L's legs, in mm from its corner: half the leg length the
+    machine keeps (TB51 takes whole mm, 5..20)."""
+    return min(20, max(5, math.floor(frame.length))) / 2
 
 
-def pieces(length: float, cross: list[float]) -> list[tuple[float, float]]:
-    """[0, length] less EXCLUDE either side of every crossing, as (from, to) mm from the corner."""
-    cuts = [(0.0, length)]
-    for c in cross:
-        lo, hi = c - EXCLUDE, c + EXCLUDE
-        cuts = [part for a, b in cuts for part in ((a, min(b, lo)), (max(a, hi), b)) if part[1] > part[0]]
-    return [(a, b) for a, b in cuts if b - a >= MIN_PIECE]
+def pieces(length: float, cross: float) -> list[tuple[float, float]]:
+    """[0, length] less EXCLUDE either side of the crossing, as (from, to) mm from the corner."""
+    parts = ((0.0, min(length, cross - EXCLUDE)), (max(0.0, cross + EXCLUDE), length))
+    return [(a, b) for a, b in parts if b - a >= MIN_PIECE]
 
 
-def cuts(frame: Frame, start: tuple[float, float]) -> list[tuple[str, Polyline]]:
-    """(corner, cut) along every L mark's centre lines, in page mm, the legs' pieces from
-    ``pieces``; where both legs' first pieces reach the corner they join into one L. A 3-mark
-    sheet's square comes first, as its outline."""
-    cross = crossings(frame, start)
-    out = [("top-left", square(frame))] if frame.marks == 3 else []
-    for name, (i, j), (sx, sy) in CORNERS:
-        if name not in L_MARKS[frame.marks]:
-            continue
+def cuts(frame: Frame) -> list[tuple[str, Polyline]]:
+    """(corner, cut) in page mm: the square's outline first, then each L mark's legs along their
+    centre lines in the pieces ``pieces`` leaves, the two pieces at the corner joined into one L."""
+    out = [("top-left", square(frame))]
+    for name, (i, j), (sx, sy) in L_MARKS:
         cx = frame.inset + i * frame.width
         cy = frame.top + j * frame.height
 
@@ -89,13 +71,12 @@ def cuts(frame: Frame, start: tuple[float, float]) -> list[tuple[str, Polyline]]
         def at_v(d: float, cx=cx, cy=cy, sy=sy) -> Point:
             return (cx, cy + sy * d)
 
-        h = pieces(frame.length, cross[(name, "h")])
-        v = pieces(frame.length, cross[(name, "v")])
-        if h and v and h[0][0] == 0 and v[0][0] == 0:
-            out.append((name, Polyline((at_h(h[0][1]), (cx, cy), at_v(v[0][1])))))
-            h, v = h[1:], v[1:]
-        out += [(name, Polyline((at_h(a), at_h(b)))) for a, b in h]
-        out += [(name, Polyline((at_v(a), at_v(b)))) for a, b in v]
+        legs = pieces(frame.length, crossing(frame))  # the same along both legs
+        if legs and legs[0][0] == 0:
+            out.append((name, Polyline((at_h(legs[0][1]), (cx, cy), at_v(legs[0][1])))))
+            legs = legs[1:]
+        out += [(name, Polyline((at_h(a), at_h(b)))) for a, b in legs]
+        out += [(name, Polyline((at_v(a), at_v(b)))) for a, b in legs]
     return out
 
 

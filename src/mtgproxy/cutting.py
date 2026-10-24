@@ -1,8 +1,9 @@
 """Cut a printed sheet on the Cameo 5 Alpha with our own driver (``mtgproxy.cameo``).
 
-The mark scan is chosen explicitly (4 → TB124 four L-marks, 3 → TB123 square + 2 L-marks), the
-mark frame comes from the same layouts.json that placed the marks in the PDF, and the blade
-settings come from a preset (laminate or plain paper), each overridable by a plain flag.
+Every sheet has 3-mark registration (the square top-left, L marks top-right and bottom-left),
+scanned with TB123. The mark frame comes from the same layouts.json that placed the marks in the
+PDF, and the blade settings come from a preset (laminate or plain paper), each overridable by a
+plain flag.
 """
 
 from __future__ import annotations
@@ -41,7 +42,6 @@ PRESETS = {
 class CutOptions:
     paper: str = "a4"
     card_size: str = "standard"
-    registration: str = "4"
     force: int = PRESETS["laminate"].force
     speed: int = PRESETS["laminate"].speed
     depth: int = PRESETS["laminate"].depth
@@ -54,11 +54,11 @@ class CutOptions:
     dry_run: bool = False
     layout: str = "4x2"  # 4x2 | 3x3 (layout.py): which of the engine's layouts the sheet was printed in
     # The printed marks (mm). Leg length None = the layout's: 9.4 on the card-maker's 4x2 A4 (and
-    # deckbox's), 10.5 on its 3x3.
+    # deckbox's), 6 on its 3x3.
     reg_length: float | None = None
     reg_thickness: float = 1.0
     # Mark corners' distance from the paper edges (mm). None = the layout's (10 for the card-maker's
-    # 4x2 A4, 3.5 for its 3x3). Nothing may be cut above/left of the top-left mark.
+    # 4x2 A4; 3.5 from the sides and 9 from the top and bottom on its 3x3).
     reg_inset: float | None = None
     out_dir: Path = field(default_factory=lambda: ROOT / "output" / "cut")
     label: str | None = None  # deck name, for log/transcript file names
@@ -67,51 +67,15 @@ class CutOptions:
     scan_starts: list[tuple[float, float]] | None = None  # (top, left) mm; None = the driver's defaults
 
 
-SCAN_START_FILE = "scan-start.json"  # in out_dir: where each kind of sheet last registered
-
-
-def start_key(frame) -> str:
-    top = "" if frame.inset_y is None else f", {frame.inset_y:g} mm top and bottom"
-    return f"{frame.marks}-mark, inset {frame.inset:g} mm{top}, legs {frame.length:g} mm"
-
-
-def remembered_start(out_dir: Path, frame) -> tuple[float, float] | None:
-    """The scan start that last found these marks, or None. Sheets and loads move the marks by
-    a millimetre or two, so the next sheet is likeliest to register near the last one."""
-    try:
-        top, left = json.loads((out_dir / SCAN_START_FILE).read_text())[start_key(frame)]
-        return float(top), float(left)
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-
-
-def remember_start(out_dir: Path, frame, start: tuple[float, float]) -> None:
-    path = out_dir / SCAN_START_FILE
-    try:
-        known = json.loads(path.read_text())
-    except (OSError, ValueError):
-        known = {}
-    known[start_key(frame)] = [round(start[0], 2), round(start[1], 2)]
-    path.write_text(json.dumps(known, indent=2) + "\n")
-
-
 def scan_starts(o: CutOptions, frame) -> tuple[list[tuple[float, float]], str]:
-    """The starts to try in order, and where the first came from. ``--scan-start`` is taken as
-    given; otherwise the search goes around the remembered start, then tries the default."""
+    """The starts to try in order, and where the first came from: ``--scan-start`` as given, else
+    the one start 2 mm into the square (``driver.default_start``). TB123's area search covers the
+    millimetre or two the marks move from one load to the next."""
     from .cameo import driver
 
     if o.scan_starts:
         return o.scan_starts, "--scan-start"
-    default = driver.default_start(frame)
-    if frame.marks == 3:  # TB123's area search covers the drift a 4-mark search has to step around
-        return [default], "the area search's corner"
-    last = remembered_start(o.out_dir, frame)
-    if last is None:
-        return driver.search_starts(default), "the default"
-    starts = driver.search_starts(last)
-    if default not in starts:
-        starts.append(default)
-    return starts, "where the last sheet registered"
+    return [driver.default_start(frame)], "2 mm into the square"
 
 
 def read_cut_offset(path: Path = CUT_OFFSET_FILE) -> tuple[float, float]:
@@ -149,11 +113,8 @@ def check(o: CutOptions) -> None:
     paper it never prints."""
     try:
         layout.check(o.layout, o.paper, o.card_size)
-        layout.registration(o.layout, o.registration)
     except layout.LayoutError as e:
         raise CutError(str(e)) from e
-    if o.registration not in ("3", "4"):
-        raise CutError("--registration must be 3 or 4")
 
 
 def run_cut(o: CutOptions) -> int:
@@ -188,7 +149,6 @@ def run_cut(o: CutOptions) -> int:
         height=geom.reg_y_mm,
         length=geom.reg_length_mm if o.reg_length is None else o.reg_length,
         thickness=o.reg_thickness,
-        marks=int(o.registration),
         inset_y=geom.reg_inset_y_mm,
     )
     try:
@@ -200,7 +160,7 @@ def run_cut(o: CutOptions) -> int:
     what = f"{geom.cards} cards ({geom.layout})" if o.svg is None else svg.name
     via = "nothing (dry run)" if o.dry_run else o.connection
     print(
-        f"cut-proxies: {name} — {what}, {o.registration}-mark registration "
+        f"cut-proxies: {name} — {what}, 3-mark registration "
         f"(marks inset {frame.inset:g} mm"
         + ("" if frame.inset_y is None else f", {frame.inset_y:g} mm top and bottom")
         + f", {frame.width:g} x {frame.height:g} mm apart, "
@@ -227,8 +187,6 @@ def run_cut(o: CutOptions) -> int:
         if o.proof:
             confirm = dry_confirm if o.dry_run else ask_operator
         result = driver.cut(job, t, log, starts, confirm)
-        if not o.dry_run:
-            remember_start(o.out_dir, frame, result.start)
     except (session.CutError, TransportError) as e:
         raise CutError(f"{e}\ncut-proxies: session log: {log_path}") from e
     finally:
@@ -262,11 +220,11 @@ def wait_for_next_sheet(o: CutOptions, interrupted) -> bool:
 
 
 PROOF_HELP = """\
-cut-proxies: proof cuts are down, on the marks: each mark's L scored along its centre lines,
-with a gap across each leg where the sensor reads it (a 3-mark sheet's square: its outline,
-along the edge of the black). Lift the lid and look at every mark. Registered right, every cut
-runs down the middle of the black and ends where the leg ends. A misread corner's cuts sit
-beside its lines: how far beside is the misread.
+cut-proxies: proof cuts are down, on the marks: the square's outline, along the edge of the
+black, and each L scored along its centre lines, with a gap across each leg where the sensor
+reads it. Lift the lid and look at every mark. Registered right, the outline traces the square's
+edge and every L cut runs down the middle of the black and ends where the leg ends. A misread
+mark's cuts sit beside it: how far beside is the misread.
     y  every cut on its mark: cut the job
     r  a cut is off its mark: scan the marks again (the new cuts go on the same marks)
     q  stop: nothing more is cut, the head goes home"""

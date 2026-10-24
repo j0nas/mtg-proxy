@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
@@ -38,7 +38,6 @@ class BuildOptions:
     fmt: str = "mtga"
     out_parent: Path = field(default_factory=Path.cwd)
     paper: str = "a4"
-    registration: str | None = None  # 3 | 4; None = the layout's (4 for 4x2, 3 for 3x3)
     card_size: str = "standard"
     layout: str = "4x2"  # 4x2 | 3x3, see layout.py
     board: str = "main"
@@ -316,11 +315,11 @@ def per_page(opts: BuildOptions) -> int:
 
 def pdf_base_args(opts: BuildOptions) -> list[str]:
     # --extend_corners 3.5mm: Scryfall scans have rounded corners; this fills the
-    # corner bleed so cut cards don't get white corner slivers.
+    # corner bleed so cut cards don't get white corner slivers. Every sheet is 3-mark (cutting.py).
     return [
         "--card_size", opts.card_size,
         "--paper_size", opts.paper,
-        "--registration", opts.registration,
+        "--registration", "3",
         "--extend_corners", "3.5mm",
         *layout.engine_flags(opts.layout),
     ]  # fmt: skip
@@ -459,15 +458,12 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
 
 # --- the whole thing ---------------------------------------------------------
 def resolve_layout(opts: BuildOptions) -> BuildOptions:
-    """``opts`` with its registration settled by the layout (layout.registration); raises
-    BuildError for a layout this paper, card size, registration or --backs can't have."""
+    """``opts`` as given; raises BuildError for a layout this paper, card size or --backs can't
+    have."""
     try:
         layout.check(opts.layout, opts.paper, opts.card_size)
-        opts = replace(opts, registration=layout.registration(opts.layout, opts.registration))
     except layout.LayoutError as e:
         raise BuildError(str(e)) from e
-    if opts.registration not in ("3", "4"):
-        raise BuildError("--registration must be 3 or 4")
     if opts.layout in layout.SINGLE_SIDED and not opts.fronts_only:
         raise BuildError(
             f"--layout {opts.layout} prints fronts only for now: no sheet in this layout has been printed "
@@ -500,7 +496,7 @@ def run_build(opts: BuildOptions) -> BuildResult:
         split = local_split(opts, deck)
         log(
             f"dry run: {name} → {out} (paper {opts.paper}, {opts.layout} layout of {per_page(opts)} cards, "
-            f"{opts.registration}-mark, format {deck.fmt}, fetch args {fetch_args_for(opts)})"
+            f"format {deck.fmt}, fetch args {fetch_args_for(opts)})"
         )
         if split:
             log_split(split, deck.fmt)
@@ -581,7 +577,6 @@ def run_build(opts: BuildOptions) -> BuildResult:
                 name=name,
                 paper=opts.paper,
                 card_size=opts.card_size,
-                registration=opts.registration,
                 cards=printed,
                 fronts_only=opts.fronts_only,
                 duplex_dfc=opts.duplex_dfc,
@@ -594,7 +589,6 @@ def run_build(opts: BuildOptions) -> BuildResult:
         name=name,
         paper=opts.paper,
         card_size=opts.card_size,
-        registration=opts.registration,
         cards=printed,
         fronts_only=opts.fronts_only,
         generated=date.today().isoformat(),

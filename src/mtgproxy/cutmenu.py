@@ -1,7 +1,7 @@
 """The menu a bare ``cut-proxies`` shows at a terminal.
 
 Enter on the first question cuts the default: this folder's run.json, or a plain A4 sheet
-(standard cards, four L-marks) when there is none, with the laminate preset. "Choose…" asks
+(standard cards, the default layout) when there is none, with the laminate preset. "Choose…" asks
 which run, which preset and what to do (cut, proof first, dry run, probe). The connection is
 never asked: Bluetooth LE unless ``--usb`` is given.
 
@@ -24,7 +24,7 @@ from .cutting import PRESETS
 from .paths import SIDECAR_NAME
 from .sidecar import RunInfo
 
-PLAIN = "plain A4 sheet: standard cards, 4-mark"
+PLAIN = "plain A4 sheet: standard cards, 4x2"
 MODES = {
     "cut": "cut",
     "proof": "proof cuts on the marks first, then y cuts / r rescans / q stops (first sheet only)",
@@ -53,8 +53,7 @@ def describe(sidecar: Path) -> str | None:
         i = RunInfo.read(sidecar)
     except (OSError, ValueError, TypeError):
         return None
-    sheet = f"{i.paper}/{i.card_size}" + ("" if i.layout == "4x2" else f" {i.layout}")
-    return f"{i.name}: {i.cards} cards, {sheet}, {i.registration}-mark"
+    return f"{i.name}: {i.cards} cards, {i.paper}/{i.card_size} {i.layout}"
 
 
 def ask(where: Path, via: str) -> Picked | None:

@@ -75,10 +75,10 @@ def test_prune_to_tokens(tmp_path, monkeypatch):
 @needs_engine
 def test_cli_make_dry_run_resolves_without_network(decklist, tmp_path):
     r = runner.invoke(
-        app, ["make", str(decklist), "-o", str(tmp_path), "--dry-run", "-r", "3", "--", "--prefer_set", "sld"]
+        app, ["make", str(decklist), "-o", str(tmp_path), "--dry-run", "--", "--prefer_set", "sld"]
     )
     assert r.exit_code == 0, r.output
-    assert "dry run: mydeck" in r.output and "3-mark" in r.output and "'--prefer_set', 'sld'" in r.output
+    assert "dry run: mydeck" in r.output and "'--prefer_set', 'sld'" in r.output
     assert (tmp_path / "mydeck").is_dir()
 
 
@@ -113,8 +113,8 @@ def test_cli_validation():
     assert r.exit_code == 2 and "No such option" in r.output
     r = runner.invoke(app, ["make", "missing.txt", "--dry-run"])
     assert r.exit_code == 1 and "decklist not found" in r.output
-    r = runner.invoke(app, ["make", "x.txt", "-r", "5", "--dry-run"])
-    assert r.exit_code == 1 and "registration" in r.output
+    r = runner.invoke(app, ["make", "x.txt", "-r", "3", "--dry-run"])
+    assert r.exit_code == 2 and "No such option" in r.output  # every sheet is 3-mark: no -r
 
 
 def test_cli_notes_and_cut_errors(tmp_path):
@@ -144,14 +144,14 @@ def test_cli_cut_takes_geometry_from_sidecar(tmp_path, monkeypatch):
     monkeypatch.setattr(cutting, "run_cut", fake_run_cut)
     r = runner.invoke(app, ["cut", "--run", str(tmp_path), "--passes", "4"])
     assert r.exit_code == 0, r.output
-    assert (captured["paper"], captured["registration"], captured["label"], captured["passes"]) == (
+    assert (captured["paper"], captured["layout"], captured["label"], captured["passes"]) == (
         "letter",
-        "3",
+        "4x2",  # run.json from before layouts
         "orah",
         4,
     )
-    r = runner.invoke(app, ["cut", "--run", str(tmp_path), "-r", "4"])
-    assert captured["registration"] == "4"  # explicit flag wins
+    r = runner.invoke(app, ["cut", "--run", str(tmp_path), "-p", "a4"])
+    assert captured["paper"] == "a4"  # explicit flag wins
     assert isinstance(captured["out_dir"], Path)
     assert captured["connection"] == "ble"  # Bluetooth unless asked otherwise
     r = runner.invoke(app, ["cut", "--run", str(tmp_path), "--usb"])
@@ -186,8 +186,6 @@ def test_move_tokens_last_reindexes_by_token_name(tmp_path, monkeypatch):
 
 
 def test_cli_make_3x3_refuses_what_it_cant_print(decklist):
-    r = runner.invoke(app, ["make", str(decklist), "--layout", "3x3", "-r", "4", "--dry-run"])
-    assert r.exit_code == 1 and "3-mark registration only" in r.output and "Drop -r 4" in r.output
     r = runner.invoke(app, ["make", str(decklist), "--layout", "3x3", "-p", "letter", "--dry-run"])
     assert r.exit_code == 1 and "A4 paper with standard cards only, not letter" in r.output
     r = runner.invoke(app, ["make", str(decklist), "--layout", "3x3", "--backs", "--dry-run"])
@@ -199,22 +197,20 @@ def test_cli_make_3x3_refuses_what_it_cant_print(decklist):
 
 
 @needs_engine
-def test_cli_make_3x3_dry_run_says_nine_a_sheet_and_three_marks(decklist, tmp_path):
+def test_cli_make_3x3_dry_run_says_nine_a_sheet(decklist, tmp_path):
     r = runner.invoke(app, ["make", str(decklist), "-o", str(tmp_path), "--layout", "3x3", "--dry-run"])
     assert r.exit_code == 0, r.output
-    assert "(paper a4, 3x3 layout of 9 cards, 3-mark," in r.output
+    assert "(paper a4, 3x3 layout of 9 cards, format" in r.output
     r = runner.invoke(app, ["make", str(decklist), "-o", str(tmp_path), "--dry-run"])
-    assert "(paper a4, 4x2 layout of 8 cards, 4-mark," in r.output
+    assert "(paper a4, 4x2 layout of 8 cards, format" in r.output
 
 
-def test_3x3_takes_the_engines_tighter_layout_and_three_marks():
-    opts = build.resolve_layout(BuildOptions(layout="3x3"))
-    assert opts.registration == "3"
-    assert build.pdf_base_args(opts)[-3:] == ["--borderless", "--label", ""] and "3" in build.pdf_base_args(
-        opts
-    )
-    four = build.resolve_layout(BuildOptions())
-    assert four.registration == "4" and "--borderless" not in build.pdf_base_args(four)
+def test_every_sheet_is_3_mark_and_3x3_takes_the_engines_tighter_layout():
+    three = build.pdf_base_args(build.resolve_layout(BuildOptions(layout="3x3")))
+    assert three[three.index("--registration") + 1] == "3"
+    assert three[-3:] == ["--borderless", "--label", ""]
+    four = build.pdf_base_args(build.resolve_layout(BuildOptions(layout="4x2")))
+    assert four[four.index("--registration") + 1] == "3" and "--borderless" not in four
 
 
 @pytest.fixture
@@ -261,7 +257,7 @@ def test_a_3x3_run_records_its_layout_for_cut_proxies(tmp_path, monkeypatch, gam
     assert (info.layout, info.registration, info.cards, info.paper) == ("3x3", "3", 9, "a4")
     notes = (result.out / NOTES_NAME).read_text()
     assert "| layout: 3x3 | registration: 3-mark | cards: 9" in notes
-    assert "`cut-proxies --layout 3x3 -r 3`" in notes
+    assert "`cut-proxies --layout 3x3`" in notes
 
 
 @needs_engine

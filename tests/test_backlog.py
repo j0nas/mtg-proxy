@@ -369,8 +369,6 @@ def test_redo_and_the_backlog_count_sheets_of_the_runs_layout(tmp_path, monkeypa
 
     built = []
     monkeypatch.setattr(build, "run_build", lambda opts: built.append(opts))
-    r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--layout", "3x3", "-r", "4"])
-    assert r.exit_code == 1 and "Drop -r 4" in r.output
     r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--layout", "3x3", "--backs"])
     assert r.exit_code == 1 and "Drop --backs" in r.output
     r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--layout", "3x3", "--full-only", "-n"])

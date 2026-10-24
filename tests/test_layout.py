@@ -85,10 +85,6 @@ def test_a4_standard_3x3_geometry_and_svg(tmp_path):
     # beside the top-left card's corner. None of TB123's passes over the square reach a card: its
     # first row runs through the square, and it measures the square down at x 7 and across at y 11.5.
     assert clear == pytest.approx({"square": 1.44, "top-right": 5.25, "bottom-left": 5.24}, abs=0.05)
-    # The corner a fourth mark would take is as clear as the others: -r 4 is refused for its scan
-    # start (layout.registration), not for room.
-    bottom_right = [(200.5, 287.5, 207.0, 288.5), (206.0, 282.0, 207.0, 288.5)]
-    assert min(_gap(o, m) for o in outlines for m in bottom_right) == pytest.approx(5.25, abs=0.05)
 
 
 @needs_engine
@@ -133,7 +129,6 @@ def test_the_marks_the_engine_prints_are_the_frame_cut_proxies_scans():
         g.reg_y_mm,
         g.reg_length_mm,
         1.0,
-        3,
         g.reg_inset_y_mm,
     )
     cx, cy = (SQUARE_3X3[0] + SQUARE_3X3[2]) / 2, (SQUARE_3X3[1] + SQUARE_3X3[3]) / 2
@@ -157,11 +152,6 @@ def test_layout_names_papers_and_marks():
         layout.check("3x3", "letter", "standard")
     with pytest.raises(layout.LayoutError, match="not a4 with poker"):
         layout.check("3x3", "a4", "poker")
-    assert layout.registration("4x2", None) == "4" and layout.registration("4x2", "3") == "3"
-    assert layout.registration("3x3", None) == "3" and layout.registration("3x3", "3") == "3"
-    with pytest.raises(layout.LayoutError, match=r"3-mark registration only .* Drop -r 4"):
-        layout.registration("3x3", "4")
-    assert layout.registration("3x3", "5") == "5"  # left for the caller's "must be 3 or 4"
     assert layout.engine_flags("4x2") == [] and layout.engine_flags("3x3") == ["--borderless", "--label", ""]
 
 

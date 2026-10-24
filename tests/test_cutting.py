@@ -35,39 +35,22 @@ def test_the_stored_offset_is_the_calibrated_one():
     assert cutting.read_cut_offset() == (0.0, 0.5)
 
 
-def frame(marks=4, inset=10.0):
+def frame(inset=10.0):
     from mtgproxy.cameo import session
 
-    return session.Frame(
-        page_w=297, page_h=210, inset=inset, width=297 - 2 * inset, height=210 - 2 * inset, marks=marks
-    )
+    return session.Frame(page_w=297, page_h=210, inset=inset, width=297 - 2 * inset, height=210 - 2 * inset)
 
 
-def test_the_next_sheet_searches_around_where_the_last_one_registered(tmp_path):
+def test_the_scan_starts_once_2_mm_into_the_square(tmp_path):
+    """TB123's area search finds the square from one start: nothing is remembered between sheets."""
     o = cutting.CutOptions(out_dir=tmp_path)
-    starts, origin = cutting.scan_starts(o, frame())
-    assert (starts[0], len(starts), origin) == ((7.5, 18), 9, "the default")
-    cutting.remember_start(tmp_path, frame(), (9.5, 18))
-    starts, origin = cutting.scan_starts(o, frame())
-    assert starts[:3] == [(9.5, 18), (9.5, 16), (9.5, 20)] and origin == "where the last sheet registered"
-    assert len(starts) == 9  # the default (7.5, 18) is already one of the neighbours
-    cutting.remember_start(tmp_path, frame(), (11.5, 24))
-    assert cutting.scan_starts(o, frame())[0][-1] == (7.5, 18)  # far off: the default comes last
-    # A 3-mark sheet's square is found by an area search: one start, nothing remembered.
-    assert cutting.scan_starts(o, frame(marks=3)) == ([(8, 4)], "the area search's corner")
+    assert cutting.scan_starts(o, frame()) == ([(12, 4)], "2 mm into the square")
+    assert cutting.scan_starts(o, frame(inset=5)) == ([(7, 1)], "2 mm into the square")
 
 
 def test_given_starts_are_tried_as_given(tmp_path):
-    cutting.remember_start(tmp_path, frame(), (9.5, 18))
-    o = cutting.CutOptions(out_dir=tmp_path, scan_starts=[(6.0, 17.0)])
-    assert cutting.scan_starts(o, frame()) == ([(6.0, 17.0)], "--scan-start")
-
-
-def test_a_damaged_memory_falls_back_to_the_default(tmp_path):
-    (tmp_path / cutting.SCAN_START_FILE).write_text("{not json")
-    assert cutting.remembered_start(tmp_path, frame()) is None
-    cutting.remember_start(tmp_path, frame(), (7.5, 20))  # and is replaced
-    assert cutting.remembered_start(tmp_path, frame()) == (7.5, 20)
+    o = cutting.CutOptions(out_dir=tmp_path, scan_starts=[(6.0, 17.0), (8.0, 17.0)])
+    assert cutting.scan_starts(o, frame()) == ([(6.0, 17.0), (8.0, 17.0)], "--scan-start")
 
 
 def cut_options(monkeypatch, *args: str) -> cutting.CutOptions:
@@ -83,7 +66,7 @@ def test_laminate_is_the_default_preset(monkeypatch, tmp_path):
     o = cut_options(monkeypatch)
     assert (o.force, o.speed, o.depth, o.passes) == (20, 25, 5, 3)
     assert (o.reg_length, o.reg_thickness) == (None, 1.0)  # legs: the layout's, 9.4 on a 4x2 A4
-    assert (o.layout, o.registration) == ("4x2", "4")
+    assert o.layout == "4x2"
 
 
 def test_the_paper_preset_and_explicit_flags_override_it(monkeypatch, tmp_path):
@@ -101,7 +84,7 @@ def test_an_unknown_preset_is_refused(monkeypatch, tmp_path):
 
 
 # --- the menu a bare cut-proxies shows at a terminal ---------------------------
-def write_run(where, name, paper="letter", registration="3", layout="4x2", cards=8):
+def write_run(where, name, paper="letter", layout="4x2", cards=8, registration="3"):
     from mtgproxy.sidecar import RunInfo
 
     where.mkdir(parents=True, exist_ok=True)
@@ -109,10 +92,10 @@ def write_run(where, name, paper="letter", registration="3", layout="4x2", cards
         name,
         paper,
         "standard",
-        registration,
         cards=cards,
         fronts_only=True,
         generated="2026-10-01",
+        registration=registration,
         layout=layout,
     )
     return info.write(where)
@@ -122,15 +105,26 @@ def test_a_3x3_run_is_cut_as_one(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     write_run(tmp_path, "test-sheet", paper="a4", layout="3x3", cards=9)
     o = cut_options(monkeypatch, "--dry-run")
-    assert (o.layout, o.registration, o.paper, o.reg_length, o.reg_inset) == ("3x3", "3", "a4", None, None)
-    result = CliRunner().invoke(cli.app, ["cut", "--dry-run", "-r", "4"])
-    assert result.exit_code == 1 and "--layout 3x3 prints 3-mark registration only" in result.output
+    assert (o.layout, o.paper, o.reg_length, o.reg_inset) == ("3x3", "a4", None, None)
 
 
-def test_a_plain_3x3_sheet_takes_three_marks(monkeypatch, tmp_path):
+def test_a_4_mark_run_is_refused(monkeypatch, tmp_path):
+    """A sheet printed before 3-mark only: its marks have no square for TB123 to find."""
+    monkeypatch.chdir(tmp_path)
+    write_run(tmp_path, "old", paper="a4", registration="4")
+    monkeypatch.setattr(cutting, "run_cut", lambda o: pytest.fail("a 4-mark sheet was cut"))
+    result = CliRunner().invoke(cli.app, ["cut", "--dry-run"])
+    assert result.exit_code == 1
+    assert "old was printed with 4-mark registration" in result.output
+    assert "4-mark sheets are no longer supported: rebuild and reprint" in result.output
+    result = CliRunner().invoke(cli.app, ["cut", "-r", "3", "--dry-run"])
+    assert result.exit_code == 2 and "No such option" in result.output  # no -r: every sheet is 3-mark
+
+
+def test_a_plain_3x3_sheet(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)  # no run.json
     o = cut_options(monkeypatch, "--layout", "3x3", "--dry-run")
-    assert (o.layout, o.registration, o.label) == ("3x3", "3", None)
+    assert (o.layout, o.label) == ("3x3", None)
     result = CliRunner().invoke(cli.app, ["cut", "--layout", "3x3", "-p", "letter", "--dry-run"])
     assert result.exit_code == 1 and "A4 paper with standard cards only" in result.output
 
@@ -138,30 +132,32 @@ def test_a_plain_3x3_sheet_takes_three_marks(monkeypatch, tmp_path):
 def test_the_menu_names_a_3x3_run(tmp_path):
     from mtgproxy import cutmenu
 
-    assert cutmenu.describe(write_run(tmp_path, "t", "a4", layout="3x3", cards=9)) == (
-        "t: 9 cards, a4/standard 3x3, 3-mark"
+    assert (
+        cutmenu.describe(write_run(tmp_path, "t", "a4", layout="3x3", cards=9))
+        == "t: 9 cards, a4/standard 3x3"
     )
 
 
 @needs_engine
 def test_a_3x3_dry_run_scans_its_own_frame(tmp_path, capsys):
     """The whole job against the stand-in: the frame, leg length and SVG are the 3x3 layout's."""
-    o = cutting.CutOptions(layout="3x3", registration="3", dry_run=True, out_dir=tmp_path, label="t")
+    o = cutting.CutOptions(layout="3x3", dry_run=True, out_dir=tmp_path, label="t")
     assert cutting.run_cut(o) == 0
     out = capsys.readouterr().out
     assert (
         "t — 9 cards (3x3), 3-mark registration (marks inset 3.5 mm, 9 mm top and bottom, 203 x 279 mm apart, 6 x 1 mm)"
         in out
     )
-    assert "scan starts at (11, 1) mm, the area search's corner" in out
+    assert "scan starts at (11, 1) mm, 2 mm into the square" in out
     sent = (tmp_path / "t.cmds").read_bytes().decode().split("\x03")
-    # Legs 10.5 mm (TB51 in 1/20 mm), then TB123 with the frame's height and width and the start.
+    # Legs 6 mm (TB51 in 1/20 mm), then TB123 with the frame's height and width and the start.
     assert "TB51,120" in sent and "TB123,5580,4060,220,20" in sent
     assert (tmp_path / "t.svg").read_text().count("<path ") == 9
-    four = cutting.CutOptions(dry_run=True, out_dir=tmp_path, label="f")
+    four = cutting.CutOptions(layout="4x2", dry_run=True, out_dir=tmp_path, label="f")
     assert cutting.run_cut(four) == 0
     sent = (tmp_path / "f.cmds").read_bytes().decode().split("\x03")
-    assert "TB51,188" in sent and "TB124,3800,5540,150,360" in sent  # the 4x2's, as before
+    assert "TB51,188" in sent and "TB123,3800,5540,240,80" in sent  # the 4x2's frame, from (12, 4)
+    assert not (tmp_path / "scan-start.json").exists()
 
 
 def menu(monkeypatch, *answers):
@@ -189,8 +185,8 @@ def test_enter_cuts_this_folders_run_with_laminate_over_bluetooth(monkeypatch, t
     write_run(tmp_path, "mydeck")
     asked = menu(monkeypatch, "default", "done")
     o = cut_options(monkeypatch)
-    assert asked[0][1][0] == "Cut mydeck: 8 cards, letter/standard, 3-mark · laminate · Bluetooth"
-    assert (o.label, o.paper, o.registration, o.connection) == ("mydeck", "letter", "3", "ble")
+    assert asked[0][1][0] == "Cut mydeck: 8 cards, letter/standard 4x2 · laminate · Bluetooth"
+    assert (o.label, o.paper, o.connection) == ("mydeck", "letter", "ble")
     assert (o.force, o.passes, o.dry_run, o.proof, o.probe) == (20, 3, False, False, False)
 
 
@@ -200,12 +196,12 @@ def test_with_no_run_here_the_default_is_a_plain_a4_sheet(monkeypatch, tmp_path)
     asked = menu(monkeypatch, "default", "done")
     o = cut_options(monkeypatch)
     assert asked[0][1][0].startswith("Cut plain A4 sheet")
-    assert (o.label, o.paper, o.card_size, o.registration) == (None, "a4", "standard", "4")
+    assert (o.label, o.paper, o.card_size, o.layout) == (None, "a4", "standard", "4x2")
 
 
 def test_choose_picks_a_run_below_a_preset_and_a_mode(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    sub = write_run(tmp_path / "otherdeck", "otherdeck", paper="a4", registration="4")
+    sub = write_run(tmp_path / "otherdeck", "otherdeck", paper="a4")
     asked = menu(monkeypatch, "choose", str(sub), "paper", "proof", "done")
     o = cut_options(monkeypatch)
     assert asked[1][1][0].startswith("plain A4 sheet")  # nothing here, so plain stays the default
@@ -218,7 +214,7 @@ def test_choose_plain_ignores_this_folders_run(monkeypatch, tmp_path):
     asked = menu(monkeypatch, "choose", "", "laminate", "dry-run")
     o = cut_options(monkeypatch)
     assert asked[1][1][0].startswith("mydeck:")  # this folder's run stays the default
-    assert (o.label, o.paper, o.registration, o.dry_run) == (None, "a4", "4", True)
+    assert (o.label, o.paper, o.dry_run) == (None, "a4", True)
 
 
 def test_usb_still_asks_and_says_so(monkeypatch, tmp_path):
