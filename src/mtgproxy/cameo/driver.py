@@ -62,7 +62,10 @@ def default_start(frame: Frame) -> tuple[float, float]:
     NOTES.md). The sweep has to cross the square's left edge from white paper: starts 2-6 mm in
     from the left all found it that night, and starts at 11-13 mm, on or past the square, never
     did (reply 1). The square must print exactly 5 mm (the engine fork's cd4166a): at 6 mm the
-    machine found it and then failed to measure it (reply -1) from every start."""
+    machine found it and then failed to measure it (reply -1) from every start. On the 3x3
+    layout's 3.5 mm inset the start clamps to (1.5, 1), 2 mm above and 2.5 mm left of a square
+    printed at 3.5-8.5 mm, with only that much paper between the start and the edge. Untested on
+    the machine."""
     if frame.marks == 3:
         return max(LOWEST, frame.inset - 2), max(LOWEST, frame.inset - 6)
     if frame.inset <= 5:

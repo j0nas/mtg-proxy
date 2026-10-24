@@ -18,7 +18,8 @@ from . import backlog as backlog_mod
 from .backlog import Backlog, BacklogError, Entry
 from .cache import ImageCache
 from .decks import DeckError, is_double_sided
-from .layout import LayoutError
+from .layout import MARKS, NOMINAL_CARDS, SINGLE_SIDED, LayoutError
+from .layout import check as check_layout
 from .manifest import ManifestError
 from .paths import DEFAULT_BACK, NOTES_NAME, SCM, cache_dir
 from .sidecar import RunInfo, find_sidecar
@@ -37,6 +38,12 @@ def parse_start(value: str) -> tuple[float, float]:
     except ValueError:
         fail(f"--scan-start wants TOP,LEFT in mm, got {value!r}")
     return top, left
+
+
+LAYOUT_HELP = (
+    "4x2: the paper's default layout (8 cards on A4) | 3x3: 9 cards on portrait A4, 3-mark registration "
+    "3.5 mm from the edges, fronts only (untested on the machine)"
+)
 
 
 def fail(msg: str, code: int = 1) -> None:
@@ -76,7 +83,10 @@ def make(
         Path, typer.Option("-o", "--out", help="parent dir for <deckname>/", file_okay=False)
     ] = Path("."),
     paper: Annotated[str, typer.Option("-p", "--paper", help="a4 | letter | a3 ...")] = "a4",
-    registration: Annotated[str, typer.Option("-r", "--registration", help="4 | 3 registration marks")] = "4",
+    registration: Annotated[
+        str | None, typer.Option("-r", "--registration", help="4 | 3 registration marks (default 4; 3x3: 3)")
+    ] = None,
+    sheet_layout: Annotated[str, typer.Option("--layout", help=LAYOUT_HELP)] = "4x2",
     board: Annotated[str, typer.Option(help="deck URL board: main | side | considering")] = "main",
     backs: Annotated[
         bool, typer.Option("--backs/--fronts-only", help="double-sided cards (default: fronts only)")
@@ -172,6 +182,7 @@ def make(
         out_parent=out,
         paper=paper,
         registration=registration,
+        layout=sheet_layout,
         board=board,
         fronts_only=not backs,
         duplex_dfc=not split_faces,
@@ -229,7 +240,7 @@ def notes_cmd(
 @app.command(
     help=(
         "Cut a printed sheet on the Cameo 5 Alpha. Reads run.json from the current directory (or --run) "
-        "for paper/card/registration; flags override. With no flags at a terminal, asks first "
+        "for paper/card/layout/registration; flags override. With no flags at a terminal, asks first "
         "(Enter cuts the default)."
     ),
 )
@@ -242,6 +253,9 @@ def cut(
     card: Annotated[str | None, typer.Option("-c", "--card")] = None,
     registration: Annotated[
         str | None, typer.Option("-r", "--registration", help="4 | 3 — MUST match the printed marks")
+    ] = None,
+    sheet_layout: Annotated[
+        str | None, typer.Option("--layout", help="4x2 | 3x3 — MUST match the printed sheet")
     ] = None,
     preset: Annotated[
         str,
@@ -280,10 +294,15 @@ def cut(
             "--reg-inset",
             min=3,
             max=30,
-            help="mark corners' distance from the paper edges in mm (layout default: 10)",
+            help="mark corners' distance from the paper edges in mm (default: the layout's, 10; 3x3: 3.5)",
         ),
     ] = None,
-    reg_length: Annotated[float, typer.Option("--reg-length", help="printed mark leg length in mm")] = 9.4,
+    reg_length: Annotated[
+        float | None,
+        typer.Option(
+            "--reg-length", help="printed mark leg length in mm (default: the layout's, 9.4; 3x3: 10.5)"
+        ),
+    ] = None,
     reg_thickness: Annotated[
         float, typer.Option("--reg-thickness", help="printed mark line thickness in mm")
     ] = 1.0,
@@ -329,16 +348,20 @@ def cut(
     if sidecar is not None:
         info = RunInfo.read(sidecar)
         typer.echo(
-            f"cut-proxies: using {sidecar} ({info.name}: {info.paper}/{info.card_size}, {info.registration}-mark)"
+            f"cut-proxies: using {sidecar} ({info.name}: {info.paper}/{info.card_size}, {info.layout}, "
+            f"{info.registration}-mark)"
         )
     elif run is not None:
         fail(f"no run.json at {run}")
     elif not plain:
         typer.echo("cut-proxies: no run.json in the current directory — using flags/defaults", err=True)
+    sheet_layout = sheet_layout or (info.layout if info else "4x2")
     o = cutting.CutOptions(
         paper=paper or (info.paper if info else "a4"),
         card_size=card or (info.card_size if info else "standard"),
-        registration=registration or (info.registration if info else "4"),
+        layout=sheet_layout,
+        # A plain sheet's marks are the layout's own unless -r says otherwise (4; a 3x3 sheet's 3).
+        registration=registration or (info.registration if info else MARKS.get(sheet_layout, "4")),
         force=blade.force if force is None else force,
         speed=blade.speed if speed is None else speed,
         depth=blade.depth if depth is None else depth,
@@ -350,6 +373,10 @@ def cut(
         label=info.name if info else None,
         probe=probe, proof=proof, scan_starts=[parse_start(v) for v in scan_start or []] or None,
     )  # fmt: skip
+    try:
+        cutting.check(o)  # before the loop: a retry can't fix the options
+    except cutting.CutError as e:
+        fail(str(e))
     job, sheet = o, 1
     while True:
         try:
@@ -547,14 +574,18 @@ def redo(
     bl.add(entries)
     bl.save()
     typer.echo(f"queued {len(entries)} card(s) → {bl.path}")
-    typer.echo(bl.summary(_per_page(info.paper, info.card_size)))
+    typer.echo(bl.summary(_per_page(info.paper, info.card_size, info.layout)))
 
 
-def _per_page(paper: str, card_size: str) -> int:
+def _per_page(paper: str, card_size: str, sheet_layout: str) -> int:
     try:
-        return manifest.cards_per_page(paper, card_size)
-    except (KeyError, engine.EngineMissing, OSError):
-        return 8
+        check_layout(sheet_layout, paper, card_size)
+    except LayoutError as e:
+        fail(str(e))
+    try:
+        return manifest.cards_per_page(paper, card_size, sheet_layout)
+    except (KeyError, LayoutError, engine.EngineMissing, OSError):
+        return NOMINAL_CARDS.get(sheet_layout, 8)
 
 
 backlog_app = typer.Typer(
@@ -583,30 +614,38 @@ def _resolve_faces(bl: Backlog) -> None:
             )
 
 
-def _show_backlog(out: Path, paper: str, card_size: str = "standard") -> Backlog:
+def _show_backlog(out: Path, paper: str, sheet_layout: str, card_size: str = "standard") -> Backlog:
     bl = Backlog.at(out.resolve())
     if not bl.entries:
         typer.echo(f"backlog empty ({bl.path})")
         raise typer.Exit()
     _resolve_faces(bl)
-    typer.echo(bl.summary(_per_page(paper, card_size)))
+    typer.echo(bl.summary(_per_page(paper, card_size, sheet_layout)))
     typer.echo(bl.listing())
     return bl
 
 
+SheetLayoutOpt = Annotated[str, typer.Option("--layout", help="4x2 | 3x3: count sheets of this layout")]
+
+
 @backlog_app.callback()
 def backlog_main(
-    ctx: typer.Context, out: OutOpt = Path("."), paper: Annotated[str, typer.Option("-p", "--paper")] = "a4"
+    ctx: typer.Context,
+    out: OutOpt = Path("."),
+    paper: Annotated[str, typer.Option("-p", "--paper")] = "a4",
+    sheet_layout: SheetLayoutOpt = "4x2",
 ) -> None:
     if ctx.invoked_subcommand is None:
-        _show_backlog(out, paper)
+        _show_backlog(out, paper, sheet_layout)
 
 
 @backlog_app.command(name="show", help="List the queued cards and how many full sheets they make.")
 def backlog_show(
-    out: OutOpt = Path("."), paper: Annotated[str, typer.Option("-p", "--paper")] = "a4"
+    out: OutOpt = Path("."),
+    paper: Annotated[str, typer.Option("-p", "--paper")] = "a4",
+    sheet_layout: SheetLayoutOpt = "4x2",
 ) -> None:
-    _show_backlog(out, paper)
+    _show_backlog(out, paper, sheet_layout)
 
 
 @backlog_app.command(name="drop", help="Remove entries: by listed number or by (unique) card name.")
@@ -632,7 +671,10 @@ def backlog_drop(refs: Annotated[list[str], typer.Argument()], out: OutOpt = Pat
 def backlog_build(
     out: OutOpt = Path("."),
     paper: Annotated[str, typer.Option("-p", "--paper", help="a4 | letter | a3 ...")] = "a4",
-    registration: Annotated[str, typer.Option("-r", "--registration", help="4 | 3 registration marks")] = "4",
+    registration: Annotated[
+        str | None, typer.Option("-r", "--registration", help="4 | 3 registration marks (default 4; 3x3: 3)")
+    ] = None,
+    sheet_layout: Annotated[str, typer.Option("--layout", help=LAYOUT_HELP)] = "4x2",
     backs: Annotated[
         bool, typer.Option("--backs/--fronts-only", help="double-sided (default: fronts only)")
     ] = False,
@@ -659,6 +701,14 @@ def backlog_build(
     dry_run: Annotated[bool, typer.Option("-n", "--dry-run", help="show what would be built")] = False,
 ) -> None:
     out = out.resolve()
+    try:  # before anything is looked up or written; run_build checks the same
+        build.resolve_layout(
+            build.BuildOptions(
+                paper=paper, registration=registration, layout=sheet_layout, fronts_only=not backs
+            )
+        )
+    except build.BuildError as e:
+        fail(str(e))
     bl = Backlog.at(out)
     if not bl.entries:
         fail(f"backlog empty ({bl.path})")
@@ -669,10 +719,17 @@ def backlog_build(
             fail(f"--front-only: nothing in the backlog matching {want!r}")
         for e in hits:
             e.front = True
-    per_page = _per_page(paper, "standard")
+    per_page = _per_page(paper, "standard", sheet_layout)
     cards, keep = bl.take(per_page, full_only)
     if not cards:
         fail(f"no full sheet yet ({bl.summary(per_page)}) — drop --full-only to print a partial one")
+    dfc = [c for c in cards if c.dfc and not c.front]
+    if sheet_layout in SINGLE_SIDED and dfc and not split_faces:
+        fail(
+            f"{len(dfc)} double-faced card(s) would need a duplex sheet, and --layout {sheet_layout} prints "
+            f"fronts only for now: add --split-faces or --front-only NAME, or build them without --layout "
+            f"{sheet_layout}"
+        )
     run_name = name or _fresh_name(out, f"backlog-{date.today().isoformat()}")
     typer.echo(f"{len(cards)} card(s) → {out / run_name}/" + (f", {len(keep)} stay queued" if keep else ""))
     if dry_run:
@@ -697,6 +754,7 @@ def backlog_build(
         out_parent=out,
         paper=paper,
         registration=registration,
+        layout=sheet_layout,
         fronts_only=not backs,
         duplex_dfc=not split_faces,
         front_only=[c.name for c in cards if c.front],

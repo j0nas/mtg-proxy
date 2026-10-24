@@ -324,10 +324,10 @@ def test_images_are_recorded_and_rebuild_passes_them_back(tmp_path, monkeypatch)
 
     monkeypatch.setattr(build, "stage_and_index", fake_stage)
     monkeypatch.setattr(manifest, "partition", lambda fronts_only, duplex_dfc: ([], []))
-    monkeypatch.setattr(manifest, "cards_per_page", lambda paper, card: 8)
+    monkeypatch.setattr(manifest, "cards_per_page", lambda paper, card, layout: 8)
     info = SimpleNamespace(
         decklist=str(deck), options={"images": "/cards", "include_basics": True}, paper="a4",
-        card_size="standard", fronts_only=True, cards=0, deferred=0, pdf=None, duplex_pdf=None,
+        card_size="standard", fronts_only=True, cards=0, deferred=0, pdf=None, duplex_pdf=None, layout="4x2",
     )  # fmt: skip
     manifest.rebuild(tmp_path, info)
     assert seen["opts"].images == Path("/cards") and seen["opts"].include_basics

@@ -185,6 +185,112 @@ def test_move_tokens_last_reindexes_by_token_name(tmp_path, monkeypatch):
     assert build.prune_to_tokens() == 2  # --tokens-only still recognises the renamed files
 
 
+def test_cli_make_3x3_refuses_what_it_cant_print(decklist):
+    r = runner.invoke(app, ["make", str(decklist), "--layout", "3x3", "-r", "4", "--dry-run"])
+    assert r.exit_code == 1 and "3-mark registration only" in r.output and "Drop -r 4" in r.output
+    r = runner.invoke(app, ["make", str(decklist), "--layout", "3x3", "-p", "letter", "--dry-run"])
+    assert r.exit_code == 1 and "A4 paper with standard cards only, not letter" in r.output
+    r = runner.invoke(app, ["make", str(decklist), "--layout", "3x3", "--backs", "--dry-run"])
+    assert r.exit_code == 1 and "fronts only for now" in r.output and "Drop --backs" in r.output
+    r = runner.invoke(app, ["make", "--test", "--layout", "3x3", "--backs"])
+    assert r.exit_code == 1 and "fronts only for now" in r.output
+    r = runner.invoke(app, ["make", str(decklist), "--layout", "5x5", "--dry-run"])
+    assert r.exit_code == 1 and "unknown layout '5x5' (known: 4x2, 3x3)" in r.output
+
+
+@needs_engine
+def test_cli_make_3x3_dry_run_says_nine_a_sheet_and_three_marks(decklist, tmp_path):
+    r = runner.invoke(app, ["make", str(decklist), "-o", str(tmp_path), "--layout", "3x3", "--dry-run"])
+    assert r.exit_code == 0, r.output
+    assert "(paper a4, 3x3 layout of 9 cards, 3-mark," in r.output
+    r = runner.invoke(app, ["make", str(decklist), "-o", str(tmp_path), "--dry-run"])
+    assert "(paper a4, 4x2 layout of 8 cards, 4-mark," in r.output
+
+
+def test_3x3_takes_the_engines_tighter_layout_and_three_marks():
+    opts = build.resolve_layout(BuildOptions(layout="3x3"))
+    assert opts.registration == "3"
+    assert build.pdf_base_args(opts)[-1] == "--borderless" and "3" in build.pdf_base_args(opts)
+    four = build.resolve_layout(BuildOptions())
+    assert four.registration == "4" and "--borderless" not in build.pdf_base_args(four)
+
+
+@pytest.fixture
+def game(tmp_path, monkeypatch):
+    """The engine's game/ dirs in tmp_path, its PDF step a stand-in that records its arguments."""
+    from mtgproxy import manifest, trim
+
+    game = tmp_path / "game"
+    for name in ("FRONT", "BACK", "DOUBLE_SIDED", "OUTPUT"):
+        (game / name.lower()).mkdir(parents=True)
+        monkeypatch.setattr(engine, name, game / name.lower())
+    monkeypatch.setattr(manifest, "STATE_FILE", game / ".manifest.json")
+    monkeypatch.setattr(trim, "STATE_FILE", game / ".trimmed.json")
+    monkeypatch.setattr(engine, "clean_images", lambda: [f.unlink() for f in (game / "front").iterdir()])
+    monkeypatch.setattr(build, "duplex_offset_args", lambda: [])
+    calls: list[list[str]] = []
+
+    def create_pdf(args):
+        calls.append(args)
+        (game / "output" / "game.pdf").write_bytes(b"%PDF-1.4\n")
+
+    monkeypatch.setattr(engine, "create_pdf", create_pdf)
+    return calls
+
+
+@needs_engine
+def test_a_3x3_run_records_its_layout_for_cut_proxies(tmp_path, monkeypatch, game):
+    """The 3x3 test sheet through the whole build (the engine's PDF step stood in): the engine is
+    asked for its tighter layout with 3 marks, one sheet holds 9, and run.json and the notes say so."""
+    from mtgproxy.sidecar import RunInfo
+
+    monkeypatch.setattr(
+        build,
+        "write_test_cards",
+        lambda n, front, back, ds: [(front / f"test_{i:02d}.png").write_bytes(b"x") for i in range(1, n + 1)],
+    )
+    out = tmp_path / "out"
+    out.mkdir()
+    result = build.run_build(BuildOptions(test_mode=True, layout="3x3", out_parent=out))
+    assert result.cards == 9  # one full sheet of gauges
+    args = game[0]
+    assert "--borderless" in args and args[args.index("--registration") + 1] == "3"
+    info = RunInfo.read(result.out / "run.json")
+    assert (info.layout, info.registration, info.cards, info.paper) == ("3x3", "3", 9, "a4")
+    notes = (result.out / NOTES_NAME).read_text()
+    assert "| layout: 3x3 | registration: 3-mark | cards: 9" in notes
+    assert "`cut-proxies --layout 3x3 -r 3`" in notes
+
+
+@needs_engine
+def test_a_3x3_deck_gets_pages_of_nine_and_no_duplex_sheet(tmp_path, game):
+    from mtgproxy import manifest
+
+    for i in range(1, 11):
+        (engine.FRONT / f"{i}Card{chr(64 + i)}1.png").write_bytes(b"x")  # 1CardA1.png ..
+    files, _ = manifest.partition(fronts_only=True, duplex_dfc=True)  # in the engine's order
+    per_page = build.per_page(BuildOptions(layout="3x3"))
+    sheet = manifest.make_sheet(manifest.MAIN, files, "d.pdf", per_page, manifest.Recorder())
+    assert (sheet.per_page, sheet.pages, len(sheet.page(2))) == (9, 2, 1)
+    assert manifest.locate(sheet.cards[9], {manifest.MAIN: sheet}) == "p2.1"  # slot numbers per 9
+    assert sheet.cards[9].name == "CardJ"
+    assert build._defer(files, 9)[1] == files[9:]  # --defer-partial leaves the tenth for the backlog
+
+    # A double-faced card would need a duplex sheet: refused before anything is written.
+    (engine.DOUBLE_SIDED / files[0].name).write_bytes(b"back")
+    deck = tmp_path / "deck.txt"
+    deck.write_text("1 Card\n")
+    with pytest.raises(
+        BuildError, match=r"1 double-faced card\(s\) would need a duplex sheet.*--split-faces"
+    ):
+        build.run_build(BuildOptions(deck=str(deck), layout="3x3", skip_fetch=True, out_parent=tmp_path))
+    assert game == [] and not (tmp_path / "deck" / "run.json").exists()
+    split = build.run_build(
+        BuildOptions(deck=str(deck), layout="3x3", skip_fetch=True, out_parent=tmp_path, duplex_dfc=False)
+    )
+    assert split.cards == 11 and len(game) == 1  # --split-faces: both faces on the 3x3 sheet
+
+
 def test_cli_trim_parsing():
     r = runner.invoke(app, ["make", "x.txt", "--trim", "Temple Garden:9", "--dry-run"])
     assert r.exit_code == 1 and "between 0 and 3" in r.output

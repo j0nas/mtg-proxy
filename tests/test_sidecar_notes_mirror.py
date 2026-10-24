@@ -33,6 +33,33 @@ def test_sidecar_roundtrip_and_forward_compat(tmp_path):
     p.write_text(json.dumps(raw))
     back = RunInfo.read(p)
     assert back.registration == "4" and back.trims == {"Temple Garden": 0.3}
+    assert back.layout == "4x2"
+
+
+def test_the_layout_round_trips_and_older_runs_are_4x2(tmp_path):
+    p = _info(layout="3x3", registration="3", cards=9).write(tmp_path)
+    assert json.loads(p.read_text())["layout"] == "3x3"
+    assert RunInfo.read(p).layout == "3x3"
+    raw = json.loads(p.read_text())
+    del raw["layout"]  # run.json from before layouts
+    p.write_text(json.dumps(raw))
+    assert RunInfo.read(p).layout == "4x2"
+
+
+def test_notes_for_a_3x3_sheet():
+    ctx = notes.NotesContext("t", "a4", "standard", "3", 9, True, True, 0, today="2026-10-24", layout="3x3")
+    text = notes.render(ctx)
+    assert "card: standard | layout: 3x3 | registration: 3-mark | cards: 9" in text
+    assert "**portrait A4**" in text and "**3.0 mm** from the paper's edges" in text and "2.96 mm" in text
+    assert "**Actual size / 100%** scale, borderless **OFF**" in text
+    assert "**portrait, the black square top-left**" in text and "masking tape" in text
+    assert "It reads run.json here: 3-mark scan, a4 paper, 3x3 layout." in text
+    assert "`cut-proxies --layout 3x3 -r 3`" in text
+    assert "--backs" not in text and "single-sided for now" in text
+    split = notes.render(notes.NotesContext("t", "a4", "standard", "3", 9, True, False, 2, layout="3x3"))
+    assert "Rerun without it and without --layout 3x3 for one physical double-sided card." in split
+    four = notes.render(notes.NotesContext("d", "a4", "standard", "4", 8, True, True, 0))
+    assert "layout:" not in four and "portrait" not in four and "`cut-proxies -r 4`" in four
 
 
 def test_find_sidecar(tmp_path, monkeypatch):

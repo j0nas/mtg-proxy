@@ -7,8 +7,14 @@ Y-down positive from the same origin, which cut-proxies sends to the cutter
 directly. Rounded corners come through as true arcs.
 
 Registration marks are NOT drawn: the cutter finds the printed ones itself. The
-mark geometry it needs (inset from the page edge, mark-to-mark distances) is
-derived from the same assets/layouts.json defaults create_pdf.py uses.
+mark geometry it needs (inset from the page edge, mark-to-mark distances, leg
+length) is derived from the same assets/layouts.json entries create_pdf.py uses.
+
+A sheet has one of two layouts. ``4x2`` is the engine's default layout for the paper
+(four by two standard cards on landscape A4, marks 10 mm in). ``3x3`` is nine standard
+cards on portrait A4 with the marks 3.5 mm from the edges, 3-mark only: the engine's
+``borderless`` variant, its name for the tighter inset, which has nothing to do with
+borderless printing (that stays off).
 """
 
 from __future__ import annotations
@@ -18,6 +24,14 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from . import engine
+
+DEFAULT = "4x2"
+# Our layout names → the engine's layout variant (layouts.json: layouts[paper][card][variant]).
+VARIANTS = {"4x2": "default", "3x3": "borderless"}
+ONLY = {"3x3": ("a4", "standard")}  # the one paper and card a layout is built for; others: any
+MARKS = {"3x3": "3"}  # the only registration a layout prints; others: -r, default 4
+SINGLE_SIDED = {"3x3"}  # no --backs or duplex sheet: never printed double-sided here
+NOMINAL_CARDS = {"4x2": 8, "3x3": 9}  # on A4, for messages when layouts.json can't be read
 
 
 @dataclass
@@ -31,6 +45,8 @@ class Geometry:
     reg_x_mm: float
     reg_y_mm: float
     cut_bbox_mm: tuple[float, float, float, float]
+    reg_length_mm: float = 9.4  # the printed L marks' legs, from the corner line to the leg's end
+    layout: str = DEFAULT
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -80,20 +96,64 @@ class LayoutError(Exception):
     pass
 
 
-def page_size_mm(paper: str, card_size: str) -> tuple[float, float]:
+def check(name: str, paper: str, card_size: str) -> None:
+    """Raise unless ``name`` is a layout that ``paper`` and ``card_size`` can use."""
+    if name not in VARIANTS:
+        raise LayoutError(f"unknown layout {name!r} (known: {', '.join(VARIANTS)})")
+    if name in ONLY and (paper, card_size) != ONLY[name]:
+        want_paper, want_card = ONLY[name]
+        raise LayoutError(
+            f"--layout {name} is {want_paper.upper()} paper with {want_card} cards only, "
+            f"not {paper} with {card_size}"
+        )
+
+
+def registration(name: str, asked: str | None) -> str:
+    """The marks a sheet of layout ``name`` prints: ``asked`` (-r), else the layout's own.
+
+    A 3x3 sheet is 3-mark only. Its marks are 3.5 mm from the paper's edges, so the top-left
+    mark's horizontal leg starts 3 mm below the top edge, and the 4-mark scan has to start on
+    white paper above that leg (cameo.driver.default_start). The 3-mark square is found by an
+    area search that doesn't need that strip."""
+    own = MARKS.get(name)
+    if own is None or asked is None:
+        return asked or own or "4"
+    if asked == "4" != own:
+        raise LayoutError(
+            f"--layout {name} prints {own}-mark registration only (the default with it): with the marks "
+            "3.5 mm from the edges, a 4-mark scan would have to start in the 3 mm of paper above the "
+            "top-left mark. Drop -r 4."
+        )
+    return asked  # the caller refuses anything but 3 or 4
+
+
+def engine_flags(name: str) -> list[str]:
+    """create_pdf.py's flags for this layout."""
+    return ["--borderless"] if VARIANTS[name] == "borderless" else []
+
+
+def layout_def(paper: str, card_size: str, name: str = DEFAULT) -> dict:
+    """layouts.json's entry for this paper, card size and layout."""
     layouts = engine.layouts()
     if paper not in layouts["paper_sizes"]:
         raise LayoutError(
             f"unknown paper size {paper!r} (known: {', '.join(sorted(layouts['paper_sizes']))})"
         )
-    paper_def = layouts["paper_sizes"][paper]
-    w, h = engine.size_to_mm(paper_def["width"]), engine.size_to_mm(paper_def["height"])
     sizes = layouts["layouts"].get(paper, {})
     if card_size not in sizes:
         raise LayoutError(
             f"no {card_size!r} layout for {paper!r} (available: {', '.join(sorted(sizes)) or 'none'})"
         )
-    layout = sizes[card_size]["default"]
+    variant = VARIANTS[name]
+    if variant not in sizes[card_size]:
+        raise LayoutError(f"the engine has no {name} layout for {paper!r} with {card_size!r} cards")
+    return sizes[card_size][variant]
+
+
+def page_size_mm(paper: str, card_size: str, name: str = DEFAULT) -> tuple[float, float]:
+    layout = layout_def(paper, card_size, name)
+    paper_def = engine.layouts()["paper_sizes"][paper]
+    w, h = engine.size_to_mm(paper_def["width"]), engine.size_to_mm(paper_def["height"])
     # create_pdf.py lays the page out in the layout's orientation; the DXF matches it.
     if layout.get("orientation") == "landscape" and w < h:
         w, h = h, w
@@ -102,22 +162,32 @@ def page_size_mm(paper: str, card_size: str) -> tuple[float, float]:
     return w, h
 
 
-def registration_inset_mm() -> float:
-    return engine.size_to_mm(engine.layouts()["defaults"]["registration"]["default"]["inset"])
+def registration_mm(paper: str, card_size: str, name: str = DEFAULT) -> tuple[float, float]:
+    """(inset, leg length) of the printed marks in mm, resolved as create_pdf.py does: the layout's
+    own registration settings, else the defaults (the variant's inset, the default's length)."""
+    own = layout_def(paper, card_size, name).get("registration") or {}
+    defaults = engine.layouts()["defaults"]["registration"]
+    inset = own.get("inset") or defaults[VARIANTS[name]]["inset"]
+    length = own.get("length") or defaults["default"]["length"]
+    return engine.size_to_mm(inset), engine.size_to_mm(length)
 
 
-def build_cut_svg(paper: str, card_size: str, out: Path | None) -> Geometry:
+def build_cut_svg(paper: str, card_size: str, out: Path | None, name: str = DEFAULT) -> Geometry:
     """Write the cut-path SVG (unless ``out`` is None) and return the geometry."""
     import ezdxf
 
-    page_w, page_h = page_size_mm(paper, card_size)
-    inset = registration_inset_mm()
+    page_w, page_h = page_size_mm(paper, card_size, name)
+    inset, leg = registration_mm(paper, card_size, name)
+    args = ["--card_size", card_size, "--paper_size", paper]
+    if name != DEFAULT:
+        # generate_dxf.py picks the orientation that fits the most cards unless told; create_pdf.py
+        # takes the layout's, so it is passed (the default layout's pick is already its own).
+        orientation = layout_def(paper, card_size, name)["orientation"]
+        args += ["--variant", VARIANTS[name], "--orientation", orientation]
 
     with tempfile.TemporaryDirectory() as tmp:
         dxf_path = Path(tmp) / "cut.dxf"
-        engine.run_engine_script(
-            "generate_dxf.py", ["single", str(dxf_path), "--card_size", card_size, "--paper_size", paper]
-        )
+        engine.run_engine_script("generate_dxf.py", ["single", str(dxf_path), *args])
         doc = ezdxf.readfile(dxf_path)
 
     paths: list[str] = []
@@ -144,7 +214,8 @@ def build_cut_svg(paper: str, card_size: str, out: Path | None) -> Geometry:
         svg = (
             '<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" '
             f'width="{fmt(page_w)}mm" height="{fmt(page_h)}mm" viewBox="0 0 {fmt(page_w)} {fmt(page_h)}">\n'
-            f"  <!-- {paper}/{card_size}: {len(paths)} cards, generated by mtg-proxy from silhouette-card-maker -->\n"
+            f"  <!-- {paper}/{card_size}{'' if name == DEFAULT else ' ' + name}: {len(paths)} cards, "
+            "generated by mtg-proxy from silhouette-card-maker -->\n"
             f"{body}\n</svg>\n"
         )
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -160,4 +231,6 @@ def build_cut_svg(paper: str, card_size: str, out: Path | None) -> Geometry:
         reg_x_mm=round(page_w - 2 * inset, 3),
         reg_y_mm=round(page_h - 2 * inset, 3),
         cut_bbox_mm=(round(min(xs), 3), round(min(ys), 3), round(max(xs), 3), round(max(ys), 3)),
+        reg_length_mm=round(leg, 3),
+        layout=name,
     )

@@ -53,7 +53,8 @@ def describe(sidecar: Path) -> str | None:
         i = RunInfo.read(sidecar)
     except (OSError, ValueError, TypeError):
         return None
-    return f"{i.name}: {i.cards} cards, {i.paper}/{i.card_size}, {i.registration}-mark"
+    sheet = f"{i.paper}/{i.card_size}" + ("" if i.layout == "4x2" else f" {i.layout}")
+    return f"{i.name}: {i.cards} cards, {sheet}, {i.registration}-mark"
 
 
 def ask(where: Path, via: str) -> Picked | None:

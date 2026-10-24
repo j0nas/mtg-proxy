@@ -51,11 +51,13 @@ class CutOptions:
     ble_name: str = "CAMEO 5 ALPHA"
     svg: Path | None = None
     dry_run: bool = False
-    # The printed marks (mm): the card-maker's A4 marks and deckbox's are 9.4 × 1.
-    reg_length: float = 9.4
+    layout: str = "4x2"  # 4x2 | 3x3 (layout.py): which of the engine's layouts the sheet was printed in
+    # The printed marks (mm). Leg length None = the layout's: 9.4 on the card-maker's 4x2 A4 (and
+    # deckbox's), 10.5 on its 3x3.
+    reg_length: float | None = None
     reg_thickness: float = 1.0
     # Mark corners' distance from the paper edges (mm). None = the layout's (10 for the card-maker's
-    # A4). Nothing may be cut above/left of the top-left mark.
+    # 4x2 A4, 3.5 for its 3x3). Nothing may be cut above/left of the top-left mark.
     reg_inset: float | None = None
     out_dir: Path = field(default_factory=lambda: ROOT / "output" / "cut")
     label: str | None = None  # deck name, for log/transcript file names
@@ -139,24 +141,35 @@ def ble_scan() -> int:
     return 0
 
 
+def check(o: CutOptions) -> None:
+    """Refuse options that can't describe a printed sheet: an unknown layout, or one with marks or
+    paper it never prints."""
+    try:
+        layout.check(o.layout, o.paper, o.card_size)
+        layout.registration(o.layout, o.registration)
+    except layout.LayoutError as e:
+        raise CutError(str(e)) from e
+    if o.registration not in ("3", "4"):
+        raise CutError("--registration must be 3 or 4")
+
+
 def run_cut(o: CutOptions) -> int:
     from .cameo import driver, protocol, session
     from .cameo.transport import TransportError
 
-    if o.registration not in ("3", "4"):
-        raise CutError("--registration must be 3 or 4")
+    check(o)
     o.out_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Cut geometry from the card-maker's own layout engine (same source as the PDF).
     if o.svg is None:
-        name = o.label or f"{o.paper}-{o.card_size}"
+        name = o.label or f"{o.paper}-{o.card_size}" + ("" if o.layout == layout.DEFAULT else f"-{o.layout}")
         svg = o.out_dir / f"{name}.svg"
-        geom = layout.build_cut_svg(o.paper, o.card_size, svg)
+        geom = layout.build_cut_svg(o.paper, o.card_size, svg, o.layout)
     else:
         if not o.svg.is_file():
             raise CutError(f"SVG not found: {o.svg}")
         svg, name = o.svg, o.svg.stem
-        geom = layout.build_cut_svg(o.paper, o.card_size, None)
+        geom = layout.build_cut_svg(o.paper, o.card_size, None, o.layout)
     if o.reg_inset is not None:
         geom = with_inset(geom, o.reg_inset)
 
@@ -170,7 +183,7 @@ def run_cut(o: CutOptions) -> int:
         inset=geom.reg_inset_mm,
         width=geom.reg_x_mm,
         height=geom.reg_y_mm,
-        length=o.reg_length,
+        length=geom.reg_length_mm if o.reg_length is None else o.reg_length,
         thickness=o.reg_thickness,
         marks=int(o.registration),
     )
@@ -180,7 +193,7 @@ def run_cut(o: CutOptions) -> int:
     except (ValueError, session.CutError) as e:
         raise CutError(str(e)) from e
     starts, origin = scan_starts(o, frame)
-    what = f"{geom.cards} cards" if o.svg is None else svg.name
+    what = f"{geom.cards} cards ({geom.layout})" if o.svg is None else svg.name
     via = "nothing (dry run)" if o.dry_run else o.connection
     print(
         f"cut-proxies: {name} — {what}, {o.registration}-mark registration "

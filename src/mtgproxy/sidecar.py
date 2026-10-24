@@ -1,8 +1,8 @@
 """run.json — what a build produced, so ``mtg-proxy cut`` needs no retyped flags.
 
 Written next to the PDF by every build. ``cut`` looks for it in the current
-directory (or the directory / file given), and takes paper, card size and
-registration pattern from it — the one mismatch that ruins a sheet.
+directory (or the directory / file given), and takes paper, card size, layout
+and registration pattern from it — the one mismatch that ruins a sheet.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ class RunInfo:
     cards: int
     fronts_only: bool
     generated: str
+    layout: str = "4x2"  # 4x2 | 3x3 (layout.py); run.json files from before layouts are 4x2
     pdf: str | None = None
     duplex_pdf: str | None = None
     dfc_count: int = 0

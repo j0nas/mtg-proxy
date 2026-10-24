@@ -13,11 +13,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
-from . import engine, local, manifest, mirror, notes, printing, trim
+from . import engine, layout, local, manifest, mirror, notes, printing, trim
 from .backlog import Backlog, Entry
 from .cache import ImageCache
 from .decks import FetchedDeck, fetch_deck, is_deck_url
@@ -26,7 +26,6 @@ from .sidecar import RunInfo
 from .testcards import write_test_cards
 
 TEST_SHEET_NAME = "test-sheet"
-TEST_COUNTS = {"a4": 8, "letter": 8, "tabloid": 16, "a3": 18, "arch_b": 18}
 
 
 class BuildError(Exception):
@@ -39,8 +38,9 @@ class BuildOptions:
     fmt: str = "mtga"
     out_parent: Path = field(default_factory=Path.cwd)
     paper: str = "a4"
-    registration: str = "4"
+    registration: str | None = None  # 3 | 4; None = the layout's (4 for 4x2, 3 for 3x3)
     card_size: str = "standard"
+    layout: str = "4x2"  # 4x2 | 3x3, see layout.py
     board: str = "main"
     fronts_only: bool = True
     duplex_dfc: bool = True
@@ -201,7 +201,7 @@ def stage_images(opts: BuildOptions, deck: ResolvedDeck, cache: ImageCache | Non
         trim.reset_state()
         for f in engine.images_in(engine.BACK):
             f.unlink()
-        count = TEST_COUNTS.get(opts.paper, 8)
+        count = per_page(opts)  # one full sheet
         # Double-sided test sheet: number each back so you can see which front it
         # belongs to (verifies back-page ordering, not just the offset).
         write_test_cards(count, engine.FRONT, engine.BACK, None if opts.fronts_only else engine.DOUBLE_SIDED)
@@ -306,6 +306,14 @@ def stage_and_index(opts: BuildOptions) -> manifest.Recorder:
 
 
 # --- step 4: PDFs ------------------------------------------------------------
+def per_page(opts: BuildOptions) -> int:
+    """Cards on one sheet of this paper, card size and layout."""
+    try:
+        return manifest.cards_per_page(opts.paper, opts.card_size, opts.layout)
+    except layout.LayoutError as e:
+        raise BuildError(str(e)) from e
+
+
 def pdf_base_args(opts: BuildOptions) -> list[str]:
     # --extend_corners 3.5mm: Scryfall scans have rounded corners; this fills the
     # corner bleed so cut cards don't get white corner slivers.
@@ -314,6 +322,7 @@ def pdf_base_args(opts: BuildOptions) -> list[str]:
         "--paper_size", opts.paper,
         "--registration", opts.registration,
         "--extend_corners", "3.5mm",
+        *layout.engine_flags(opts.layout),
     ]  # fmt: skip
 
 
@@ -361,9 +370,9 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
     main, duplex = manifest.partition(opts.fronts_only, opts.duplex_dfc)
     deferred: list[Path] = []
     if opts.defer_partial:
-        per_page = manifest.cards_per_page(opts.paper, opts.card_size)
-        main, d1 = _defer(main, per_page)
-        duplex, d2 = _defer(duplex, per_page)
+        n = per_page(opts)
+        main, d1 = _defer(main, n)
+        duplex, d2 = _defer(duplex, n)
         deferred = d1 + d2
         if deferred:
             log(f"--defer-partial: {len(deferred)} card(s) of a partial page go to the backlog instead")
@@ -449,13 +458,30 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
 
 
 # --- the whole thing ---------------------------------------------------------
+def resolve_layout(opts: BuildOptions) -> BuildOptions:
+    """``opts`` with its registration settled by the layout (layout.registration); raises
+    BuildError for a layout this paper, card size, registration or --backs can't have."""
+    try:
+        layout.check(opts.layout, opts.paper, opts.card_size)
+        opts = replace(opts, registration=layout.registration(opts.layout, opts.registration))
+    except layout.LayoutError as e:
+        raise BuildError(str(e)) from e
+    if opts.registration not in ("3", "4"):
+        raise BuildError("--registration must be 3 or 4")
+    if opts.layout in layout.SINGLE_SIDED and not opts.fronts_only:
+        raise BuildError(
+            f"--layout {opts.layout} prints fronts only for now: no sheet in this layout has been printed "
+            "double-sided, nor its duplex offset checked. Drop --backs."
+        )
+    return opts
+
+
 def run_build(opts: BuildOptions) -> BuildResult:
     if opts.tokens_only and opts.test_mode:
         raise BuildError("--tokens-only cannot be combined with --test")
     if opts.images and opts.test_mode:
         raise BuildError("--images cannot be combined with --test")
-    if opts.registration not in ("3", "4"):
-        raise BuildError("--registration must be 3 or 4")
+    opts = resolve_layout(opts)
     engine.ensure_engine()
 
     deck = resolve_deck(opts)
@@ -473,7 +499,8 @@ def run_build(opts: BuildOptions) -> BuildResult:
     if opts.dry_run:
         split = local_split(opts, deck)
         log(
-            f"dry run: {name} → {out} (paper {opts.paper}, {opts.registration}-mark, format {deck.fmt}, fetch args {fetch_args_for(opts)})"
+            f"dry run: {name} → {out} (paper {opts.paper}, {opts.layout} layout of {per_page(opts)} cards, "
+            f"{opts.registration}-mark, format {deck.fmt}, fetch args {fetch_args_for(opts)})"
         )
         if split:
             log_split(split, deck.fmt)
@@ -506,6 +533,15 @@ def run_build(opts: BuildOptions) -> BuildResult:
         if not engine.images_in(engine.FRONT):
             raise BuildError("this deck produces no tokens")
 
+    if opts.layout in layout.SINGLE_SIDED and opts.duplex_dfc:
+        _, duplex = manifest.partition(opts.fronts_only, opts.duplex_dfc)
+        if duplex:
+            raise BuildError(
+                f"{len(duplex)} double-faced card(s) would need a duplex sheet, and --layout {opts.layout} "
+                "prints fronts only for now: rerun with --split-faces (each face its own card), or build "
+                f"them without --layout {opts.layout}"
+            )
+
     fronts = engine.images_in(engine.FRONT)
     cards = len(fronts)
     if cards == 0:
@@ -524,13 +560,13 @@ def run_build(opts: BuildOptions) -> BuildResult:
     deferred: list[Entry] = []
     if not opts.test_mode:
         rec = manifest.Recorder.load()
-        per_page = manifest.cards_per_page(opts.paper, opts.card_size)
+        n = per_page(opts)
         sheets[manifest.MAIN] = manifest.make_sheet(
-            manifest.MAIN, pdfs.main, pdfs.pdf.name if pdfs.pdf else None, per_page, rec
+            manifest.MAIN, pdfs.main, pdfs.pdf.name if pdfs.pdf else None, n, rec
         )
         if pdfs.duplex:
             sheets[manifest.DUPLEX] = manifest.make_sheet(
-                manifest.DUPLEX, pdfs.duplex, pdfs.duplex_pdf.name if pdfs.duplex_pdf else None, per_page, rec
+                manifest.DUPLEX, pdfs.duplex, pdfs.duplex_pdf.name if pdfs.duplex_pdf else None, n, rec
             )
         trims = {s.name: s.mm for s in opts.trims}
         for f in pdfs.deferred:
@@ -550,6 +586,7 @@ def run_build(opts: BuildOptions) -> BuildResult:
                 fronts_only=opts.fronts_only,
                 duplex_dfc=opts.duplex_dfc,
                 dfc_count=pdfs.dfc_count,
+                layout=opts.layout,
             )
         )
     )
@@ -561,6 +598,7 @@ def run_build(opts: BuildOptions) -> BuildResult:
         cards=printed,
         fronts_only=opts.fronts_only,
         generated=date.today().isoformat(),
+        layout=opts.layout,
         pdf=pdfs.pdf.name if pdfs.pdf else None,
         duplex_pdf=pdfs.duplex_pdf.name if pdfs.duplex_pdf else None,
         dfc_count=pdfs.dfc_count,

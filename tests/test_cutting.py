@@ -6,6 +6,7 @@ from dataclasses import replace
 import pytest
 from typer.testing import CliRunner
 
+from conftest import needs_engine
 from mtgproxy import cli, cutting
 
 
@@ -81,7 +82,8 @@ def test_laminate_is_the_default_preset(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)  # no run.json here
     o = cut_options(monkeypatch)
     assert (o.force, o.speed, o.depth, o.passes) == (20, 25, 4, 3)
-    assert (o.reg_length, o.reg_thickness) == (9.4, 1.0)
+    assert (o.reg_length, o.reg_thickness) == (None, 1.0)  # legs: the layout's, 9.4 on a 4x2 A4
+    assert (o.layout, o.registration) == ("4x2", "4")
 
 
 def test_the_paper_preset_and_explicit_flags_override_it(monkeypatch, tmp_path):
@@ -99,12 +101,66 @@ def test_an_unknown_preset_is_refused(monkeypatch, tmp_path):
 
 
 # --- the menu a bare cut-proxies shows at a terminal ---------------------------
-def write_run(where, name, paper="letter", registration="3"):
+def write_run(where, name, paper="letter", registration="3", layout="4x2", cards=8):
     from mtgproxy.sidecar import RunInfo
 
     where.mkdir(parents=True, exist_ok=True)
-    info = RunInfo(name, paper, "standard", registration, cards=8, fronts_only=True, generated="2026-10-01")
+    info = RunInfo(
+        name,
+        paper,
+        "standard",
+        registration,
+        cards=cards,
+        fronts_only=True,
+        generated="2026-10-01",
+        layout=layout,
+    )
     return info.write(where)
+
+
+def test_a_3x3_run_is_cut_as_one(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    write_run(tmp_path, "test-sheet", paper="a4", layout="3x3", cards=9)
+    o = cut_options(monkeypatch, "--dry-run")
+    assert (o.layout, o.registration, o.paper, o.reg_length, o.reg_inset) == ("3x3", "3", "a4", None, None)
+    result = CliRunner().invoke(cli.app, ["cut", "--dry-run", "-r", "4"])
+    assert result.exit_code == 1 and "--layout 3x3 prints 3-mark registration only" in result.output
+
+
+def test_a_plain_3x3_sheet_takes_three_marks(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)  # no run.json
+    o = cut_options(monkeypatch, "--layout", "3x3", "--dry-run")
+    assert (o.layout, o.registration, o.label) == ("3x3", "3", None)
+    result = CliRunner().invoke(cli.app, ["cut", "--layout", "3x3", "-p", "letter", "--dry-run"])
+    assert result.exit_code == 1 and "A4 paper with standard cards only" in result.output
+
+
+def test_the_menu_names_a_3x3_run(tmp_path):
+    from mtgproxy import cutmenu
+
+    assert cutmenu.describe(write_run(tmp_path, "t", "a4", layout="3x3", cards=9)) == (
+        "t: 9 cards, a4/standard 3x3, 3-mark"
+    )
+
+
+@needs_engine
+def test_a_3x3_dry_run_scans_its_own_frame(tmp_path, capsys):
+    """The whole job against the stand-in: the frame, leg length and SVG are the 3x3 layout's."""
+    o = cutting.CutOptions(layout="3x3", registration="3", dry_run=True, out_dir=tmp_path, label="t")
+    assert cutting.run_cut(o) == 0
+    out = capsys.readouterr().out
+    assert (
+        "t — 9 cards (3x3), 3-mark registration (marks inset 3.5 mm, 203 x 290 mm apart, 10.5 x 1 mm)" in out
+    )
+    assert "scan starts at (1.5, 1) mm, the area search's corner" in out
+    sent = (tmp_path / "t.cmds").read_bytes().decode().split("\x03")
+    # Legs 10.5 mm (TB51 in 1/20 mm), then TB123 with the frame's height and width and the start.
+    assert "TB51,210" in sent and "TB123,5800,4060,30,20" in sent
+    assert (tmp_path / "t.svg").read_text().count("<path ") == 9
+    four = cutting.CutOptions(dry_run=True, out_dir=tmp_path, label="f")
+    assert cutting.run_cut(four) == 0
+    sent = (tmp_path / "f.cmds").read_bytes().decode().split("\x03")
+    assert "TB51,188" in sent and "TB124,3800,5540,150,360" in sent  # the 4x2's, as before
 
 
 def menu(monkeypatch, *answers):

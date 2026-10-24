@@ -27,6 +27,8 @@ from types import ModuleType
 from natsort import natsorted
 
 from . import engine
+from .layout import DEFAULT as DEFAULT_LAYOUT
+from .layout import layout_def
 from .trim import clean_name
 
 STATE_FILE = engine.GAME / ".manifest.json"
@@ -99,9 +101,9 @@ def sheets_from_dict(raw: dict | None) -> dict[str, Sheet]:
     return {k: Sheet.from_dict(k, v) for k, v in (raw or {}).items()}
 
 
-def cards_per_page(paper: str, card_size: str) -> int:
-    layout = engine.layouts()["layouts"][paper][card_size]["default"]
-    return int(layout["num_rows"]) * int(layout["num_cols"])
+def cards_per_page(paper: str, card_size: str, layout: str = DEFAULT_LAYOUT) -> int:
+    d = layout_def(paper, card_size, layout)
+    return int(d["num_rows"]) * int(d["num_cols"])
 
 
 # --- recording printings while the engine fetches --------------------------
@@ -308,7 +310,7 @@ def rebuild(run_dir: Path, info) -> dict[str, Sheet]:
             f"rebuilt {total} card(s) but the run had {expected} — the decklist or the build "
             "options differ from the original run; pass the -t N / --basics it was built with"
         )
-    per_page = cards_per_page(info.paper, info.card_size)
+    per_page = cards_per_page(info.paper, info.card_size, info.layout)
     sheets = {MAIN: make_sheet(MAIN, main, info.pdf, per_page, rec)}
     if duplex:
         sheets[DUPLEX] = make_sheet(DUPLEX, duplex, info.duplex_pdf, per_page, rec)
