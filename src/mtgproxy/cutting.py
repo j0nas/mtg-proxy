@@ -29,8 +29,9 @@ class Preset:
 
 
 PRESETS = {
-    # Jonas's proven proxy preset: 130 gsm glossy in 80 µm pouches, and the laminated deck box.
-    "laminate": Preset(force=20, speed=25, depth=4, passes=3),
+    # Jonas's proven proxy preset: 130 gsm glossy in 80 µm pouches, and the laminated deck box. Depth 5
+    # cut four laminated 3x3 sheets cleanly in a row, where depth 4 left spots attached (2026-10-25).
+    "laminate": Preset(force=20, speed=25, depth=5, passes=3),
     # Plain copier paper, cut cleanly through (calibration sheets and deck-box outlines, 2026-09-28).
     "paper": Preset(force=10, speed=5, depth=1, passes=1),
 }

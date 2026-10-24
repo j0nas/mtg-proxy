@@ -237,7 +237,7 @@ Settings, AutoBlade only (the Kraft blade can't turn the 3 mm corners):
 
 | `--preset` | Force | Speed | Depth | Passes |
 |---|---|---|---|---|
-| `laminate` (default): 130–135 gsm glossy in 80 µm pouches | 20 | 25 | 4 | 3 |
+| `laminate` (default): 130–135 gsm glossy in 80 µm pouches | 20 | 25 | 5 | 3 |
 | `paper`: plain copier paper, cut through | 10 | 5 | 1 | 1 |
 
 Explicit flags override the preset. Don't eject after a cut: lift a corner. At a terminal,

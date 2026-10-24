@@ -88,7 +88,7 @@ def test_notes_render_covers_the_run():
     )
     assert "**orah-duplex.pdf** holds the 2 double-sided card image(s)" in text
     assert "cut-proxies -r 3 -p letter" in text
-    assert "**Force 20 · Speed 25 · Depth 4 · Passes 3**" in text
+    assert "**Force 20 · Speed 25 · Depth 5 · Passes 3**" in text
     assert "`--preset paper` (Force 10 · Speed 5 · Depth 1 · Passes 1)" in text
     assert "Studio" not in text and "studio3" not in text
     duplex = notes.render(notes.NotesContext("d", "a4", "standard", "4", 8, False, True, 0))

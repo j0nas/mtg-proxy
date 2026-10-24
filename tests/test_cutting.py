@@ -81,7 +81,7 @@ def cut_options(monkeypatch, *args: str) -> cutting.CutOptions:
 def test_laminate_is_the_default_preset(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)  # no run.json here
     o = cut_options(monkeypatch)
-    assert (o.force, o.speed, o.depth, o.passes) == (20, 25, 4, 3)
+    assert (o.force, o.speed, o.depth, o.passes) == (20, 25, 5, 3)
     assert (o.reg_length, o.reg_thickness) == (None, 1.0)  # legs: the layout's, 9.4 on a 4x2 A4
     assert (o.layout, o.registration) == ("4x2", "4")
 

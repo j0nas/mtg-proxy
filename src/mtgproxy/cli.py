@@ -261,7 +261,7 @@ def cut(
         str,
         typer.Option(
             "--preset",
-            help="blade settings: laminate (force 20, speed 25, depth 4, 3 passes) | "
+            help="blade settings: laminate (force 20, speed 25, depth 5, 3 passes) | "
             "paper (force 10, speed 5, depth 1, 1 pass); the flags below override",
         ),
     ] = "laminate",

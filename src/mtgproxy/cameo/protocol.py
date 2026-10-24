@@ -48,7 +48,7 @@ def status_of(reply: bytes | None) -> str:
 class Blade:
     force: int = 20  # 1..40 on the Alpha
     speed: int = 25  # 1..30
-    depth: int = 4  # AutoBlade depth 1..10
+    depth: int = 5  # AutoBlade depth 1..10
 
     def __post_init__(self):
         if not (1 <= self.force <= 40 and 1 <= self.speed <= 30 and 0 <= self.depth <= 10):
