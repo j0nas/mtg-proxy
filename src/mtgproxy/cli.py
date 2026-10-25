@@ -311,6 +311,13 @@ def cut(
             "--probe", help="scan the marks and log what the machine reports before and after; cut nothing"
         ),
     ] = False,
+    sense: Annotated[
+        bool,
+        typer.Option(
+            "--sense",
+            help="scan the marks, then read them back with the sensor across each mark's edges; cut nothing",
+        ),
+    ] = False,
     proof: Annotated[
         bool,
         typer.Option(
@@ -373,7 +380,7 @@ def cut(
         svg=svg, dry_run=dry_run,
         reg_length=reg_length, reg_thickness=reg_thickness, reg_inset=reg_inset,
         label=info.name if info else None,
-        probe=probe, proof=proof, scan_starts=[parse_start(v) for v in scan_start or []] or None,
+        probe=probe, sense=sense, proof=proof, scan_starts=[parse_start(v) for v in scan_start or []] or None,
     )  # fmt: skip
     try:
         cutting.check(o)  # before the loop: a retry can't fix the options
@@ -392,7 +399,7 @@ def cut(
             raise typer.Exit(1) from None
         except (engine.EngineMissing, LayoutError, RuntimeError) as e:
             fail(str(e))
-        if rc or o.dry_run or o.probe:
+        if rc or o.dry_run or o.probe or o.sense:
             break
         if not _at_terminal():
             typer.echo("cut-proxies: not through? Rerun with --passes 1 (it rescans the marks).")

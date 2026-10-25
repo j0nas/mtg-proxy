@@ -241,6 +241,7 @@ cut-proxies --usb          # over the cable instead of Bluetooth LE
 cut-proxies --scan         # list the Bluetooth devices in range
 cut-proxies --dry-run      # no machine: runs the whole job against a stand-in, checks the bounds
 cut-proxies --probe        # scans the marks, logs what the machine reports, cuts nothing
+cut-proxies --sense        # scans, then reads each mark back with the sensor (TB63), cuts nothing
 cut-proxies --proof        # scores the square and each L after the scan; y cuts, r rescans, q stops
 cut-proxies --layout 4x2   # a 4x2 sheet without its run.json (a plain sheet is 3x3)
 cut-proxies --svg job.svg --layout 4x2 --reg-inset 5   # any SVG the size of that layout's page

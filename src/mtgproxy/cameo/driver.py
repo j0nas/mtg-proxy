@@ -14,8 +14,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from . import geometry, proof, protocol
-from .session import CutError, Frame, Job, Session, SessionLog, check_bounds, low_corner
+from . import geometry, proof, protocol, sensing
+from .session import CutError, Frame, Job, Session, SessionLog, check_bounds, far_corner, low_corner
 from .transport import BleTransport, RecordingTransport, Transport, UsbTransport
 
 FIRMWARE = b"CAMEO 5 ALPHA V1.04    \x03"
@@ -23,6 +23,9 @@ DRY_ANSWERS = {
     b"\x1b\x05": b"0\x03",  # ready
     b"FG": FIRMWARE,
     b"TB123": b"    0\x03",  # marks found (a scan result is padded to five characters)
+    b"TB60": b"    0\x03",  # the scan's light slot
+    b"TB62": b"  120\x03",
+    b"TB63": b"   40\x03",
 }
 
 # Queries that might report registration state; the probe logs each reply before and after a
@@ -197,6 +200,44 @@ def probe(frame: Frame, t: Transport, log: SessionLog, starts: list[tuple[float,
         start = s.register(frame, starts)
         ask(1)
         return {"firmware": firmware, "start": start, "replies": replies}
+    finally:
+        wrap_up(s, t, log)
+
+
+SENSE_SLOT = 4  # the light slot TB63 overwrites: one the scan never restores from (it uses slot 0)
+
+
+def sense(
+    frame: Frame,
+    t: Transport,
+    log: SessionLog,
+    starts: list[tuple[float, float]],
+    points: list[sensing.Point],
+) -> dict:
+    """Scan the marks, then read the spot under each point (page mm) through the registered frame.
+    Cuts nothing. Refuses when the scan's own light slot is the one TB63 would overwrite."""
+    s = Session(t, log)
+    try:
+        firmware = s.preflight()
+        log.say(f"connected: {firmware} via {t.name}, mat loaded")
+        slot = protocol.number(s.query(protocol.cmd(protocol.LIGHT_SLOT)))
+        stored = protocol.number(s.query(protocol.cmd(protocol.light_level(SENSE_SLOT))))
+        log("light", selected=slot, slot=SENSE_SLOT, stored=stored)
+        if slot is None or slot == SENSE_SLOT:
+            raise CutError(
+                f"the scan's light slot reads {slot!r}: reading the marks would overwrite it. Power-cycle the Cameo"
+            )
+        s.prepare()
+        start = s.register(frame, starts)
+        where = [sensing.registered(frame, pt) for pt in points]
+        low = (min(0.0, min(y for y, _ in where) - 0.5), min(0.0, min(x for _, x in where) - 0.5))
+        s.send(*protocol.cutting_area(*far_corner(frame), *low))
+        readings = []
+        for pt, (y, x) in zip(points, where, strict=True):
+            level, reply = s.sense(y, x, SENSE_SLOT)
+            log("sense", profile=pt.profile, offset=pt.offset, x=pt.x, y=pt.y, level=level, reply=reply)
+            readings.append((pt, level))
+        return {"firmware": firmware, "start": start, "slot": slot, "readings": readings}
     finally:
         wrap_up(s, t, log)
 

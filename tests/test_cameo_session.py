@@ -3,7 +3,7 @@ the origin, preflight refusals, bounds and cut pacing."""
 
 import pytest
 
-from mtgproxy.cameo import driver, geometry, protocol, session
+from mtgproxy.cameo import driver, geometry, protocol, sensing, session
 from mtgproxy.cameo.transport import RecordingTransport
 
 FRAME = session.Frame(page_w=297, page_h=210, inset=5, width=287, height=200)
@@ -155,3 +155,27 @@ def test_a_mat_that_never_leaves_is_no_reload():
     t = machine()  # "ready" throughout: the sheet just cut is still in
     polls = iter([False, False, True])  # the operator gives up on the third wait
     assert not driver.wait_for_reload(t, log(), lambda s: next(polls))
+
+
+def test_sensing_moves_through_the_registered_frame_and_reads_each_point_without_cutting():
+    points = [
+        sensing.Point("square", FRAME.inset + 2.5, FRAME.top + 2.5, 0.0),
+        sensing.Point("paper", 1.0, 2.0, 0.0),
+    ]
+    t = machine({b"TB60": b"    0\x03", b"TB62": b"  120\x03", b"TB63": [b"  180\x03", b"   35\x03"]})
+    report = driver.sense(FRAME, t, log(), [(7, 1)], points)
+    out = sent(t)
+    assert [level for _, level in report["readings"]] == [180, 35]
+    readings = out.replace("\x1b\x05", "")  # without the status polls between a move and its reading
+    assert readings.index("TB123") < readings.index("M50,50\x03TB63,4\x03")
+    assert readings.index("M50,50\x03TB63,4\x03") < readings.index("M-60,-80\x03TB63,4\x03")
+    assert "\\-70,-90\x03" in out  # the area reaches the paper point left of and above the square
+    assert "D" not in out.replace("TB", "")  # no draw commands at all
+    assert readings.endswith("TB0\x03L0\x03\\0,0\x03M0,0\x03TR0,0\x03J0\x03FN0\x03TB50,0\x03")
+
+
+def test_sensing_refuses_when_the_scan_restores_its_light_from_the_slot_it_would_overwrite():
+    t = machine({b"TB60": b"    4\x03", b"TB62": b"  120\x03"})
+    with pytest.raises(session.CutError, match="light slot reads 4"):
+        driver.sense(FRAME, t, log(), [(7, 1)], sensing.profiles(FRAME))
+    assert "TB63" not in sent(t) and "TB123" not in sent(t)

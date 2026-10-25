@@ -65,6 +65,7 @@ class CutOptions:
     out_dir: Path = field(default_factory=lambda: ROOT / "output" / "cut")
     label: str | None = None  # deck name, for log/transcript file names
     probe: bool = False  # scan and query the machine, cut nothing (see cameo.driver.probe)
+    sense: bool = False  # scan, then read the marks back with the sensor; cut nothing (cameo.sensing)
     proof: bool = False  # proof cuts over the marks after the scan; the job waits for y / r / q
     scan_starts: list[tuple[float, float]] | None = None  # (top, left) mm; None = the driver's defaults
 
@@ -185,6 +186,13 @@ def run_cut(o: CutOptions) -> int:
             print(probe_table(report["replies"]))
             print(f"cut-proxies: probe done; log {log_path}")
             return 0
+        if o.sense:
+            from .cameo import sensing
+
+            report = driver.sense(frame, t, log, starts, sensing.profiles(frame))
+            print(sense_table(report["readings"]))
+            print(f"cut-proxies: sensing done; log {log_path}")
+            return 0
         confirm = None
         if o.proof:
             confirm = dry_confirm if o.dry_run else ask_operator
@@ -258,4 +266,16 @@ def probe_table(replies: dict[str, list[str | None]]) -> str:
     for q, (before, after) in replies.items():
         mark = "  <- changed" if before != after else ""
         rows.append(f"{q:6} {before!s:24} {after!s:24}{mark}")
+    return "\n".join(rows)
+
+
+def sense_table(readings) -> str:
+    """Each profile's readings in order: offset (mm from the line it crosses), level, a bar."""
+    rows, last = [], None
+    for pt, level in readings:
+        if pt.profile != last:
+            rows.append(f"{pt.profile}:")
+            last = pt.profile
+        bar = "#" * round((level or 0) / 255 * 40)
+        rows.append(f"  {pt.offset:+6.2f} mm  {'?' if level is None else level:>4}  {bar}")
     return "\n".join(rows)

@@ -105,8 +105,7 @@ def blade_setup(
     of the top-left mark moves the near corner (``low_*``, negative) out to cover it."""
     f, s, d = blade.force, blade.speed, blade.depth
     return (
-        f"\\{su(low_y_mm)},{su(low_x_mm)}",
-        f"Z{su(area_y_mm)},{su(area_x_mm)}",
+        *cutting_area(area_y_mm, area_x_mm, low_y_mm, low_x_mm),
         "J1",  # tool slot 1
         f"FX{f},1",  # force
         "TJ0",
@@ -125,6 +124,13 @@ def blade_setup(
     )
 
 
+def cutting_area(
+    area_y_mm: float, area_x_mm: float, low_y_mm: float = 0.0, low_x_mm: float = 0.0
+) -> tuple[str, str]:
+    """The near corner (``\\``) and the far corner (``Z``) of the area moves and cuts may reach."""
+    return f"\\{su(low_y_mm)},{su(low_x_mm)}", f"Z{su(area_y_mm)},{su(area_x_mm)}"
+
+
 def move(y_mm: float, x_mm: float) -> str:
     return f"M{su(y_mm)},{su(x_mm)}"
 
@@ -137,6 +143,37 @@ def draw_path(points_su: list[tuple[int, int]]) -> str:
     """One GP-GL draw through several (y, x) points in SU: D y1,x1,y2,x2,… The machine gets the
     whole run of a path at once instead of one command per point."""
     return "D" + ",".join(f"{y},{x}" for y, x in points_su)
+
+
+# The sensor light's stored levels (firmware V1.04, cameo-re NOTES.md). A scan restores its light
+# from the selected slot, 0 at power-on (TB61 selects another; we never send it). TB63,n ramps the
+# light up from zero with the sensor over the head's position until the reading passes half scale,
+# stores the step that took in slot n (1-4 only) and reports it: dark ink needs more light than
+# white paper, so it is a reflectance reading of the spot under the head (0-255).
+LIGHT_SLOT = "TB60"  # → the selected slot
+
+
+def light_level(slot: int) -> str:
+    """TB62: slot ``slot``'s stored level, read only."""
+    return f"TB62,{slot}"
+
+
+def sense(slot: int) -> str:
+    """TB63: calibrate over the head's position into ``slot`` (1-4) and report the level."""
+    if not 1 <= slot <= 4:
+        raise ValueError(f"TB63 stores into slots 1-4, not {slot}")
+    return f"TB63,{slot}"
+
+
+NUMBER_REPLY = re.compile(r"^\s*(-?\d+)\s*$")
+
+
+def number(reply: bytes | None) -> int | None:
+    """A reply that is one integer (padded or not, ETX-terminated), else None."""
+    if reply is None:
+        return None
+    m = NUMBER_REPLY.match(reply.decode("latin1").rstrip(ETX))
+    return int(m.group(1)) if m else None
 
 
 # Studio's ending: back to the origin. Never the "feed" ending (M… SO0), which moves the ORIGIN

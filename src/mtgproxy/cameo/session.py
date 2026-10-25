@@ -89,6 +89,12 @@ def low_corner(extent: tuple[float, float, float, float]) -> tuple[float, float]
     return (min(0.0, y0 - 0.5) if y0 < 0 else 0.0, min(0.0, x0 - 0.5) if x0 < 0 else 0.0)
 
 
+def far_corner(frame: Frame) -> tuple[float, float]:
+    """The cutting area's far corner (y, x) from the top-left mark: the paper's far edges, +2 mm
+    for the bias."""
+    return frame.page_h - frame.top + 2, frame.page_w - frame.inset + 2
+
+
 POINTS_PER_DRAW = 32  # keeps each D command under ~400 bytes
 
 
@@ -183,9 +189,15 @@ class Session:
     def setup(self, blade: p.Blade, frame: Frame, low: tuple[float, float] = (0.0, 0.0)) -> None:
         """The blade, inside a cutting area reaching the paper's far edges (+2 mm for the bias)
         and, when a cut reaches above or left of the top-left mark, back to ``low`` (y, x)."""
-        area_y = frame.page_h - frame.top + 2
-        area_x = frame.page_w - frame.inset + 2
-        self.send(*p.blade_setup(blade, area_y, area_x, *low))
+        self.send(*p.blade_setup(blade, *far_corner(frame), *low))
+
+    def sense(self, y_mm: float, x_mm: float, slot: int) -> tuple[int | None, str | None]:
+        """Move the head to (y, x) mm in the current frame and read the spot under it
+        (protocol.sense): the level, and the reply as it came."""
+        self.send(p.move(y_mm, x_mm))
+        self.wait_ready(30)
+        reply = self.query(p.cmd(p.sense(slot)), timeout=10)
+        return p.number(reply), None if reply is None else reply.decode("latin1").rstrip(p.ETX)
 
     def register(self, frame: Frame, starts: list[tuple[float, float]]) -> tuple[float, float]:
         """Scan the marks, trying each (top, left) start in mm until the machine reports them found.
