@@ -286,8 +286,8 @@ def test_a_3x3_deck_gets_pages_of_nine_and_a_duplex_sheet(tmp_path, monkeypatch,
     deck.write_text("1 Card\n")
     result = build.run_build(BuildOptions(deck=str(deck), skip_fetch=True, out_parent=tmp_path))
     fronts, duplex = game
-    assert "--only_fronts" in fronts and "--load_offset" not in fronts
-    assert "--only_fronts" not in duplex and "--load_offset" in duplex
+    assert "--only_fronts" in fronts and "--load_offset" not in fronts and "--no_back_marks" not in fronts
+    assert "--only_fronts" not in duplex and "--load_offset" in duplex and "--no_back_marks" in duplex
     assert duplex[duplex.index("--registration") + 1] == "3" and "--borderless" in duplex
     assert (result.cards, result.dfc_count, result.duplex_pdf.name) == (10, 1, "deck-duplex.pdf")
     info = RunInfo.read(result.out / "run.json")
@@ -299,6 +299,7 @@ def test_a_3x3_deck_gets_pages_of_nine_and_a_duplex_sheet(tmp_path, monkeypatch,
     )
     (args,) = game
     assert "--only_fronts" not in args and "--load_offset" in args and "--borderless" in args
+    assert "--no_back_marks" in args
     assert both.cards == 10 and both.duplex_pdf is None
 
     game.clear()
@@ -308,7 +309,7 @@ def test_a_3x3_deck_gets_pages_of_nine_and_a_duplex_sheet(tmp_path, monkeypatch,
     assert split.cards == 11 and len(game) == 1  # --split-faces: both faces on the 3x3 sheet
 
 
-def _duplex_pages(tmp_path, sheet_layout: str, n: int):
+def _duplex_pages(tmp_path, sheet_layout: str, n: int, extra: tuple[str, ...] = ()):
     """The engine's real duplex PDF for ``n`` flat-coloured cards in ``sheet_layout`` at 50 ppi: a
     front's own top-right carries a white square, a back's own top-left a black one. Returns the
     two pages (landscape, as the engine saves every sheet) and the colours."""
@@ -331,7 +332,7 @@ def _duplex_pages(tmp_path, sheet_layout: str, n: int):
     base = build.pdf_base_args(build.resolve_layout(BuildOptions(layout=sheet_layout)))
     engine.create_pdf([
         *base, "--front_dir_path", str(dirs["front"]), "--double_sided_dir_path", str(dirs["ds"]),
-        "--back_dir_path", str(dirs["back"]), "--output_path", str(out), "--ppi", "50",
+        "--back_dir_path", str(dirs["back"]), "--output_path", str(out), "--ppi", "50", *extra,
     ])  # fmt: skip
     pages = [np.asarray(p.images[0].image.convert("RGB")).astype(int) for p in PdfReader(out).pages]
     return pages, colours
@@ -368,6 +369,25 @@ def test_each_back_sits_behind_its_front_for_a_long_edge_flip(tmp_path, sheet_la
         assert abs(bx0 - fx0) <= 2 and abs(bx1 - fx1) <= 2
         assert abs(by0 - (h - 1 - fy1)) <= 2 and abs(by1 - (h - 1 - fy0)) <= 2
         assert abs(black[0] - white[0]) <= 2 and abs(black[1] - (h - 1 - white[1])) <= 2
+
+
+@needs_engine
+def test_back_pages_carry_no_registration_marks(tmp_path):
+    """Turned over the long edge, a back page's square sits behind the front's top-right L and showed
+    through enough to make the cutter misread it (2026-10-26), so mtg-proxy's back pages have none:
+    nothing dark on a back page outside its cards. The engine's own default still prints them."""
+    import numpy as np
+
+    def stray_ink(page, colours):
+        cards = np.zeros(page.shape[:2], bool)
+        for c in colours:
+            (x0, y0, x1, y1), _ = _card(page, c, "black")
+            cards[max(0, y0 - 2) : y1 + 3, max(0, x0 - 2) : x1 + 3] = True  # JPEG fringes at the edges
+        return int(((page.sum(axis=2) < 150) & ~cards).sum())
+
+    (_, marked), colours = _duplex_pages(tmp_path / "marked", "3x3", 9)
+    (_, plain), _ = _duplex_pages(tmp_path / "plain", "3x3", 9, extra=tuple(build.BACK_PAGES))
+    assert stray_ink(marked, colours) > 20 and stray_ink(plain, colours) == 0
 
 
 def test_cli_trim_parsing():

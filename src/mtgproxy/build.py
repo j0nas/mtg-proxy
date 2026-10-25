@@ -325,6 +325,12 @@ def pdf_base_args(opts: BuildOptions) -> list[str]:
     ]  # fmt: skip
 
 
+# Back pages carry no registration marks: the cut always scans the front, and turned over the long
+# edge a back's square lands right behind the front's top-right L. On double-sided glossy it showed
+# through enough that TB123 misread that L on every scan of a sheet (2026-10-26).
+BACK_PAGES = ["--no_back_marks"]
+
+
 def duplex_offset_args() -> list[str]:
     """Saved duplex offset (data/offset_data.json) → --load_offset.
 
@@ -396,7 +402,15 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
                 [engine.DOUBLE_SIDED / f.name for f in main if (engine.DOUBLE_SIDED / f.name).is_file()],
             )
             engine.create_pdf(
-                [*base, *offset, "--front_dir_path", str(front), "--double_sided_dir_path", str(backs)]
+                [
+                    *base,
+                    *offset,
+                    *BACK_PAGES,
+                    "--front_dir_path",
+                    str(front),
+                    "--double_sided_dir_path",
+                    str(backs),
+                ]
             )
         pdf = out / f"{name}.pdf"
         shutil.copyfile(game_pdf, pdf)
@@ -449,7 +463,15 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
                 )
             duplex_out = engine.OUTPUT / "duplex.pdf"
             engine.create_pdf(
-                [*base, *offset, "--front_dir_path", str(dfc_front), "--output_path", str(duplex_out)]
+                [
+                    *base,
+                    *offset,
+                    *BACK_PAGES,
+                    "--front_dir_path",
+                    str(dfc_front),
+                    "--output_path",
+                    str(duplex_out),
+                ]
             )
             duplex_pdf = out / f"{name}-duplex.pdf"
             shutil.copyfile(duplex_out, duplex_pdf)
