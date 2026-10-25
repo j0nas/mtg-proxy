@@ -11,7 +11,13 @@ FOUND, NOT_FOUND = b"    0\x03", b"    1\x03"
 
 
 def machine(overrides=None):
-    answers = {b"\x1b\x05": b"0\x03", b"FG": driver.FIRMWARE, b"TB123": FOUND, **(overrides or {})}
+    answers = {
+        b"\x1b\x05": b"0\x03",
+        b"FG": driver.FIRMWARE,
+        b"TB123": FOUND,
+        b"TB122": FOUND,
+        **(overrides or {}),
+    }
     return RecordingTransport(lambda *a, **k: None, answers)
 
 
@@ -208,12 +214,13 @@ def test_a_misread_rescans_and_cuts_once_the_marks_agree():
     assert out.count("TB123") == 2 and "D" in out.replace("TB", "")
 
 
-def test_a_misread_twice_stops_before_anything_is_cut():
+def test_a_misread_on_every_scan_stops_before_anything_is_cut():
     t = checked([INK, PAPER])  # every reading after the placement is paper
-    with pytest.raises(session.CutError, match="after a rescan too: nothing was cut"):
+    with pytest.raises(session.CutError, match="after 3 scans: nothing was cut"):
         driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
-    assert out.count("TB123") == 2 and "D" not in out.replace("TB", "")
+    assert out.count("TB123") == 2 and out.count("TB122") == 1  # three-mark twice, then two-mark
+    assert "D" not in out.replace("TB", "")
     assert out.endswith("TB0\x03L0\x03\\0,0\x03M0,0\x03TR0,0\x03J0\x03FN0\x03TB50,0\x03\x1b\x05")
 
 
@@ -248,3 +255,64 @@ def test_the_scan_and_the_next_sheet_get_the_scans_own_light_back_after_every_re
     assert placement < out.index("TB61,0", placement) < out.index("TB123")  # TB63 leaves its light on
     last = out.rindex("TB63,4")
     assert last < out.index("TB61,0", last) < out.index("D")
+
+
+def test_two_failed_three_mark_scans_fall_back_to_two_marks_and_cut_when_the_check_agrees():
+    t = machine({b"TB60": b"    0\x03", b"TB63": [INK, *MARKS_OK], b"TB123": NOT_FOUND, b"TB122": FOUND})
+    driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    out = sent(t)
+    assert out.count("TB123") == 2 and out.count("TB122,4000,5740") == 1
+    assert out.rindex("TB63,4") < out.index(
+        "D"
+    )  # the top-right L read before the cut, though TB122 skipped it
+
+
+def test_without_the_check_a_missed_scan_never_falls_back_to_two_marks():
+    t = machine({b"TB123": NOT_FOUND, b"TB122": FOUND})
+    with pytest.raises(session.CutError, match="couldn't find the marks"):
+        driver.cut(job(), t, log(), [driver.default_start(FRAME)])
+    assert "TB122" not in sent(t)
+
+
+FAINT = [b"  189\x03", b"  177\x03", b"  168\x03", b"  130\x03", b"  125\x03"]  # centre, nudges, sides
+
+
+def test_a_faint_leg_passes_when_it_is_darker_than_the_paper_on_both_sides():
+    t = checked([INK, *SQUARE_OK, INK, INK, *FAINT, INK])  # the bottom-left vertical leg on 2026-10-26
+    driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    assert "D" in sent(t).replace("TB", "")
+
+
+def test_a_shadow_edge_dark_on_one_side_only_is_no_leg():
+    edge = [b"  215\x03", b"  220\x03", b"  205\x03", b"  230\x03", b"  180\x03"]
+    t = checked([INK, *[*SQUARE_OK, *edge, INK, INK, INK] * 3])  # placement, then the same on all three scans
+    with pytest.raises(session.CutError, match="after 3 scans"):
+        driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    assert sent(t).count("TB63,4") == 1 + 3 * 13  # each scan: 5 for the square, 5 for the edge, 3 legs
+
+
+def test_diagnose_reads_the_square_then_legs_where_the_square_says_and_never_scans():
+    sq = sensing.square_rows(FRAME)
+
+    def mark(row, shift, width):
+        return [
+            b"  255\x03" if abs(p.offset - row.middle - shift) <= width else b"  170\x03" for p in row.points
+        ]
+
+    legs = sensing.leg_rows(FRAME, dx=1.0, dy=0.0)
+    readings = (
+        mark(sq[0], 1.0, 2.75)
+        + mark(sq[1], 0.0, 2.75)
+        + [r for row in legs for r in mark(row, 1.0 if row.axis == "x" else 0.0, 0.3)]
+    )
+    t = machine({b"TB60": b"    0\x03", b"TB63": readings})
+    seen = driver.diagnose(FRAME, t, log())
+    out = sent(t).replace("\x1b\x05", "")
+    assert [s.shift for s in seen] == [1.0, 0.0, 1.0, 0.0, 1.0, 0.0]
+    first = legs[0].points[0]  # the top-right vertical leg's row starts 2 mm left of where the square says
+    assert (
+        f"M{protocol.su(first.y)},{protocol.su(first.x)}\x03TB63,4" in out
+        and first.x == FRAME.inset + FRAME.width - 1.0
+    )
+    assert out.count("TB63,4") == 2 * 21 + 4 * 9 and "TB123" not in out and "TB122" not in out
+    assert out.rindex("TB63,4") < out.rindex("TB61,0")  # the scan's own light back for whatever comes next

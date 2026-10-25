@@ -199,7 +199,9 @@ class Session:
         reply = self.query(p.cmd(p.sense(slot)), timeout=10)
         return p.number(reply), None if reply is None else reply.decode("latin1").rstrip(p.ETX)
 
-    def register(self, frame: Frame, starts: list[tuple[float, float]]) -> tuple[float, float]:
+    def register(
+        self, frame: Frame, starts: list[tuple[float, float]], marks: int = 3
+    ) -> tuple[float, float]:
         """Scan the marks, trying each (top, left) start in mm until the machine reports them found.
 
         The start is where the sensor begins its area search for the square, from the origin (the
@@ -211,7 +213,7 @@ class Session:
             if stale:
                 self.log("stale", replies=[s.decode("latin1") for s in stale])
             self.send(*p.mark_setup(frame.length, frame.thickness))
-            scan = p.scan(frame.height, frame.width, top, left)
+            scan = p.scan(frame.height, frame.width, top, left, marks)
             t0 = time.monotonic()
             self.send(*scan)
             result, others = None, []

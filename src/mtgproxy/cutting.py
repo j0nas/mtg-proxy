@@ -67,6 +67,7 @@ class CutOptions:
     probe: bool = False  # scan and query the machine, cut nothing (see cameo.driver.probe)
     sense: bool = False  # scan, then read the marks back with the sensor; cut nothing (cameo.sensing)
     check: bool = True  # read the marks with the sensor before and after the scan; stop on a misread
+    diagnose: bool = False  # read across every mark before any scan and say what they show; cut nothing
     proof: bool = False  # proof cuts over the marks after the scan; the job waits for y / r / q
     scan_starts: list[tuple[float, float]] | None = None  # (top, left) mm; None = the driver's defaults
 
@@ -187,6 +188,11 @@ def run_cut(o: CutOptions) -> int:
             print(probe_table(report["replies"]))
             print(f"cut-proxies: probe done; log {log_path}")
             return 0
+        if o.diagnose:
+            seen = driver.diagnose(frame, t, log)
+            print(diagnose_report(seen, frame))
+            print(f"cut-proxies: diagnose done; log {log_path}")
+            return 0
         if o.sense:
             from .cameo import sensing
 
@@ -281,4 +287,21 @@ def sense_table(readings) -> str:
             last = pt.profile
         bar = "#" * round((level or 0) / 255 * 40)
         rows.append(f"  {pt.offset:+6.2f} mm  {'?' if level is None else level:>4}  {bar}")
+    return "\n".join(rows)
+
+
+def diagnose_report(seen, frame) -> str:
+    """The verdict first, then each row: where the mark is (+ right or down), its peak, the paper
+    beside it, and the readings as bars."""
+    from .cameo import sensing
+
+    rows = ["cut-proxies: before any scan, in the loaded mat's frame (page mm):"]
+    rows += [f"  {line}" for line in sensing.verdict(seen, frame)]
+    for s in seen:
+        where = "no clear mark" if s.shift is None else f"{s.shift:+.2f} mm"
+        paper = "?" if s.paper_range is None else f"{s.paper_range[0]}-{s.paper_range[1]}"
+        rows.append(f"{s.row.mark}, {s.row.what}: {where}, peak {s.peak}, paper {paper}")
+        for pt, level in zip(s.row.points, s.levels, strict=True):
+            bar = "#" * round((level or 0) / 255 * 40)
+            rows.append(f"  {pt.offset - s.row.middle:+5.2f} mm  {'?' if level is None else level:>4}  {bar}")
     return "\n".join(rows)

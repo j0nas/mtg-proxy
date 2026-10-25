@@ -102,8 +102,10 @@ def cut(
     """The whole job. Once anything moved the machine, it always ends back at the origin.
 
     With ``check``, the sensor reads the square before the scan (is the sheet where its marks
-    should be?) and every mark after it (does the print agree with the frame the scan made?); a
-    disagreement rescans once, then stops the job before anything is cut (``sensing``). With
+    should be?) and every mark after it (does the print agree with the frame the scan made?). A
+    scan that finds nothing or disagrees with the print is tried again, then once more as TB122,
+    which skips the top-right L (SCANS); when none agrees, the job stops before anything is cut
+    (``sensing``). With
     ``confirm``, proof cuts go down over the marks between the scan and the cut, and nothing else
     is cut until the operator says so. A rescan returns to the origin and repeats a fresh run's start."""
     s = Session(t, log)
@@ -134,7 +136,18 @@ def cut(
                 check_placement(s, job.frame, log)
             if check:  # the readings leave the light wherever their ramp stopped: back to the scan's level
                 s.send(protocol.select_light(slot))
-            start = s.register(job.frame, starts)
+            marks = SCANS[min(attempt, len(SCANS) - 1)] if check else 3
+            if marks == 2:
+                log.say(
+                    "two-mark scan (TB122): the square and the bottom-left L; the check reads the top-right L"
+                )
+            try:
+                start = s.register(job.frame, starts, marks)
+            except CutError as e:
+                if check and attempt + 1 < rounds:
+                    log.say(f"{e.args[0].split('. ')[0]}: scanning again")
+                    continue
+                raise
             if low != (0.0, 0.0) and attempt == 0:
                 log.say(
                     f"cut reaches {max(0.0, -reach[1]):.2f} mm above / {max(0.0, -reach[0]):.2f} mm left of the "
@@ -148,11 +161,12 @@ def cut(
                     for line in failed:
                         log.say(f"check: {line}")
                     if attempt + 1 < rounds:
-                        log.say("the marks don't read where the scan put them: rescanning")
+                        log.say("the marks don't read where the scan put them: scanning again")
                         continue
                     raise CutError(
-                        "the marks don't read where the scan put them, after a rescan too: nothing was cut. "
-                        "Check that the sheet lies flat and its marks are clean, then rerun"
+                        f"the marks don't read where the scan put them, after {rounds} scans: nothing was cut. "
+                        "Check that the sheet lies flat with its paper's corner on the mat grid's and its marks "
+                        "are clean, then rerun; cut-proxies --diagnose shows what the sensor sees at each mark"
                     )
                 log.say(
                     f"check: every mark reads where the scan put it ({len(sensing.checks(job.frame))} readings)"
@@ -165,7 +179,11 @@ def cut(
         wrap_up(s, t, log)
 
 
-CHECK_ROUNDS = 2  # a frame that fails the mark check gets one rescan before the job stops
+# The scans a checked job tries, in order, until one agrees with the print. TB122 reads only the square
+# and the bottom-left L: on 2026-10-26 a double-sided sheet whose back showed through behind its
+# top-right L misread on every TB123 and registered first time as TB122, the check confirming the L.
+SCANS = (3, 3, 2)
+CHECK_ROUNDS = len(SCANS)
 
 
 def check_light_slot(s: Session, log: SessionLog) -> int:
@@ -197,21 +215,48 @@ def check_placement(s: Session, frame: Frame, log: SessionLog) -> None:
 def check_marks(s: Session, frame: Frame, log: SessionLog) -> list[str]:
     """After the scan, every ``sensing.checks`` reading through the registered frame: what failed,
     one line each, or nothing when the print agrees with the frame. A leg's centre line that isn't
-    ink is read NUDGE either side before it fails."""
+    ink is read NUDGE either side, then, still not ink, SIDE either side: it passes as a faint leg
+    when its darkest reading beats the paper on both sides by CONTRAST."""
     failed = []
+
+    def read(c: sensing.Check) -> int | None:
+        return s.sense(*sensing.registered(frame, c), SENSE_SLOT)[0]
+
     for c in sensing.checks(frame):
-        level, _ = s.sense(*sensing.registered(frame, c), SENSE_SLOT)
-        seen, nudged = c.reads(level), []
+        level = read(c)
+        seen, nudged, sides = c.reads(level), [], []
         if c.ink and seen is not True and c.nudge:
             for k in (-1, 1):
-                n = replace(c, x=c.x + k * sensing.NUDGE * c.nudge[0], y=c.y + k * sensing.NUDGE * c.nudge[1])
-                nl, _ = s.sense(*sensing.registered(frame, n), SENSE_SLOT)
+                nl = read(c.nudged(k * sensing.NUDGE))
                 nudged.append(nl)
-                if n.reads(nl) is True:
+                if c.reads(nl) is True:
                     seen = True
                     break
+            if seen is not True:
+                sides = [read(c.nudged(k * sensing.SIDE)) for k in (-1, 1)]
+                peak = max((v for v in (level, *nudged) if v is not None), default=None)
+                if (
+                    peak is not None
+                    and None not in sides
+                    and all(c.reads(v) is False and peak - v >= sensing.CONTRAST for v in sides)
+                ):
+                    seen = True
+                    log.say(
+                        f"check: {c.mark}, {c.what} reads faint ({peak}) against paper at {sides[0]}/{sides[1]}"
+                    )
         ok = seen is c.ink
-        log("check", mark=c.mark, what=c.what, x=c.x, y=c.y, ink=c.ink, level=level, nudged=nudged, ok=ok)
+        log(
+            "check",
+            mark=c.mark,
+            what=c.what,
+            x=c.x,
+            y=c.y,
+            ink=c.ink,
+            level=level,
+            nudged=nudged,
+            sides=sides,
+            ok=ok,
+        )
         if not ok:
             want = "ink" if c.ink else "paper"
             got = (
@@ -328,6 +373,37 @@ def sense(
             readings.append((pt, level))
         s.send(protocol.select_light(slot))  # the next scan starts with the light as it finds it
         return {"firmware": firmware, "start": start, "slot": slot, "readings": readings}
+    finally:
+        wrap_up(s, t, log)
+
+
+def diagnose(frame: Frame, t: Transport, log: SessionLog) -> list[sensing.Seen]:
+    """Before any scan, rows of readings across every mark in the loaded mat's frame: the square
+    first (``sensing.square_rows``), then each leg (``sensing.leg_rows``) centred on where the
+    square says the sheet sits. Where each mark really is and how it reads. Cuts nothing and
+    scans nothing, so it works on a sheet the scan can't register."""
+    s = Session(t, log)
+    seen: list[sensing.Seen] = []
+    try:
+        firmware = s.preflight()
+        log.say(f"connected: {firmware} via {t.name}, mat loaded")
+        slot = check_light_slot(s, log)
+        s.prepare()
+
+        def read(rows: list[sensing.Row]) -> None:
+            for row in rows:
+                levels = []
+                for pt in row.points:
+                    level, reply = s.sense(pt.y, pt.x, SENSE_SLOT)
+                    log("diagnose", mark=row.mark, what=row.what, offset=pt.offset, level=level, reply=reply)
+                    levels.append(level)
+                seen.append(sensing.see(row, levels))
+
+        read(sensing.square_rows(frame))
+        dx, dy = (v.shift or 0.0 for v in seen)  # the legs' rows follow the square
+        read(sensing.leg_rows(frame, dx, dy))
+        s.send(protocol.select_light(slot))
+        return seen
     finally:
         wrap_up(s, t, log)
 

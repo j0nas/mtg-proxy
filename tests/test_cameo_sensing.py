@@ -83,3 +83,49 @@ def test_readings_between_ink_and_paper_count_as_neither():
 def test_the_placement_reading_is_the_square_middle_in_page_mm():
     p = sensing.placement(FRAME)
     assert (p.x, p.y, p.ink) == (6.0, 11.5, True)
+
+
+def test_the_square_on_a_good_sheet_reads_a_quarter_mm_left_of_true():
+    # The laminated lands sheet's square across x on 2026-10-25, -2.5..7.5 mm from its near edge.
+    levels = [161, 168, 176, 196, *[255] * 11, 253, 238, 232, 228, 230, 236]
+    seen = sensing.see(sensing.square_rows(FRAME)[0], levels)
+    assert (seen.peak, seen.shift) == (255, -0.25)
+    assert not any("square" in line for line in sensing.verdict([seen], FRAME))  # nothing to warn about
+
+
+def test_a_faint_leg_on_bright_paper_is_found_and_flagged():
+    # The double-sided MDFC sheet's bottom-left vertical leg on 2026-10-26, its row centred 1.5 mm
+    # right, where the square said the sheet sat.
+    row = next(r for r in sensing.leg_rows(FRAME, dx=1.5) if r.mark == "bottom-left L" and r.axis == "x")
+    seen = sensing.see(row, [110, 107, 94, 163, 239, 149, 116, 118, 118])
+    assert (seen.peak, seen.shift) == (239, 1.5) and seen.paper < 135
+    lines = sensing.verdict([seen], FRAME)
+    assert any("never reads as full ink (peak 239" in line for line in lines)
+    assert any("unusually bright" in line for line in lines)
+
+
+def test_a_mark_at_the_end_of_its_row_has_no_position():
+    row = sensing.leg_rows(FRAME)[0]
+    seen = sensing.see(row, [190, 188, 192, 193, 197, 201, 200, 251, 255])  # the leg runs off the row
+    assert seen.shift is None
+    assert any("no clear mark within the row" in line for line in sensing.verdict([seen], FRAME))
+
+
+def test_the_verdict_names_placement_turn_and_size():
+    def at(row, shift):  # a sharp mark whose middle sits ``shift`` mm off
+        levels = [255 if abs(p.offset - (row.middle + shift)) <= (2.5 if row.mark == "square" else 0.3) else 170
+                  for p in row.points]  # fmt: skip
+        return sensing.see(row, levels)
+
+    sq = sensing.square_rows(FRAME)
+    seen = [at(sq[0], 1.5), at(sq[1], 0.0)]
+    legs = sensing.leg_rows(FRAME, dx=1.5, dy=0.0)
+    seen += [at(r, 1.5 if r.axis == "x" else 0.0) for r in legs]  # moved, not turned or stretched
+    lines = sensing.verdict(seen, FRAME)
+    assert lines[0] == "the sheet sits 1.50 mm right and 0.00 mm down of where its marks should be"
+    assert lines[1].startswith("not turned, by the left edge") and lines[2].startswith(
+        "not turned, by the top"
+    )
+    assert lines[3:5] == ["square to top-right L: 203.00 mm across (printed 203)",
+                          "square to bottom-left L: 279.00 mm down (printed 279)"]  # fmt: skip
+    assert len(lines) == 5  # sharp, full-ink marks on ordinary paper: nothing to warn about

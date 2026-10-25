@@ -155,10 +155,13 @@ and double-faced cards go to `<deck>-duplex.pdf` (`--split-faces` puts both face
 sheet instead). The engine saves every page landscape, so both sides print like a 4x2 sheet's,
 manual duplex with a long-edge flip, and the saved duplex offset moves the back pages the same
 way. On the engine's output each back sits behind its front, upright when the card is turned
-over side to side (checked at 300 ppi, and by the tests at 50 ppi). No 3x3 sheet has been printed
-double-sided yet, and the offset was measured with the landscape calibration sheet: check the
-first one against a light before laminating a batch (`make-proxies --test --backs` numbers each
-back), and remeasure the offset if it is off.
+over side to side (checked at 300 ppi, and by the tests at 50 ppi). The back pages carry no
+registration marks (the engine fork's `--no_back_marks`): nothing scans them, and turned over the
+long edge a back's square lands right behind the front's top-right L, where on double-sided glossy
+it showed through enough to make every TB123 misread that L (2026-10-26). The first 3x3 sheet
+printed double-sided (2026-10-26) had its backs slightly off with the offset measured on the
+landscape calibration sheet; check against a light before laminating a batch
+(`make-proxies --test --backs` numbers each back), and remeasure the offset if it is off.
 
 `--layout 4x2` is the engine's own layout: eight cards on landscape A4, the marks 10 mm in. It is
 the default on every other paper and card size, since 3x3 is A4 with standard cards only.
@@ -243,6 +246,7 @@ cut-proxies --dry-run      # no machine: runs the whole job against a stand-in, 
 cut-proxies --probe        # scans the marks, logs what the machine reports, cuts nothing
 cut-proxies --sense        # scans, then reads each mark back with the sensor (TB63), cuts nothing
 cut-proxies --no-check     # skips the sensor check of the marks before and after the scan
+cut-proxies --diagnose     # before any scan: where each mark sits and how it reads; cuts nothing
 cut-proxies --proof        # scores the square and each L after the scan; y cuts, r rescans, q stops
 cut-proxies --layout 4x2   # a 4x2 sheet without its run.json (a plain sheet is 3x3)
 cut-proxies --svg job.svg --layout 4x2 --reg-inset 5   # any SVG the size of that layout's page
@@ -320,9 +324,21 @@ black ink and 151-242 over laminated paper. So every cut reads the marks itself 
 the square's middle before the scan, which must be ink or the sheet isn't where its marks should
 be, and after it 9 points through the frame the scan made: ink in the middle of the square and on
 each L leg's centre line, paper just outside the square. A frame off by about half a millimetre
-fails; the job rescans once and then stops before anything is cut. It adds about 35 s a sheet, and
-each reading stores a light level in the machine's slot 4, which the scan never uses (it checks
-that first). A misread can
+fails. A leg that never reads full ink still passes when it is a narrow line darker than the paper
+on both sides by 40 (a double-sided sheet's leg peaked at 239 over paper at 91-132); the edge of a
+shadow is dark on one side only. It adds about 35 s a sheet, and each reading stores a light level
+in the machine's slot 4, which the scan never uses (it checks that first, and gives the scan its
+own light back afterwards: TB63 leaves the light where its ramp stopped, and TB123 starts with the
+light as it finds it).
+
+A scan that finds nothing, or one the check disagrees with, is tried again, then once more as
+TB122, the firmware's two-mark scan: the square and the bottom-left L only. The check still reads
+the top-right L, so a two-mark frame is cut only when that L reads where it puts it. On
+2026-10-26 a double-sided sheet whose back showed through behind its top-right L misread on every
+TB123 and registered first time as TB122. When all three disagree, nothing is cut, and
+`cut-proxies --diagnose` shows why: before any scan it reads across the square and each leg in the
+loaded mat's frame (about 4 minutes), and says where the sheet sits, how it is turned and
+stretched, and which marks never read as full ink or sit on unusually bright paper. A misread can
 also be caught by eye: `--proof` scores the square's outline, along the edge of the black, and each L
 along its centre lines after the scan, then waits. Lift the lid: registered right, the outline
 traces the square's edge and every L cut runs down the middle of the black and ends where the leg
