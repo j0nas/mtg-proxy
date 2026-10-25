@@ -179,3 +179,63 @@ def test_sensing_refuses_when_the_scan_restores_its_light_from_the_slot_it_would
     with pytest.raises(session.CutError, match="light slot reads 4"):
         driver.sense(FRAME, t, log(), [(7, 1)], sensing.profiles(FRAME))
     assert "TB63" not in sent(t) and "TB123" not in sent(t)
+
+
+INK, PAPER = b"  255\x03", b"  180\x03"
+SQUARE_OK = [INK, PAPER, PAPER, PAPER, PAPER]  # its middle, then left, right, above, below it
+LEG_OK = [INK, PAPER, PAPER]  # the centre line, then either side
+MARKS_OK = SQUARE_OK + LEG_OK * 4  # the top-right L's two legs, then the bottom-left's
+
+
+def checked(readings):
+    return machine({b"TB60": b"    0\x03", b"TB63": readings})
+
+
+def test_a_frame_the_print_agrees_with_is_cut_after_seventeen_readings():
+    t = checked([INK, *MARKS_OK])  # the placement reading first
+    driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    out = sent(t)
+    assert out.count("TB63,4") == 18 and out.count("TB123") == 1
+    assert out.index("TB60") < out.index("TB63,4") < out.index("TB123")  # slot, placement, scan
+    assert "\\-35,-35\x03" in out  # the area reaches the paper points 1.25 mm left of and above the square
+    assert out.rindex("TB63,4") < out.index("D")  # every reading before the first cut
+
+
+def test_a_misread_rescans_and_cuts_once_the_marks_agree():
+    misread = [PAPER, *SQUARE_OK[1:], *LEG_OK * 4]  # the square's middle reads paper
+    t = checked([INK, *misread, *MARKS_OK])
+    driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    out = sent(t)
+    assert out.count("TB123") == 2 and "D" in out.replace("TB", "")
+
+
+def test_a_misread_twice_stops_before_anything_is_cut():
+    t = checked([INK, PAPER])  # every reading after the placement is paper
+    with pytest.raises(session.CutError, match="after a rescan too: nothing was cut"):
+        driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    out = sent(t)
+    assert out.count("TB123") == 2 and "D" not in out.replace("TB", "")
+    assert out.endswith("TB0\x03L0\x03\\0,0\x03M0,0\x03TR0,0\x03J0\x03FN0\x03TB50,0\x03\x1b\x05")
+
+
+def test_a_sheet_without_ink_under_the_square_is_never_scanned():
+    t = checked([PAPER])
+    with pytest.raises(session.CutError, match="the sheet isn't where its marks should be"):
+        driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    assert "TB123" not in sent(t)
+
+
+def test_a_leg_centre_that_misses_by_a_hair_is_read_a_quarter_mm_either_side():
+    nudged = [b"  240\x03", INK, PAPER, PAPER]  # centre in between, the first nudge on ink
+    t = checked([INK, *SQUARE_OK, *nudged, *LEG_OK * 3])
+    driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    out = sent(t).replace("\x1b\x05", "")
+    assert "M94,5735\x03TB63,4" in out  # the top-right vertical leg, 0.25 mm left of its centre line
+    assert "D" in out.replace("TB", "")
+
+
+def test_the_light_slot_the_scan_uses_is_never_overwritten():
+    t = machine({b"TB60": b"    4\x03"})
+    with pytest.raises(session.CutError, match="light slot reads 4"):
+        driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    assert "TB63" not in sent(t) and "TB123" not in sent(t)

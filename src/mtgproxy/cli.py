@@ -311,6 +311,13 @@ def cut(
             "--probe", help="scan the marks and log what the machine reports before and after; cut nothing"
         ),
     ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="skip reading the marks with the sensor before and after the scan (about a minute a sheet)",
+        ),
+    ] = False,
     sense: Annotated[
         bool,
         typer.Option(
@@ -380,7 +387,7 @@ def cut(
         svg=svg, dry_run=dry_run,
         reg_length=reg_length, reg_thickness=reg_thickness, reg_inset=reg_inset,
         label=info.name if info else None,
-        probe=probe, sense=sense, proof=proof, scan_starts=[parse_start(v) for v in scan_start or []] or None,
+        probe=probe, sense=sense, check=not no_check, proof=proof, scan_starts=[parse_start(v) for v in scan_start or []] or None,
     )  # fmt: skip
     try:
         cutting.check(o)  # before the loop: a retry can't fix the options

@@ -92,27 +92,46 @@ Confirm = Callable[[int, bool], str]
 
 
 def cut(
-    job: Job, t: Transport, log: SessionLog, starts: list[tuple[float, float]], confirm: Confirm | None = None
+    job: Job,
+    t: Transport,
+    log: SessionLog,
+    starts: list[tuple[float, float]],
+    confirm: Confirm | None = None,
+    check: bool = False,
 ) -> Result:
     """The whole job. Once anything moved the machine, it always ends back at the origin.
 
-    With ``confirm``, proof cuts go down over the marks between the scan and the cut, and nothing
-    else is cut until the operator says so. A rescan returns to the origin and repeats a fresh run's start."""
+    With ``check``, the sensor reads the square before the scan (is the sheet where its marks
+    should be?) and every mark after it (does the print agree with the frame the scan made?); a
+    disagreement rescans once, then stops the job before anything is cut (``sensing``). With
+    ``confirm``, proof cuts go down over the marks between the scan and the cut, and nothing else
+    is cut until the operator says so. A rescan returns to the origin and repeats a fresh run's start."""
     s = Session(t, log)
     try:
         extent = reach = check_bounds(job)
         if confirm:  # the area must hold the proof cuts too, which may reach past the job's own
             marks = [cut for _, cut in proof.cuts(job.frame)]
             reach = check_bounds(replace(job, lines=[*job.lines, *marks]))
+        if check:  # and the paper points beside the marks
+            points = [sensing.registered(job.frame, c) for c in sensing.checks(job.frame)]
+            reach = (
+                min(reach[0], *(x for _, x in points)),
+                min(reach[1], *(y for y, _ in points)),
+                *reach[2:],
+            )
         low = low_corner(reach)
-        rounds = proof.ROUNDS if confirm else 1
+        rounds = max(proof.ROUNDS if confirm else 1, CHECK_ROUNDS if check else 1)
         for attempt in range(rounds):
             if attempt:
                 s.finish()
                 s.wait_ready(60)
             firmware = s.preflight()
             log.say(f"connected: {firmware} via {t.name}, mat loaded")
+            if check and attempt == 0:
+                check_light_slot(s, log)
             s.prepare()
+            if check and attempt == 0:
+                check_placement(s, job.frame, log)
             start = s.register(job.frame, starts)
             if low != (0.0, 0.0) and attempt == 0:
                 log.say(
@@ -120,12 +139,82 @@ def cut(
                     f"top-left mark: cutting area widened to {low[0]:g}, {low[1]:g} mm"
                 )
             s.setup(job.blade, job.frame, low)
+            if check:
+                failed = check_marks(s, job.frame, log)
+                if failed:
+                    for line in failed:
+                        log.say(f"check: {line}")
+                    if attempt + 1 < rounds:
+                        log.say("the marks don't read where the scan put them: rescanning")
+                        continue
+                    raise CutError(
+                        "the marks don't read where the scan put them, after a rescan too: nothing was cut. "
+                        "Check that the sheet lies flat and its marks are clean, then rerun"
+                    )
+                log.say(
+                    f"check: every mark reads where the scan put it ({len(sensing.checks(job.frame))} readings)"
+                )
             if confirm is None or prove(s, job, log, confirm, attempt, rescan=attempt + 1 < rounds):
                 break
         s.cut(job)
         return Result(firmware, start, extent)
     finally:
         wrap_up(s, t, log)
+
+
+CHECK_ROUNDS = 2  # a frame that fails the mark check gets one rescan before the job stops
+
+
+def check_light_slot(s: Session, log: SessionLog) -> None:
+    """Refuse to read the marks when the scan restores its light from the slot TB63 overwrites."""
+    slot = protocol.number(s.query(protocol.cmd(protocol.LIGHT_SLOT)))
+    log("light", selected=slot, slot=SENSE_SLOT)
+    if slot is None or slot == SENSE_SLOT:
+        raise CutError(
+            f"the scan's light slot reads {slot!r}: reading the marks would overwrite it. Power-cycle the Cameo"
+        )
+
+
+def check_placement(s: Session, frame: Frame, log: SessionLog) -> None:
+    """Before the scan: ink under the square's middle, or the sheet isn't where its marks should be."""
+    c = sensing.placement(frame)
+    level, reply = s.sense(c.y, c.x, SENSE_SLOT)  # the loaded mat's frame, in page mm like the scan start
+    log("placement", x=c.x, y=c.y, level=level, reply=reply)
+    if c.reads(level) is not True:
+        raise CutError(
+            f"no ink at the square's middle before the scan ({c.y:g} mm down, {c.x:g} mm in; it read "
+            f"{level!r}): the sheet isn't where its marks should be. Put its top-left corner on the mat "
+            "grid's, reload and rerun"
+        )
+
+
+def check_marks(s: Session, frame: Frame, log: SessionLog) -> list[str]:
+    """After the scan, every ``sensing.checks`` reading through the registered frame: what failed,
+    one line each, or nothing when the print agrees with the frame. A leg's centre line that isn't
+    ink is read NUDGE either side before it fails."""
+    failed = []
+    for c in sensing.checks(frame):
+        level, _ = s.sense(*sensing.registered(frame, c), SENSE_SLOT)
+        seen, nudged = c.reads(level), []
+        if c.ink and seen is not True and c.nudge:
+            for k in (-1, 1):
+                n = replace(c, x=c.x + k * sensing.NUDGE * c.nudge[0], y=c.y + k * sensing.NUDGE * c.nudge[1])
+                nl, _ = s.sense(*sensing.registered(frame, n), SENSE_SLOT)
+                nudged.append(nl)
+                if n.reads(nl) is True:
+                    seen = True
+                    break
+        ok = seen is c.ink
+        log("check", mark=c.mark, what=c.what, x=c.x, y=c.y, ink=c.ink, level=level, nudged=nudged, ok=ok)
+        if not ok:
+            want = "ink" if c.ink else "paper"
+            got = (
+                "nothing"
+                if level is None
+                else f"{level} ({'ink' if seen else 'paper' if seen is False else 'between'})"
+            )
+            failed.append(f"{c.mark}, {c.what}: read {got} where {want} should be")
+    return failed
 
 
 def prove(

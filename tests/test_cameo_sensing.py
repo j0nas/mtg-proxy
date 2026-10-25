@@ -56,3 +56,30 @@ def test_tb63_stores_into_slots_one_to_four_only_and_replies_parse_as_numbers():
     assert protocol.number(b"   -1\x03") == -1
     assert protocol.number(b"1,2\x03") is None
     assert protocol.number(None) is None
+
+
+def test_a_cut_reads_the_square_and_both_legs_of_each_l():
+    c = sensing.checks(FRAME)
+    assert len(c) == 17 and sum(x.ink for x in c) == 5
+    square = {x.what: (x.x, x.y) for x in c if x.mark == "top-left"}
+    assert square["the square"] == (6.0, 11.5) and square["left of the square"] == (2.25, 11.5)
+    assert square["below the square"] == (6.0, 15.25)  # 1.25 mm below its bottom edge
+    legs = {(x.mark, x.what): (x.x, x.y) for x in c}
+    assert legs[("top-right", "the vertical leg")] == (206.5, 12)
+    assert legs[("bottom-left", "above the horizontal leg")] == (6.5, 287)
+
+
+def test_readings_between_ink_and_paper_count_as_neither():
+    c = sensing.checks(FRAME)[0]
+    assert (c.reads(255), c.reads(250), c.reads(247), c.reads(245), c.reads(None)) == (
+        True,
+        True,
+        None,
+        False,
+        None,
+    )
+
+
+def test_the_placement_reading_is_the_square_middle_in_page_mm():
+    p = sensing.placement(FRAME)
+    assert (p.x, p.y, p.ink) == (6.0, 11.5, True)

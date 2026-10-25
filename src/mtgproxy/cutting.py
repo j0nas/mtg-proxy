@@ -66,6 +66,7 @@ class CutOptions:
     label: str | None = None  # deck name, for log/transcript file names
     probe: bool = False  # scan and query the machine, cut nothing (see cameo.driver.probe)
     sense: bool = False  # scan, then read the marks back with the sensor; cut nothing (cameo.sensing)
+    check: bool = True  # read the marks with the sensor before and after the scan; stop on a misread
     proof: bool = False  # proof cuts over the marks after the scan; the job waits for y / r / q
     scan_starts: list[tuple[float, float]] | None = None  # (top, left) mm; None = the driver's defaults
 
@@ -196,7 +197,9 @@ def run_cut(o: CutOptions) -> int:
         confirm = None
         if o.proof:
             confirm = dry_confirm if o.dry_run else ask_operator
-        result = driver.cut(job, t, log, starts, confirm)
+        if o.check and o.dry_run:
+            print("cut-proxies: dry run: the mark check is skipped (it needs the machine's sensor)")
+        result = driver.cut(job, t, log, starts, confirm, check=o.check and not o.dry_run)
     except (session.CutError, TransportError) as e:
         raise CutError(f"{e}\ncut-proxies: session log: {log_path}") from e
     finally:

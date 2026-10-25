@@ -242,6 +242,7 @@ cut-proxies --scan         # list the Bluetooth devices in range
 cut-proxies --dry-run      # no machine: runs the whole job against a stand-in, checks the bounds
 cut-proxies --probe        # scans the marks, logs what the machine reports, cuts nothing
 cut-proxies --sense        # scans, then reads each mark back with the sensor (TB63), cuts nothing
+cut-proxies --no-check     # skips the sensor check of the marks before and after the scan
 cut-proxies --proof        # scores the square and each L after the scan; y cuts, r rescans, q stops
 cut-proxies --layout 4x2   # a 4x2 sheet without its run.json (a plain sheet is 3x3)
 cut-proxies --svg job.svg --layout 4x2 --reg-inset 5   # any SVG the size of that layout's page
@@ -313,8 +314,16 @@ Registration:
   (Graphtec's guidance): ink near a mark can be read as part of it.
 
 The machine reports no mark positions (FQ5 reads -64 after every successful scan, straight or
-tilted; its firmware keeps them to itself), so a misread can't be caught from the replies. It can
-be caught by eye: `--proof` scores the square's outline, along the edge of the black, and each L
+tilted; its firmware keeps them to itself), so a misread can't be caught from the replies. Its
+sensor can be read, though: TB63 reports how much light the spot under the head needs, 255 over
+black ink and 151-242 over laminated paper. So every cut reads the marks itself (`cameo/sensing.py`):
+the square's middle before the scan, which must be ink or the sheet isn't where its marks should
+be, and after it 17 points through the frame the scan made: ink in the middle of the square and on
+each L leg's centre line, paper just outside them. A frame off by about half a millimetre fails;
+the job rescans once and then stops before anything is cut. It adds about a minute a sheet, and
+each reading stores a light level in the machine's slot 4, which the scan never uses (it checks
+that first). A misread can
+also be caught by eye: `--proof` scores the square's outline, along the edge of the black, and each L
 along its centre lines after the scan, then waits. Lift the lid: registered right, the outline
 traces the square's edge and every L cut runs down the middle of the black and ends where the leg
 ends; a misread mark's cuts sit beside it, by the size of the misread. Each leg is left uncut for 1.5 mm either side of where the sensor crosses it, so a
