@@ -153,6 +153,14 @@ def draw_path(points_su: list[tuple[int, int]]) -> str:
 LIGHT_SLOT = "TB60"  # → the selected slot
 
 
+def select_light(slot: int) -> str:
+    """TB61: select a slot and set the light to its stored level (RAM only, nothing saved). TB63
+    leaves the light where its ramp stopped, 255 after a reading over ink, and TB123 starts its
+    search with the light as it finds it (it restores the stored level only to retry), so a
+    reading before a scan has to be followed by this (firmware V1.04, 2026-10-26)."""
+    return f"TB61,{slot}"
+
+
 def light_level(slot: int) -> str:
     """TB62: slot ``slot``'s stored level, read only."""
     return f"TB62,{slot}"

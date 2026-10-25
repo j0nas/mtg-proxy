@@ -128,10 +128,12 @@ def cut(
             firmware = s.preflight()
             log.say(f"connected: {firmware} via {t.name}, mat loaded")
             if check and attempt == 0:
-                check_light_slot(s, log)
+                slot = check_light_slot(s, log)
             s.prepare()
             if check and attempt == 0:
                 check_placement(s, job.frame, log)
+            if check:  # the readings leave the light wherever their ramp stopped: back to the scan's level
+                s.send(protocol.select_light(slot))
             start = s.register(job.frame, starts)
             if low != (0.0, 0.0) and attempt == 0:
                 log.say(
@@ -141,6 +143,7 @@ def cut(
             s.setup(job.blade, job.frame, low)
             if check:
                 failed = check_marks(s, job.frame, log)
+                s.send(protocol.select_light(slot))  # for the rescan, or the next sheet's scan
                 if failed:
                     for line in failed:
                         log.say(f"check: {line}")
@@ -165,14 +168,17 @@ def cut(
 CHECK_ROUNDS = 2  # a frame that fails the mark check gets one rescan before the job stops
 
 
-def check_light_slot(s: Session, log: SessionLog) -> None:
-    """Refuse to read the marks when the scan restores its light from the slot TB63 overwrites."""
+def check_light_slot(s: Session, log: SessionLog) -> int:
+    """The slot the scan takes its light from; refuses to read the marks when it is the one TB63
+    overwrites. Sets the light to that slot's level, undoing a reading an earlier job left."""
     slot = protocol.number(s.query(protocol.cmd(protocol.LIGHT_SLOT)))
     log("light", selected=slot, slot=SENSE_SLOT)
     if slot is None or slot == SENSE_SLOT:
         raise CutError(
             f"the scan's light slot reads {slot!r}: reading the marks would overwrite it. Power-cycle the Cameo"
         )
+    s.send(protocol.select_light(slot))
+    return slot
 
 
 def check_placement(s: Session, frame: Frame, log: SessionLog) -> None:
@@ -309,13 +315,7 @@ def sense(
     try:
         firmware = s.preflight()
         log.say(f"connected: {firmware} via {t.name}, mat loaded")
-        slot = protocol.number(s.query(protocol.cmd(protocol.LIGHT_SLOT)))
-        stored = protocol.number(s.query(protocol.cmd(protocol.light_level(SENSE_SLOT))))
-        log("light", selected=slot, slot=SENSE_SLOT, stored=stored)
-        if slot is None or slot == SENSE_SLOT:
-            raise CutError(
-                f"the scan's light slot reads {slot!r}: reading the marks would overwrite it. Power-cycle the Cameo"
-            )
+        slot = check_light_slot(s, log)
         s.prepare()
         start = s.register(frame, starts)
         where = [sensing.registered(frame, pt) for pt in points]
@@ -326,6 +326,7 @@ def sense(
             level, reply = s.sense(y, x, SENSE_SLOT)
             log("sense", profile=pt.profile, offset=pt.offset, x=pt.x, y=pt.y, level=level, reply=reply)
             readings.append((pt, level))
+        s.send(protocol.select_light(slot))  # the next scan starts with the light as it finds it
         return {"firmware": firmware, "start": start, "slot": slot, "readings": readings}
     finally:
         wrap_up(s, t, log)

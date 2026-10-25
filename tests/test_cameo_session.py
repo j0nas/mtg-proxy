@@ -238,3 +238,13 @@ def test_the_light_slot_the_scan_uses_is_never_overwritten():
     with pytest.raises(session.CutError, match="light slot reads 4"):
         driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     assert "TB63" not in sent(t) and "TB123" not in sent(t)
+
+
+def test_the_scan_and_the_next_sheet_get_the_scans_own_light_back_after_every_reading():
+    t = checked([INK, *MARKS_OK])
+    driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    out = sent(t).replace("\x1b\x05", "")
+    placement = out.index("TB63,4")
+    assert placement < out.index("TB61,0", placement) < out.index("TB123")  # TB63 leaves its light on
+    last = out.rindex("TB63,4")
+    assert last < out.index("TB61,0", last) < out.index("D")
