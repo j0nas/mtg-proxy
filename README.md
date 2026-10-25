@@ -318,9 +318,9 @@ tilted; its firmware keeps them to itself), so a misread can't be caught from th
 sensor can be read, though: TB63 reports how much light the spot under the head needs, 255 over
 black ink and 151-242 over laminated paper. So every cut reads the marks itself (`cameo/sensing.py`):
 the square's middle before the scan, which must be ink or the sheet isn't where its marks should
-be, and after it 17 points through the frame the scan made: ink in the middle of the square and on
-each L leg's centre line, paper just outside them. A frame off by about half a millimetre fails;
-the job rescans once and then stops before anything is cut. It adds about a minute a sheet, and
+be, and after it 9 points through the frame the scan made: ink in the middle of the square and on
+each L leg's centre line, paper just outside the square. A frame off by about half a millimetre
+fails; the job rescans once and then stops before anything is cut. It adds about 35 s a sheet, and
 each reading stores a light level in the machine's slot 4, which the scan never uses (it checks
 that first). A misread can
 also be caught by eye: `--proof` scores the square's outline, along the edge of the black, and each L

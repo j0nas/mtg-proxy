@@ -183,26 +183,25 @@ def test_sensing_refuses_when_the_scan_restores_its_light_from_the_slot_it_would
 
 INK, PAPER = b"  255\x03", b"  180\x03"
 SQUARE_OK = [INK, PAPER, PAPER, PAPER, PAPER]  # its middle, then left, right, above, below it
-LEG_OK = [INK, PAPER, PAPER]  # the centre line, then either side
-MARKS_OK = SQUARE_OK + LEG_OK * 4  # the top-right L's two legs, then the bottom-left's
+MARKS_OK = SQUARE_OK + [INK] * 4  # then the top-right L's two legs' centre lines, then the bottom-left's
 
 
 def checked(readings):
     return machine({b"TB60": b"    0\x03", b"TB63": readings})
 
 
-def test_a_frame_the_print_agrees_with_is_cut_after_seventeen_readings():
+def test_a_frame_the_print_agrees_with_is_cut_after_nine_readings():
     t = checked([INK, *MARKS_OK])  # the placement reading first
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
-    assert out.count("TB63,4") == 18 and out.count("TB123") == 1
+    assert out.count("TB63,4") == 10 and out.count("TB123") == 1
     assert out.index("TB60") < out.index("TB63,4") < out.index("TB123")  # slot, placement, scan
     assert "\\-35,-35\x03" in out  # the area reaches the paper points 1.25 mm left of and above the square
     assert out.rindex("TB63,4") < out.index("D")  # every reading before the first cut
 
 
 def test_a_misread_rescans_and_cuts_once_the_marks_agree():
-    misread = [PAPER, *SQUARE_OK[1:], *LEG_OK * 4]  # the square's middle reads paper
+    misread = [PAPER, *SQUARE_OK[1:], INK, INK, INK, INK]  # the square's middle reads paper
     t = checked([INK, *misread, *MARKS_OK])
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
@@ -226,8 +225,8 @@ def test_a_sheet_without_ink_under_the_square_is_never_scanned():
 
 
 def test_a_leg_centre_that_misses_by_a_hair_is_read_a_quarter_mm_either_side():
-    nudged = [b"  240\x03", INK, PAPER, PAPER]  # centre in between, the first nudge on ink
-    t = checked([INK, *SQUARE_OK, *nudged, *LEG_OK * 3])
+    nudged = [b"  240\x03", INK]  # the centre in between, the first nudge on ink
+    t = checked([INK, *SQUARE_OK, *nudged, INK, INK, INK])
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t).replace("\x1b\x05", "")
     assert "M94,5735\x03TB63,4" in out  # the top-right vertical leg, 0.25 mm left of its centre line

@@ -13,8 +13,10 @@ without the sensor passing half scale, and paper 151-242. Every mark read where 
 frame put it, within 0.25 mm, and a 1 mm leg read 255 across its middle 0.5-0.75 mm.
 
 ``checks`` is what a cut reads before the blade goes down (``cut-proxies`` runs it unless told
-not to): ink in the middle of the square and on each L leg's centre line, paper just outside
-them. A frame off by about half a millimetre or more fails it.
+not to): ink in the middle of the square and on each L leg's centre line, paper just outside the
+square. A frame off by about half a millimetre or more fails it. A leg needs no paper reading: it
+is 1 mm wide, so its centre reads paper once the frame is off by about 0.4 mm across it, and
+nothing else printed comes within 3 mm of it. The 5 mm square needs its four.
 """
 
 from __future__ import annotations
@@ -32,7 +34,6 @@ LEG_REACH = 2.0  # mm read either side of its centre line
 INK = 250  # at or above: ink. Ink read 255 on 2026-10-25 (253 where the spot was half on it)
 PAPER = 245  # at or below: paper. Paper read 151-242, 242 only half a mm from a leg
 OUTSIDE_SQUARE = 1.25  # mm from the square's edge to its paper checks (it read 0.5 mm wide each side)
-OUTSIDE_LEG = 1.0  # mm from a leg's centre line to its paper checks
 NUDGE = 0.25  # mm either side of a leg's centre line, read when the centre itself isn't ink
 
 
@@ -109,8 +110,7 @@ def placement(frame: Frame) -> Check:
 
 def checks(frame: Frame) -> list[Check]:
     """The readings a cut takes after the scan, page mm: the square's middle and a paper point
-    OUTSIDE_SQUARE beyond each of its edges, then each L leg's centre line halfway along it and a
-    paper point OUTSIDE_LEG either side."""
+    OUTSIDE_SQUARE beyond each of its edges, then each L leg's centre line halfway along it."""
     x0, y0 = frame.inset, frame.top
     mid, far = SQUARE / 2, SQUARE + OUTSIDE_SQUARE
     out = [
@@ -120,16 +120,11 @@ def checks(frame: Frame) -> list[Check]:
         Check("top-left", "above the square", x0 + mid, y0 - OUTSIDE_SQUARE, False),
         Check("top-left", "below the square", x0 + mid, y0 + far, False),
     ]
-    half, d = frame.length / 2, OUTSIDE_LEG
+    half = frame.length / 2
     for name, (i, j), (sx, sy) in L_MARKS:
         cx, cy = frame.inset + i * frame.width, frame.top + j * frame.height
-        vy, hx = cy + sy * half, cx + sx * half
         out += [
-            Check(name, "the vertical leg", cx, vy, True, nudge=(1, 0)),
-            Check(name, "left of the vertical leg", cx - d, vy, False),
-            Check(name, "right of the vertical leg", cx + d, vy, False),
-            Check(name, "the horizontal leg", hx, cy, True, nudge=(0, 1)),
-            Check(name, "above the horizontal leg", hx, cy - d, False),
-            Check(name, "below the horizontal leg", hx, cy + d, False),
+            Check(name, "the vertical leg", cx, cy + sy * half, True, nudge=(1, 0)),
+            Check(name, "the horizontal leg", cx + sx * half, cy, True, nudge=(0, 1)),
         ]
     return out

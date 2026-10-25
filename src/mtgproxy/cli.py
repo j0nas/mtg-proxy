@@ -315,7 +315,7 @@ def cut(
         bool,
         typer.Option(
             "--no-check",
-            help="skip reading the marks with the sensor before and after the scan (about a minute a sheet)",
+            help="skip reading the marks with the sensor before and after the scan (about 35 s a sheet)",
         ),
     ] = False,
     sense: Annotated[
