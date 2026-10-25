@@ -53,8 +53,9 @@ make-proxies --test --print        # and send it to the default CUPS printer at 
 make-proxies --test --layout 4x2   # eight of them on landscape A4 (see Sheet layouts)
 ```
 
-One portrait A4 of nine gauge cards: exact 63x88 mm geometry, hairline art, almost no ink. The frame sits
-1.0 mm inside the cut line, so after cutting the white margin must be 1.0 mm on all four sides.
+One portrait A4 of nine gauge cards: exact 63x88 mm geometry, hairline art, almost no ink. The
+frame sits 1.0 mm inside the cut line, so after cutting the white margin must be 1.0 mm on all four
+sides.
 Gray ticks at 0.5 and 1.5 mm read any offset. A crosshair on front and back checks duplex
 alignment against a light. A TOP marker catches flips.
 
@@ -142,19 +143,28 @@ it. With the card-maker's 3.5 mm all round and 10.5 mm legs, the bottom-left L r
 a laminated sheet, three scans out of three; at 7 mm its search began on the bottom-left card's
 corner and once read that (2026-10-24). Now every pass stays 1.2–2.6 mm clear of the card print
 (simulated on a real sheet), and four laminated sheets registered and cut in a row (2026-10-25).
-It is fronts only: `--backs` is refused, and so is a deck whose double-faced cards would need a
-duplex sheet; `--split-faces` prints their faces on the 3x3 sheet.
+
+A 3x3 sheet's marks have their outer edges 3.0 mm from the paper's sides, and the ET-8550 prints
+to 2.96 mm from every edge, so the sheet must print at 100 %. The PDF page is landscape like every
+sheet's: print it upright (rotated a quarter turn, then portrait at 100 %) and put it on the mat
+portrait with the square at the top-left. The square sits 0.6 mm from the top-left card's print,
+beside its corner.
+
+A 3x3 sheet goes double-sided as a 4x2 one does: `--backs` prints the whole deck double-sided,
+and double-faced cards go to `<deck>-duplex.pdf` (`--split-faces` puts both faces on the main
+sheet instead). The engine saves every page landscape, so both sides print like a 4x2 sheet's,
+manual duplex with a long-edge flip, and the saved duplex offset moves the back pages the same
+way. On the engine's output each back sits behind its front, upright when the card is turned
+over side to side (checked at 300 ppi, and by the tests at 50 ppi). No 3x3 sheet has been printed
+double-sided yet, and the offset was measured with the landscape calibration sheet: check the
+first one against a light before laminating a batch (`make-proxies --test --backs` numbers each
+back), and remeasure the offset if it is off.
 
 `--layout 4x2` is the engine's own layout: eight cards on landscape A4, the marks 10 mm in. It is
 the default on every other paper and card size, since 3x3 is A4 with standard cards only.
 `run.json` records the layout, so `cut-proxies` scans the right frame and cuts the right outlines,
 and `redo` counts the run's sheets. `backlog` and `backlog build` count nine to a sheet unless
 given `--layout 4x2`.
-
-The marks' outer edges are 3.0 mm from the paper's sides, and the ET-8550 prints to 2.96 mm from
-every edge, so the sheet must print at 100 %. The PDF page is landscape like every sheet's: print it
-upright (rotated a quarter turn, then portrait at 100 %) and put it on the mat portrait with the
-square at the top-left. The square sits 0.6 mm from the top-left card's print, beside its corner.
 
 ## Reprints and leftovers
 
@@ -206,7 +216,8 @@ Once, for `--backs` decks and duplex sheets:
    Units are 300 PPI pixels, ~0.085 mm.
 3. `mtg-proxy offset -x <x> -y <y>` (`-a <deg>` for rotation).
 
-Stored in `data/offset_data.json`, tracked, applied to every double-sided PDF.
+Stored in `data/offset_data.json`, tracked, applied to every double-sided PDF, 3x3 and 4x2 alike:
+both are landscape pages, and the engine shifts the back pages in the page's own pixels.
 
 ## Cutting
 
@@ -327,7 +338,7 @@ A3 works on the ET-8550 (18 cards a sheet) but needs the 12x24" mat.
 
 ```sh
 uv sync
-uv run pytest           # ~90 tests, no network, no printer, no Cameo, ~2 s
+uv run pytest           # ~180 tests, no network, no printer, no Cameo, ~4 s
 uv run ruff check src tests && uv run ruff format src tests
 ```
 

@@ -30,7 +30,6 @@ DEFAULT = "3x3"  # on the paper and card it is built for (ONLY); see ``default``
 # Our layout names → the engine's layout variant (layouts.json: layouts[paper][card][variant]).
 VARIANTS = {"3x3": "borderless", "4x2": "default"}
 ONLY = {"3x3": ("a4", "standard")}  # the one paper and card a layout is built for; others: any
-SINGLE_SIDED = {"3x3"}  # no --backs or duplex sheet: never printed double-sided here
 NOMINAL_CARDS = {"4x2": 8, "3x3": 9}  # on A4, for messages when layouts.json can't be read
 
 

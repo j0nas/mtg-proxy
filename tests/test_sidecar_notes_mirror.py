@@ -60,9 +60,11 @@ def test_notes_for_a_3x3_sheet():
     assert "**portrait, the black square top-left**" in text and "masking tape" in text
     assert "It reads run.json here: a4 paper, 3x3 layout." in text
     assert "`cut-proxies --layout 3x3`" in text
-    assert "--backs" not in text and "single-sided for now" in text
+    assert "Rerun with --backs for double-sided." in text
     split = notes.render(notes.NotesContext("t", "a4", "standard", 9, True, False, 2, layout="3x3"))
-    assert "Rerun without it and without --layout 3x3 for one physical double-sided card." in split
+    assert "Rerun without it for one physical double-sided card." in split
+    duplex = notes.render(notes.NotesContext("t", "a4", "standard", 9, True, True, 2, layout="3x3"))
+    assert "**t-duplex.pdf** holds the 2 double-sided card image(s)" in duplex and "**portrait A4**" in duplex
     four = notes.render(notes.NotesContext("d", "a4", "standard", 8, True, True, 0, layout="4x2"))
     assert "| layout: 4x2 | registration: 3-mark |" in four and "portrait" not in four
     assert "`cut-proxies --layout 4x2`" in four

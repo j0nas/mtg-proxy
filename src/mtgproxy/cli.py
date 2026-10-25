@@ -18,7 +18,7 @@ from . import backlog as backlog_mod
 from .backlog import Backlog, BacklogError, Entry
 from .cache import ImageCache
 from .decks import DeckError, is_double_sided
-from .layout import NOMINAL_CARDS, SINGLE_SIDED, LayoutError
+from .layout import NOMINAL_CARDS, LayoutError
 from .layout import check as check_layout
 from .layout import default as default_layout
 from .manifest import ManifestError
@@ -43,7 +43,7 @@ def parse_start(value: str) -> tuple[float, float]:
 
 LAYOUT_HELP = (
     "3x3 (the default on A4 with standard cards): 9 cards on portrait A4, marks 3.5 mm from the sides "
-    "and 9 mm from the top and bottom, fronts only | 4x2: 8 cards on landscape A4, the engine's own "
+    "and 9 mm from the top and bottom | 4x2: 8 cards on landscape A4, the engine's own "
     "layout (the default on any other paper or card)"
 )
 
@@ -724,13 +724,6 @@ def backlog_build(
     cards, keep = bl.take(per_page, full_only)
     if not cards:
         fail(f"no full sheet yet ({bl.summary(per_page)}) — drop --full-only to print a partial one")
-    dfc = [c for c in cards if c.dfc and not c.front]
-    if sheet_layout in SINGLE_SIDED and dfc and not split_faces:
-        fail(
-            f"{len(dfc)} double-faced card(s) would need a duplex sheet, and --layout {sheet_layout} prints "
-            f"fronts only for now: add --split-faces or --front-only NAME, or build them without --layout "
-            f"{sheet_layout}"
-        )
     run_name = name or _fresh_name(out, f"backlog-{date.today().isoformat()}")
     typer.echo(f"{len(cards)} card(s) → {out / run_name}/" + (f", {len(keep)} stay queued" if keep else ""))
     if dry_run:

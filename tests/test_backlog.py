@@ -369,18 +369,23 @@ def test_redo_and_the_backlog_count_sheets_of_the_runs_layout(tmp_path, monkeypa
 
     built = []
     monkeypatch.setattr(build, "run_build", lambda opts: built.append(opts))
-    r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--layout", "3x3", "--backs"])
-    assert r.exit_code == 1 and "Drop --backs" in r.output
+    r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--backs", "-n"])
+    assert r.exit_code == 0 and "10 card(s) → " in r.output  # double-sided 3x3 sheets
     r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--layout", "3x3", "--full-only", "-n"])
     assert r.exit_code == 0 and "9 card(s) → " in r.output and ", 1 stay queued" in r.output
 
-    # A double-faced card in the queue: a 3x3 build has no duplex sheet for it.
+    # A double-faced card in the queue goes on the 3x3 build's duplex sheet.
     bl = Backlog.at(tmp_path)
     bl.add([Entry.from_slot(_card("Delver", "sld", "1", dfc=True), "deck", "d1.1", None)])
     bl.save()
-    r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--layout", "3x3", "--name", "b"])
-    assert r.exit_code == 1 and "1 double-faced card(s) would need a duplex sheet" in r.output
-    assert not built and not (tmp_path / "b").exists()
+    done = build.BuildResult("b", tmp_path / "b", None, None, 1, 11)
+    monkeypatch.setattr(build, "run_build", lambda opts: built.append(opts) or done)
+    monkeypatch.setattr(build, "print_summary", lambda r, o: None)
+    r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--name", "b"])
+    assert r.exit_code == 0, r.output
+    (opts,) = built
+    assert (opts.layout, opts.duplex_dfc, opts.fronts_only) == ("3x3", True, True)
+    assert "1 Delver (SLD) 1" in Path(opts.deck).read_text()
 
 
 def test_the_backlog_refuses_a_layout_it_cant_count(tmp_path):

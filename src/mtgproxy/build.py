@@ -459,17 +459,12 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
 # --- the whole thing ---------------------------------------------------------
 def resolve_layout(opts: BuildOptions) -> BuildOptions:
     """``opts`` with its layout settled (None: the default for the paper and card); raises
-    BuildError for a layout this paper, card size or --backs can't have."""
+    BuildError for a layout this paper or card size can't have."""
     opts = replace(opts, layout=opts.layout or layout.default(opts.paper, opts.card_size))
     try:
         layout.check(opts.layout, opts.paper, opts.card_size)
     except layout.LayoutError as e:
         raise BuildError(str(e)) from e
-    if opts.layout in layout.SINGLE_SIDED and not opts.fronts_only:
-        raise BuildError(
-            f"--layout {opts.layout} prints fronts only for now: no sheet in this layout has been printed "
-            "double-sided, nor its duplex offset checked. Drop --backs."
-        )
     return opts
 
 
@@ -529,15 +524,6 @@ def run_build(opts: BuildOptions) -> BuildResult:
         log(f"--tokens-only: dropped {pruned} non-token image(s)")
         if not engine.images_in(engine.FRONT):
             raise BuildError("this deck produces no tokens")
-
-    if opts.layout in layout.SINGLE_SIDED and opts.duplex_dfc:
-        _, duplex = manifest.partition(opts.fronts_only, opts.duplex_dfc)
-        if duplex:
-            raise BuildError(
-                f"{len(duplex)} double-faced card(s) would need a duplex sheet, and --layout {opts.layout} "
-                "prints fronts only for now: rerun with --split-faces (each face its own card), or build "
-                f"them without --layout {opts.layout}"
-            )
 
     fronts = engine.images_in(engine.FRONT)
     cards = len(fronts)

@@ -10,7 +10,6 @@ from datetime import date
 from pathlib import Path
 
 from .cutting import PRESETS
-from .layout import SINGLE_SIDED
 from .paths import NOTES_NAME
 
 
@@ -54,10 +53,7 @@ def render(c: NotesContext) -> str:
             if c.duplex_dfc
             else f" | double-faced cards: {c.dfc_count} (both faces as separate cards)"
         )
-    single = c.layout in SINGLE_SIDED
-    if c.fronts_only and single:
-        step2 = f"Fronts only — print single-sided ({c.layout} sheets are single-sided for now)."
-    elif c.fronts_only:
+    if c.fronts_only:
         step2 = "Fronts only (default) — print single-sided. Rerun with --backs for double-sided."
     else:
         step2 = (
@@ -72,9 +68,7 @@ def render(c: NotesContext) -> str:
     elif c.dfc_count > 0 and c.fronts_only:
         step2 += (
             f"\n   - {c.dfc_count} double-faced card(s): both faces are in the main PDF as separate single-sided"
-            "\n     cards (--split-faces). Rerun without it"
-            + (f" and without --layout {c.layout}" if single else "")
-            + " for one physical double-sided card."
+            "\n     cards (--split-faces). Rerun without it for one physical double-sided card."
         )
     paper_flag = "" if c.paper == "a4" else f" -p {c.paper}"
     lam, paper = PRESETS["laminate"], PRESETS["paper"]
