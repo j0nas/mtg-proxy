@@ -18,9 +18,10 @@ from dataclasses import dataclass
 
 ETX = "\x03"
 INIT = "\x1b\x04"  # ESC EOT: reset the command parser
-STATUS = "\x1b\x05"  # ESC ENQ → "0" ready, "1" moving, "2" unloaded (no mat/media)
+STATUS = "\x1b\x05"  # ESC ENQ → "0" ready, "1" moving, "2" unloaded (no mat/media), "3" paused
 VERSION = "FG"
-STATUS_TEXT = {"0": "ready", "1": "moving", "2": "unloaded"}
+# "3" is the machine's pause button (2026-10-26: pressed mid-cut, the cut waited for it).
+STATUS_TEXT = {"0": "ready", "1": "moving", "2": "unloaded", "3": "paused"}
 
 
 def su(mm: float) -> int:
@@ -37,7 +38,7 @@ def raw(s: str) -> bytes:
 
 
 def status_of(reply: bytes | None) -> str:
-    """'ready' / 'moving' / 'unloaded', or the raw reply text when it is something else."""
+    """'ready' / 'moving' / 'unloaded' / 'paused', or the raw reply text when it is something else."""
     if reply is None:
         return "no reply"
     text = reply.decode("latin1").rstrip(ETX).strip()

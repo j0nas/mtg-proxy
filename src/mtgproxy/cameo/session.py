@@ -182,10 +182,20 @@ class Session:
         return p.status_of(self.query(p.raw(p.STATUS)))
 
     def wait_ready(self, timeout: float, poll: float = 0.5) -> str:
+        """Poll until the machine stops moving: its status then. A pause on the machine waits for
+        the operator to press pause again, however long, and doesn't count against ``timeout``.
+        On 2026-10-26 the driver took a pause mid-cut for an error, sent the head home and let go,
+        and the machine's pause button could no longer resume the cut."""
         end = time.monotonic() + timeout
+        told = False
         while True:
             s = self.status()
-            if s != "moving" or time.monotonic() > end:
+            if s == "paused":
+                if not told:
+                    self.log.say("paused on the Cameo: press its pause button again to carry on")
+                    told = True
+                end = time.monotonic() + timeout
+            elif s != "moving" or time.monotonic() > end:
                 return s
             time.sleep(poll)
 

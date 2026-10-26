@@ -540,3 +540,13 @@ def test_a_machine_that_loses_its_place_on_the_proof_cuts_never_cuts_the_job():
     assert not asked  # stopped before anyone was asked
     cuts = sent(t).replace("TB", "").count("D")
     assert 0 < cuts <= len(list(proof.cuts(FRAME)))  # the proof cuts and nothing more
+
+
+def test_a_pause_on_the_machine_waits_for_the_operator_and_the_cut_carries_on():
+    said = []
+    s_log = session.SessionLog(None, echo=said.append)
+    t = machine({b"\x1b\x05": [b"1\x03", b"3\x03", b"3\x03", b"3\x03", b"1\x03", b"0\x03"]})
+    s = session.Session(t, s_log)
+    assert s.wait_ready(5, poll=0) == "ready"  # moving, paused three polls, moving, then done
+    assert said.count("paused on the Cameo: press its pause button again to carry on") == 1
+    assert protocol.status_of(b"3\x03") == "paused"
