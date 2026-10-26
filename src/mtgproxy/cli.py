@@ -136,6 +136,14 @@ def make(
     plain: Annotated[
         bool, typer.Option("--plain", help="normal frames (default prefers showcase/extended/full art)")
     ] = False,
+    alt_names: Annotated[
+        bool,
+        typer.Option(
+            "--alt-names",
+            help="also pick printings that show another name on the card (Universes Beyond names like "
+            "'Rathalos, King of the Skies', Japanese-only printings); a set and number in the deck line always wins",
+        ),
+    ] = False,
     skip_fetch: Annotated[
         bool, typer.Option("--skip-fetch", help="reuse already-downloaded card images")
     ] = False,
@@ -195,6 +203,7 @@ def make(
         fronts_only=not backs,
         duplex_dfc=not split_faces,
         fancy_art=not plain,
+        alt_names=alt_names,
         include_basics=basics,
         token_copies=tokens_only or tokens or 0,
         tokens_only=tokens_only is not None,

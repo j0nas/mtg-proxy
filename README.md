@@ -95,6 +95,7 @@ make-proxies decks/mydeck.txt -t 2               # 2 of each distinct token at t
 make-proxies decks/mydeck.txt --skip-fetch       # reuse fetched images
 make-proxies decks/mydeck.txt --dry-run
 make-proxies decks/mydeck.txt -- --prefer_set sld   # extra fetch.py args after --
+make-proxies decks/mydeck.txt --alt-names        # also rank printings with another name on the card
 make-proxies decks/mydeck.txt --trim "Temple Garden" --trim "Battle Angels of Tyr:0.5"
 ```
 
@@ -110,6 +111,14 @@ Images are cached in `~/.cache/mtg-proxy`, keyed by Scryfall image URL. A 100-ca
 ~15 s the first time and a couple of seconds after. Lookups always hit Scryfall, so a list without
 printings resolves to current art. `MTG_FETCH_WORKERS=1` forces serial fetching if Scryfall
 complains.
+
+Fancy art (the default) ranks a card's printings newest first and prefers showcase, then
+borderless, extended or full art. Printings that show another name on the card stay out of that
+ranking: Universes Beyond versions such as "Rathalos, King of the Skies" for Drakuseth, Maw of
+Flames, and Japanese-only Mystical Archive cards. `--alt-names` lets them back in. A set and
+collector number on the deck line always wins, so `1 Drakuseth, Maw of Flames (SLD) 2237` prints
+the Rathalos art without the flag. Prize printings such as the Legacy Championship duals carry the
+real name and stay in. With `--prefer_lang`, translated printings count as the card's own name.
 
 `--trim`: the engine builds the 1.25 mm bleed by smearing each image's outer pixel row outward.
 On borderless printings that row is a dark rim, so the bleed shows as a band. `--trim "Card"`

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
-from . import engine, layout, local, manifest, mirror, notes, printing, trim
+from . import engine, layout, local, manifest, mirror, notes, printing, printings, trim
 from .backlog import Backlog, Entry
 from .cache import ImageCache
 from .decks import FetchedDeck, fetch_deck, is_deck_url
@@ -44,6 +44,7 @@ class BuildOptions:
     fronts_only: bool = True
     duplex_dfc: bool = True
     fancy_art: bool = True
+    alt_names: bool = False  # --alt-names: rank printings with another name on the card (printings.py)
     include_basics: bool = False
     token_copies: int = 0
     tokens_only: bool = False
@@ -65,6 +66,7 @@ class BuildOptions:
             "fmt": self.fmt,
             "duplex_dfc": self.duplex_dfc,
             "fancy_art": self.fancy_art,
+            "alt_names": self.alt_names,
             "include_basics": self.include_basics,
             "token_copies": self.token_copies,
             "tokens_only": self.tokens_only,
@@ -216,6 +218,7 @@ def stage_images(opts: BuildOptions, deck: ResolvedDeck, cache: ImageCache | Non
     scryfall = engine.scryfall_module()
     if cache is not None:
         cache.install(scryfall)
+    printings.install(scryfall, alt_names=opts.alt_names, foreign_ok=printings.prefers_lang(opts.fetch_args))
     rec = manifest.Recorder()
     rec.install(scryfall)
     local.place_indices(scryfall, split.positions if split else [])
@@ -513,7 +516,8 @@ def run_build(opts: BuildOptions) -> BuildResult:
         split = local_split(opts, deck)
         log(
             f"dry run: {name} → {out} (paper {opts.paper}, {opts.layout} layout of {per_page(opts)} cards, "
-            f"format {deck.fmt}, fetch args {fetch_args_for(opts)})"
+            f"format {deck.fmt}, fetch args {fetch_args_for(opts)}"
+            f"{', alternate names allowed' if opts.alt_names else ''})"
         )
         if split:
             log_split(split, deck.fmt)

@@ -294,6 +294,7 @@ def rebuild(run_dir: Path, info) -> dict[str, Sheet]:
         fronts_only=info.fronts_only,
         duplex_dfc=o.get("duplex_dfc", True),
         fancy_art=o.get("fancy_art", True),
+        alt_names=o.get("alt_names", False),
         include_basics=o.get("include_basics", False),
         token_copies=o.get("token_copies", 0),
         tokens_only=o.get("tokens_only", False),
