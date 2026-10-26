@@ -177,3 +177,12 @@ def test_the_square_is_the_whole_run_of_its_width_nearest_where_it_should_be():
     assert sensing.square_in(row, levels) == 3.0
     x_row = [255, 146, 122, 255, 180, 172, 163, 159, 175, 172, 164, 167, 164, 154, 153, 148, 148]
     assert sensing.square_in(sensing.search_row(replace(FRAME, paper_at=(0.0, 0.0)), "x"), x_row) is None
+
+
+def test_a_middle_that_reads_paper_is_looked_for_not_passed_on_a_try_at_its_edge():
+    # 2026-10-26: re-tacked 2.6 mm further left, the square's middle read 134 and a quarter mm left
+    # of it 255, its edge; the sheet passed and every scan started below the square.
+    sheet = Sheet(at=(0.4, 3.0))
+    record = run(sheet)
+    (located,) = [f for e, f in record if e == "located"]
+    assert located["paper_at"] == pytest.approx((0.4, 3.0), abs=0.75) and cut_once(sheet)

@@ -274,7 +274,11 @@ def check_placement(s: Session, frame: Frame, log: SessionLog) -> Frame:
     if sensing.blank(paper):
         if c.reads(level, paper) is True:
             return frame
-        for k in (-1, 1):  # single readings inside the square swing: 238-255 on the deck box's sheet
+        # Single readings inside the square swing (238-255 on the deck box's sheet): a dim one gets a
+        # second try either side. A middle that reads like the paper beside it is off the square, and
+        # a try at its edge would pass a sheet lying 2.5 mm off (2026-10-26): that one is looked for.
+        dim = level is not None and paper is not None and level >= paper + sensing.CONTRAST
+        for k in (-1, 1) if dim else ():
             nl, reply = read_loaded(s, frame, c.nudged(k * sensing.NUDGE))
             log("placement", x=c.x + k * sensing.NUDGE, y=c.y, level=nl, reply=reply)
             if c.reads(nl, paper) is True:
