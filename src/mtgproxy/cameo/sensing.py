@@ -213,8 +213,8 @@ class Flatness:
         return (
             f"{'; '.join(dark)} (blank paper in the middle of the top margin {self._mid()}): the sheet "
             "doesn't lie flat there. On glossy film the sensor sees the film's angle, so a slight wave or "
-            "a lifted corner does this. Unload it and press the sheet down onto the mat on a table: a mat "
-            "stuck down on something soft (a chair cushion) bonds the sheet in waves too slight to see"
+            "a lifted corner does this. Unload it and press the sheet down onto the mat on a table: stuck "
+            "down with the mat on something soft (a chair cushion), it bonds in waves too slight to see"
         )
 
     def notes(self) -> list[str]:
