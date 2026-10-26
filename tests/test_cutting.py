@@ -112,6 +112,15 @@ def test_paper_at_refuses_anything_but_one_or_two_lengths_of_0_or_more(monkeypat
     assert result.exit_code == 1 and want in result.output
 
 
+def test_scored_lines_get_their_own_light_blade_unless_told_otherwise(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    o = cut_options(monkeypatch)
+    assert (o.scores, o.score_force, o.score_speed, o.score_depth) == (True, 15, None, 3)
+    o = cut_options(monkeypatch, "--score-force", "12", "--score-speed", "6", "--score-depth", "2")
+    assert (o.score_force, o.score_speed, o.score_depth) == (12, 6, 2)
+    assert not cut_options(monkeypatch, "--no-scores").scores
+
+
 def test_an_unknown_preset_is_refused(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(cli.app, ["cut", "--preset", "cardstock"])
@@ -326,6 +335,7 @@ def test_next_sheet_repeats_the_job_and_one_more_pass_cuts_once(monkeypatch, tmp
     assert [m for m, _ in asked] == [f"Sheet {n} done. Lift a corner:" for n in (1, 2, 2, 3)]
     assert jobs[0] == jobs[1] == jobs[3] and (jobs[0].passes, jobs[0].proof) == (3, False)
     assert (jobs[2].passes, jobs[2].proof, jobs[2].force) == (1, False, 20)
+    assert jobs[0].scores and not jobs[2].scores  # the extra pass leaves the scored folds alone
 
 
 def test_a_proofed_batch_proofs_its_first_sheet_only_unless_asked(monkeypatch, tmp_path):
@@ -441,3 +451,35 @@ def test_from_a_script_a_failure_just_fails(monkeypatch, tmp_path):
     result = CliRunner().invoke(cli.app, ["cut"])
     assert result.exit_code == 1 and len(jobs) == 1
     assert "error: registration marks not found" in result.output
+
+
+BOX_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="297mm" height="210mm" viewBox="0 0 297 210">'
+    '<path d="M20,20 L120,20 L120,120 L20,120 Z" fill="none" stroke="#ff0000"/>'
+    '<path d="M70,22 L70,118" fill="none" stroke="#00ff00"/>'
+    '<path d="M22,70 L118,70" fill="none" stroke="#00ff00"/>'
+    "</svg>"
+)
+
+
+@needs_engine
+def test_a_dry_run_with_scored_folds_says_how_they_are_cut(tmp_path, capsys):
+    svg = tmp_path / "box.svg"
+    svg.write_text(BOX_SVG)
+    o = cutting.CutOptions(
+        layout="4x2", reg_inset=5, svg=svg, dry_run=True, out_dir=tmp_path, force=33, speed=4, depth=6
+    )
+    assert cutting.run_cut(o) == 0
+    out = capsys.readouterr().out
+    assert "cut-proxies: 2 scored line(s) first: force 15 · speed 4 · depth 3 · one pass\n" in out
+    assert "scored 2 line(s) at force 15, speed 4, depth 3; cutting now" in out
+    sent = (tmp_path / "box.cmds").read_bytes().decode().split("\x03")
+    assert sent.count("TF3,1") == 1 and sent.count("TF6,1") == 2
+    assert cutting.run_cut(replace(o, scores=False, passes=1)) == 0
+    out = capsys.readouterr().out
+    assert (
+        "2 scored line(s) left uncut (--no-scores)" in out
+        and "TF3,1" not in (tmp_path / "box.cmds").read_text()
+    )
+    with pytest.raises(cutting.CutError, match="no lighter than the cut's"):
+        cutting.run_cut(replace(o, force=10, speed=5, depth=1))  # --preset paper's blade

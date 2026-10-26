@@ -73,12 +73,42 @@ def default_start(frame: Frame) -> tuple[float, float]:
     return frame.on_mat(top, max(LOWEST, frame.inset - 6))
 
 
-def plan(svg: Path, frame: Frame, blade: protocol.Blade, passes: int, bias: tuple[float, float]) -> Job:
-    lines = geometry.load_svg(svg)
-    if not lines:
+def plan(
+    svg: Path,
+    frame: Frame,
+    blade: protocol.Blade,
+    passes: int,
+    bias: tuple[float, float],
+    score_blade: protocol.Blade | None = None,
+) -> Job:
+    """The job an SVG describes. Its scores (``geometry.SCORE`` strokes) are scored once with
+    ``score_blade`` before anything is cut, or left out when it is None (a sheet scored already).
+    The cuts go ``passes`` times, each closed loop's laps in a row. A score blade at least as heavy as the cut's in both force
+    and depth is refused: its one pass would go as deep as a pass of the cut."""
+    cuts, scores = geometry.load_kinds(svg)
+    if score_blade is None:
+        scores = []
+    if not cuts and not scores:
         raise CutError(f"{svg} has no paths to cut")
-    ordered = geometry.order(lines, start=(frame.inset, frame.top))
-    job = Job(geometry.passes(ordered, passes), frame, blade, bias, shapes=ordered)
+    if scores and score_blade and score_blade.force >= blade.force and score_blade.depth >= blade.depth:
+        raise CutError(
+            f"the score blade (force {score_blade.force}, depth {score_blade.depth}) is no lighter than the "
+            f"cut's (force {blade.force}, depth {blade.depth}): the scored folds would cut like the outline. "
+            "Give --score-force or --score-depth below the cut's"
+        )
+    start = (frame.inset, frame.top)
+    ordered = geometry.order(cuts, start=start)
+    folds = geometry.order(scores, start=start)
+    lines = geometry.passes(ordered, passes)
+    job = Job(
+        lines,
+        frame,
+        blade,
+        bias,
+        shapes=[*folds, *ordered],
+        scores=geometry.passes(folds, 1),
+        score_blade=score_blade if scores else None,
+    )
     check_bounds(job)
     return job
 
@@ -198,7 +228,7 @@ def cut(
             verify = partial(held, s, job.frame, log, flat, slot) if check else None
             if confirm is None or prove(s, job, log, confirm, attempt, attempt + 1 < rounds, verify):
                 break
-        s.cut(job)
+        s.cut_job(job, low)
         if check:
             lost = held(s, job.frame, log, flat, slot)
             if lost:

@@ -37,6 +37,14 @@ PRESETS = {
     "paper": Preset(force=10, speed=5, depth=1, passes=1),
 }
 
+# The blade for an SVG's scored lines (cameo.geometry.SCORE): one pass before the cut, meant to mark
+# a laminated sheet's top film along each fold and leave the sheet whole. A guess, untested on the
+# machine: Jonas's 220 gsm deck box in an 80 µm pouch cuts through at force 33, depth 6, 3 passes,
+# and at force 20 even depth 9 stopped short in 3, so one pass at 15 should stay well inside it.
+# The speed is the cut's unless --score-speed says otherwise.
+SCORE_FORCE = 15
+SCORE_DEPTH = 3
+
 
 @dataclass
 class CutOptions:
@@ -71,6 +79,11 @@ class CutOptions:
     proof: bool = False  # proof cuts over the marks after the scan; the job waits for y / r / q
     scan_starts: list[tuple[float, float]] | None = None  # (top, left) mm; None = the driver's defaults
     paper_at: tuple[float, float] = (0.0, 0.0)  # (right, down) mm: the paper's corner from the grid's
+    # The SVG's scored lines (cameo.geometry.SCORE), cut first in one pass; False leaves them out.
+    scores: bool = True
+    score_force: int = SCORE_FORCE
+    score_speed: int | None = None  # None = the cut's speed
+    score_depth: int = SCORE_DEPTH
 
 
 def scan_starts(o: CutOptions, frame) -> tuple[list[tuple[float, float]], str]:
@@ -175,7 +188,11 @@ def run_cut(o: CutOptions) -> int:
     frame = frame_of(geom, o.reg_length, o.reg_thickness, o.paper_at)
     try:
         blade = protocol.Blade(o.force, o.speed, o.depth)
-        job = driver.plan(svg, frame, blade, o.passes, bias)
+        score = None
+        if o.scores:
+            speed = o.speed if o.score_speed is None else o.score_speed
+            score = protocol.Blade(o.score_force, speed, o.score_depth)
+        job = driver.plan(svg, frame, blade, o.passes, bias, score)
     except (ValueError, session.CutError) as e:
         raise CutError(str(e)) from e
     starts, origin = scan_starts(o, frame)
@@ -192,6 +209,18 @@ def run_cut(o: CutOptions) -> int:
         f"cut-proxies: force {o.force} · speed {o.speed} · depth {o.depth} · passes {o.passes} · "
         f"offset x={bias[0]:g}mm y={bias[1]:g}mm · via {via}"
     )
+    if job.scores:
+        b = job.score_blade
+        print(
+            f"cut-proxies: {len(job.scores)} scored line(s) first: force {b.force} · speed {b.speed} · "
+            f"depth {b.depth} · one pass"
+        )
+    elif not o.scores:
+        from .cameo import geometry
+
+        uncut = len(geometry.load_kinds(svg)[1])
+        if uncut:
+            print(f"cut-proxies: {uncut} scored line(s) left uncut (--no-scores)")
     if frame.paper_at != (0, 0):
         print(f"cut-proxies: the paper's top-left corner {frame.placed()}")
     top, left = starts[0]
@@ -237,6 +266,8 @@ def run_cut(o: CutOptions) -> int:
         print(f"cut-proxies: dry run OK — transcript {transcript}, session log {log_path}")
         return 0
     print(f"cut-proxies: done — {what} cut. Don't eject yet: lift a corner and check it's through.")
+    if job.scores:
+        print("cut-proxies: its folds are scored: another pass wants --no-scores, or they are scored again.")
     return 0
 
 
