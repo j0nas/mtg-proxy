@@ -103,6 +103,23 @@ def with_inset(geom: layout.Geometry, inset: float) -> layout.Geometry:
     )
 
 
+def frame_of(geom: layout.Geometry, reg_length: float | None = None, reg_thickness: float = 1.0):
+    """The printed marks as the machine is told them (``session.Frame``), from a layout's geometry;
+    ``reg_length`` None = the layout's leg length."""
+    from .cameo import session
+
+    return session.Frame(
+        page_w=geom.page_w_mm,
+        page_h=geom.page_h_mm,
+        inset=geom.reg_inset_mm,
+        width=geom.reg_x_mm,
+        height=geom.reg_y_mm,
+        length=geom.reg_length_mm if reg_length is None else reg_length,
+        thickness=reg_thickness,
+        inset_y=geom.reg_inset_y_mm,
+    )
+
+
 def ble_scan() -> int:
     from .cameo.transport import BleTransport
 
@@ -146,16 +163,7 @@ def run_cut(o: CutOptions) -> int:
     cfg_x, cfg_y = read_cut_offset()
     bias = (cfg_x if o.x_off is None else o.x_off, cfg_y if o.y_off is None else o.y_off)
 
-    frame = session.Frame(
-        page_w=geom.page_w_mm,
-        page_h=geom.page_h_mm,
-        inset=geom.reg_inset_mm,
-        width=geom.reg_x_mm,
-        height=geom.reg_y_mm,
-        length=geom.reg_length_mm if o.reg_length is None else o.reg_length,
-        thickness=o.reg_thickness,
-        inset_y=geom.reg_inset_y_mm,
-    )
+    frame = frame_of(geom, o.reg_length, o.reg_thickness)
     try:
         blade = protocol.Blade(o.force, o.speed, o.depth)
         job = driver.plan(svg, frame, blade, o.passes, bias)
