@@ -325,10 +325,10 @@ def test_diagnose_reads_the_square_then_legs_where_the_square_says_and_never_sca
 def test_a_sheet_that_doesnt_lie_flat_by_a_mark_is_never_scanned():
     # 2026-10-26: blank paper inside the top-right L read 255, like ink; mid-top read 171.
     t = checked([INK, PAPER, b"  171\x03", INK, PAPER])  # placement, above the square, mid-top, the L's
-    with pytest.raises(session.CutError, match="inside the top-right L reads 255, like black ink") as e:
+    with pytest.raises(session.CutError) as e:
         driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
-    assert "middle of the top margin reads 171" in str(e.value) and "Nothing was scanned or cut" in str(
-        e.value
+    assert str(e.value) == (
+        "sheet not detected as flat (blank paper inside the top-right L: 255, mid-top: 171): nothing scanned or cut"
     )
     out = sent(t).replace("\x1b\x05", "")
     assert "TB123" not in out and "TB122" not in out and out.count("TB63,4") == 5
@@ -351,7 +351,9 @@ def test_paper_that_barely_stands_out_warns_and_still_cuts():
     driver.cut(
         job(), t, session.SessionLog(None, echo=said.append), [driver.default_start(FRAME)], check=True
     )
-    assert any(line.startswith("check: blank paper inside the bottom-left L reads 232") for line in said)
+    assert any(
+        line.startswith("check: low contrast inside the bottom-left L (blank paper: 232") for line in said
+    )
     assert "D" in sent(t).replace("TB", "")
 
 
@@ -360,8 +362,6 @@ def test_ink_on_a_mark_whose_paper_read_like_ink_proves_nothing():
     t = checked(MARKS_OK)
     failed = driver.check_marks(session.Session(t, log()), FRAME, log(), flat)
     assert failed == [
-        "top-right, the vertical leg: reads ink, but blank paper beside it didn't read as paper before the "
-        "scan, so ink there proves nothing",
-        "top-right, the horizontal leg: reads ink, but blank paper beside it didn't read as paper before the "
-        "scan, so ink there proves nothing",
+        "top-right, the vertical leg: reads ink, but the paper beside it didn't read as paper",
+        "top-right, the horizontal leg: reads ink, but the paper beside it didn't read as paper",
     ]

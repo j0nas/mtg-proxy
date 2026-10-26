@@ -239,7 +239,7 @@ def check_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
     flat = read_flat(s, frame, log)
     stop = flat.stop()
     if stop:
-        raise CutError(f"{stop}. Nothing was scanned or cut")
+        raise CutError(f"{stop}: nothing scanned or cut")
     for line in flat.notes():
         log.say(f"check: {line}")
     return flat
@@ -295,10 +295,7 @@ def check_marks(s: Session, frame: Frame, log: SessionLog, flat: sensing.Flatnes
             unproven=unproven,
         )
         if unproven:
-            failed.append(
-                f"{c.mark}, {c.what}: reads ink, but blank paper beside it didn't read as paper before the "
-                "scan, so ink there proves nothing"
-            )
+            failed.append(f"{c.mark}, {c.what}: reads ink, but the paper beside it didn't read as paper")
         elif not ok:
             want = "ink" if c.ink else "paper"
             got = (

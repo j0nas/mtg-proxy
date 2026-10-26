@@ -333,9 +333,8 @@ elbow 3 mm from its corner, and the middle of the top margin for comparison. On 
 sensor reads the light the film mirrors back, so it sees the film's angle: where the sheet doesn't
 lie flat, blank paper reads 255 like black ink, the scan misreads or finds nothing, and an ink
 reading there proves nothing. When paper beside a mark reads like ink, the run stops before
-scanning and names the mark ("blank paper inside the top-right L reads 255, like black ink (blank
-paper in the middle of the top margin reads 171): the sheet doesn't lie flat there"): unload it
-and press the sheet down onto the mat on a table. That sheet had been stuck down on a mat lying on
+scanning: "sheet not detected as flat (blank paper inside the top-right L: 255, mid-top: 171)".
+Unload it and press the sheet down onto the mat on a table. That sheet had been stuck down on a mat lying on
 a chair cushion: the waves were too slight to see, and re-laying it on a table fixed it. Paper above 220 there is only a warning: the
 scan may misread, and the check after it catches a misread. Sheets that registered read 150-210
 beside their marks; a sheet that didn't lie flat along its top edge (2026-10-26) read 255 inside

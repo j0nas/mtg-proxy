@@ -194,35 +194,21 @@ class Flatness:
         return any(c.mark == mark and blank(level) for c, level in self.readings)
 
     def _mid(self) -> str:
-        return "gave no reading" if self.reference is None else f"reads {self.reference}"
+        return f"mid-top: {'no reading' if self.reference is None else self.reference}"
 
     def stop(self) -> str | None:
         """Why the scan can't be trusted, when blank paper beside a mark doesn't read as paper."""
-        dark = []
-        for c, level in self.readings:
-            if blank(level):
-                continue
-            if level is None:
-                dark.append(f"blank paper {c.what} gave no reading")
-            elif level >= INK:
-                dark.append(f"blank paper {c.what} reads {level}, like black ink")
-            else:
-                dark.append(f"blank paper {c.what} reads {level}, nearly as dark as black ink")
-        if not dark:
-            return None
-        return (
-            f"{'; '.join(dark)} (blank paper in the middle of the top margin {self._mid()}): the sheet "
-            "doesn't lie flat there. On glossy film the sensor sees the film's angle, so a slight wave or "
-            "a lifted corner does this. Unload it and press the sheet down onto the mat on a table: stuck "
-            "down with the mat on something soft (a chair cushion), it bonds in waves too slight to see"
-        )
+        dark = [
+            f"{c.what}: {'no reading' if level is None else level}"
+            for c, level in self.readings
+            if not blank(level)
+        ]
+        return f"sheet not detected as flat (blank paper {', '.join(dark)}, {self._mid()})" if dark else None
 
     def notes(self) -> list[str]:
         """Blank paper beside a mark that reads paper, but only just: the scan may misread there."""
         return [
-            f"blank paper {c.what} reads {level} (in the middle of the top margin it {self._mid()}; beside the "
-            "marks of sheets that registered, 150-210): little contrast with the mark, so the scan may "
-            "misread it, which the check after the scan catches"
+            f"low contrast {c.what} (blank paper: {level}, {self._mid()}): the scan may misread"
             for c, level in self.readings
             if blank(level) and level is not None and level > LOW_CONTRAST
         ]

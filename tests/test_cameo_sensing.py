@@ -177,26 +177,24 @@ def _flat(tl=180, tr=180, bl=180, mid=171):
 
 
 def test_blank_paper_that_reads_like_ink_says_the_sheet_doesnt_lie_flat_and_where():
-    stop = _flat(tr=255).stop()
-    assert stop.startswith(
-        "blank paper inside the top-right L reads 255, like black ink (blank paper in the middle of the top "
-        "margin reads 171): the sheet doesn't lie flat there."
-    )
-    assert "a slight wave or a lifted corner" in stop and "on a table" in stop
-    both = _flat(tl=248, tr=255).stop()
     assert (
-        "3 mm above the square reads 248, nearly as dark as black ink; blank paper inside the top-right L"
-        in both
+        _flat(tr=255).stop()
+        == "sheet not detected as flat (blank paper inside the top-right L: 255, mid-top: 171)"
+    )
+    assert _flat(tl=248, tr=255).stop() == (
+        "sheet not detected as flat (blank paper 3 mm above the square: 248, inside the top-right L: 255, mid-top: 171)"
     )
     assert _flat().stop() is None and _flat(tl=245).stop() is None  # 245 is still paper (PAPER)
-    assert "gave no reading" in _flat(bl=None).stop()
+    assert "inside the bottom-left L: no reading" in _flat(bl=None).stop()
 
 
 def test_paper_that_only_just_reads_as_paper_is_a_warning_not_a_stop():
     f = _flat(bl=232)
     assert f.stop() is None
     (note,) = f.notes()
-    assert note.startswith("blank paper inside the bottom-left L reads 232") and "may misread" in note
+    assert (
+        note == "low contrast inside the bottom-left L (blank paper: 232, mid-top: 171): the scan may misread"
+    )
     assert _flat(tl=210, tr=220, bl=150).notes() == []  # what sheets that registered read
 
 
@@ -209,8 +207,11 @@ def test_ink_on_a_mark_counts_only_where_the_paper_beside_it_read_as_paper():
 
 def test_diagnose_says_what_a_cut_would_stop_or_warn_with():
     lines = sensing.verdict([], FRAME, _flat(tr=255, bl=232))
-    assert lines[0].startswith("a cut stops here: blank paper inside the top-right L reads 255")
-    assert any(line.startswith("blank paper inside the bottom-left L reads 232") for line in lines)
+    assert (
+        lines[0]
+        == "a cut stops here: sheet not detected as flat (blank paper inside the top-right L: 255, mid-top: 171)"
+    )
+    assert any(line.startswith("low contrast inside the bottom-left L (blank paper: 232") for line in lines)
     assert lines[-1] == (
         "blank paper beside the marks: 3 mm above the square 180, inside the top-right L 255, "
         "inside the bottom-left L 232; in the middle of the top margin 171"
