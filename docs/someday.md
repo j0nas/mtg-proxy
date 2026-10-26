@@ -31,11 +31,7 @@ These came out of a day of cutting one box. Jonas wants them built.
   the window for a scan start is about 1 mm: low enough that the measuring pass starts on paper,
   high enough to cross the square. A sheet that sits 0.5 mm off misses it. The proxy sheets' square
   is 9 mm down.
-- **Our own registration, as a fallback.** Fit the frame from TB63 readings across each mark's
-  edges (more marks than three, with a residual check) and cut through our own transform, for
-  sheets the firmware's scan can't read.
-- **The cutter stands fully on its shelf.** With the mat overhanging the shelf's edge, the sheet
-  tilted as it fed, and scans missed or registered off. A note for the README's placement section.
+
 
 Cut settings found that day for Epson Premium Glossy 220 gsm in an 80 µm pouch: force 33, speed 4,
 depth 6, 3 passes cut through. At force 20, depths 7, 8 and 9 all cut equally deep and none went

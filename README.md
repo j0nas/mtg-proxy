@@ -408,6 +408,10 @@ plus the Bluetooth movement events.
 Placement: sheet top-left on the mat grid, aligned to the paper edge, not the laminate edge.
 Stick it down with the mat on a table or another hard, flat surface: on a soft one the mat bends
 under your hand and the sheet bonds in waves the sensor reads as ink.
+The cutter stands fully on its table or shelf, and the mat runs level in and out of it: a mat that
+hangs off the front edge or droops tilts the sheet as it feeds. On 2026-10-26, with the cutter
+pulled forward over a shelf's edge, scans missed the square and a re-tacked sheet registered 3 mm
+off; with the cutter back on the shelf and its front propped level, it registered first time.
 Standard 12x12" mat against the left notch, pinch rollers on the mat, lid closed, room neither
 very bright nor very dark. A sheet that creeps on a worn mat skews long jobs: use a sticky mat
 or tape the edges. If the scan fails nothing is cut. Glare from glossy laminate is a known cause
