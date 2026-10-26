@@ -129,3 +129,15 @@ def test_the_verdict_names_placement_turn_and_size():
     assert lines[3:5] == ["square to top-right L: 203.00 mm across (printed 203)",
                           "square to bottom-left L: 279.00 mm down (printed 279)"]  # fmt: skip
     assert len(lines) == 5  # sharp, full-ink marks on ordinary paper: nothing to warn about
+
+
+def test_a_leg_that_barely_stands_out_is_called_faint_not_missing():
+    # The top-right vertical leg of the second sideboard sheet on 2026-10-26: placed right, but the
+    # paper beside it read nearly as dark, and every scan of that sheet misread.
+    row = sensing.leg_rows(FRAME, dx=0.25)[0]
+    seen = sensing.see(row, [231, 232, 255, 255, 255, 252, 255, 247, 243])
+    assert seen.shift is None and seen.faint
+    assert any(
+        "barely stands out (darkest 255, everything around it 231-255)" in line
+        for line in sensing.verdict([seen], FRAME)
+    )

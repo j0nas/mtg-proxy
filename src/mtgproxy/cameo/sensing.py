@@ -202,6 +202,7 @@ class Seen:
     paper: int | None
     paper_range: tuple[int, int] | None
     shift: float | None
+    faint: bool = False  # nothing stood out: the paper read nearly as dark as the darkest reading
 
 
 def see(row: Row, levels: list[int | None]) -> Seen:
@@ -218,7 +219,7 @@ def see(row: Row, levels: list[int | None]) -> Seen:
     right = sorted(v for _, v in vals[-3:])[1]
     if peak - min(left, right) < CONTRAST:  # nothing in this row stands out: no mark
         ranked = sorted(v for _, v in vals)
-        return Seen(row, tuple(levels), peak, ranked[len(ranked) // 2], (ranked[0], ranked[-1]), None)
+        return Seen(row, tuple(levels), peak, ranked[len(ranked) // 2], (ranked[0], ranked[-1]), None, True)
     lo = hi = k
     while lo > 0 and vals[lo - 1][1] >= (peak + left) / 2:
         lo -= 1
@@ -272,7 +273,13 @@ def verdict(seen: list[Seen], frame: Frame) -> list[str]:
         )
     for s in seen:
         name = f"{s.row.mark}, {s.row.what}"
-        if s.shift is None:
+        if s.shift is None and s.faint and s.paper_range is not None:
+            lo, hi = s.paper_range
+            out.append(
+                f"{name}: barely stands out (darkest {s.peak}, everything around it {lo}-{hi}): "
+                "hard for the scan to find; look for haze or smudges on the laminate there"
+            )
+        elif s.shift is None:
             out.append(f"{name}: no clear mark within the row: it may sit further off, or not read at all")
         elif s.peak is not None and s.peak < INK:
             out.append(
