@@ -83,15 +83,14 @@ def test_the_area_search_can_latch_onto_a_card(sheet_3x3):
 
 
 def test_a_vector_pdf_renders_the_same_way(tmp_path):
-    """The frame's marks drawn as vectors (as the deck box's PDF is) walk clean, with no print near."""
-    import matplotlib
-
-    matplotlib.use("Agg")
-    from matplotlib import pyplot as plt
+    """The frame's marks drawn as vectors (as the deck box's PDF is) walk clean, with no print near.
+    A Figure of its own, without pyplot: switching pyplot's backend moves the engine's marks by a
+    pixel or two in every later test that draws them."""
+    from matplotlib.figure import Figure
     from matplotlib.patches import Rectangle
 
     f = frame_of("3x3")
-    fig = plt.figure(figsize=(f.page_w / 25.4, f.page_h / 25.4))
+    fig = Figure(figsize=(f.page_w / 25.4, f.page_h / 25.4))
     ax = fig.add_axes((0, 0, 1, 1))
     ax.set_xlim(0, f.page_w)
     ax.set_ylim(f.page_h, 0)
@@ -109,22 +108,16 @@ def test_a_vector_pdf_renders_the_same_way(tmp_path):
         ax.add_patch(Rectangle((x, y), w, h, color="black", linewidth=0))
     pdf = tmp_path / "vector.pdf"
     fig.savefig(pdf)
-    plt.close(fig)
     report = simulate.run(pdf, f)
     assert report.ok, report.lines()
     assert all(p.clearance is None for p in report.passes)
 
 
 def test_a_page_of_the_wrong_size_is_refused(tmp_path):
-    import matplotlib
+    from matplotlib.figure import Figure
 
-    matplotlib.use("Agg")
-    from matplotlib import pyplot as plt
-
-    fig = plt.figure(figsize=(5, 5))
     pdf = tmp_path / "small.pdf"
-    fig.savefig(pdf)
-    plt.close(fig)
+    Figure(figsize=(5, 5)).savefig(pdf)
     with pytest.raises(simulate.SimulationError, match="the layout's 210 x 297"):
         simulate.run(pdf, frame_of("3x3"))
     with pytest.raises(simulate.SimulationError, match="page 2"):

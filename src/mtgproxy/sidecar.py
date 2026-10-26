@@ -26,6 +26,8 @@ class RunInfo:
     # Always 3 now; run.json files from before 3-mark only may say 4, and cut refuses those sheets.
     registration: str = "3"
     layout: str = "4x2"  # 4x2 | 3x3 (layout.py); run.json files from before layouts are 4x2
+    # The sheets carry the layout's proof targets (layout.proof_targets_mm); sheets from before them don't.
+    proof_targets: bool = False
     pdf: str | None = None
     duplex_pdf: str | None = None
     dfc_count: int = 0

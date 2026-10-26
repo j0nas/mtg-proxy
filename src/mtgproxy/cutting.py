@@ -76,7 +76,14 @@ class CutOptions:
     sense: bool = False  # scan, then read the marks back with the sensor; cut nothing (cameo.sensing)
     check: bool = True  # read the marks with the sensor before and after the scan; stop on a misread
     diagnose: bool = False  # read across every mark before any scan and say what they show; cut nothing
-    proof: bool = False  # proof cuts over the marks after the scan; the job waits for y / r / q
+    proof: bool = False  # a proof cut around a printed target after the scan; the job waits for y / r / q
+    # The sheet's proof targets' centres (page mm, y down) and side: None = the layout's, which an
+    # --svg sheet doesn't have. The first proof_from are cut already: a run on this sheet that cuts
+    # one moves it on, so a retry takes the next (cameo.proof).
+    proof_targets: list[tuple[float, float]] | None = None
+    proof_target_size: float | None = None
+    proof_from: int = 0
+    proof_blade: tuple[int, int, int] | None = None  # (force, speed, depth); None = cameo.proof.BLADE
     scan_starts: list[tuple[float, float]] | None = None  # (top, left) mm; None = the driver's defaults
     paper_at: tuple[float, float] = (0.0, 0.0)  # (right, down) mm: the paper's corner from the grid's
     # The SVG's scored lines (cameo.geometry.SCORE), cut first in one pass; False leaves them out.
@@ -125,9 +132,11 @@ def frame_of(
     reg_length: float | None = None,
     reg_thickness: float = 1.0,
     paper_at: tuple[float, float] = (0.0, 0.0),
+    targets: tuple = (),
 ):
     """The printed marks as the machine is told them (``session.Frame``), from a layout's geometry;
-    ``reg_length`` None = the layout's leg length, ``paper_at`` where the paper sits on the mat."""
+    ``reg_length`` None = the layout's leg length, ``paper_at`` where the paper sits on the mat,
+    ``targets`` the proof targets the rounds can take (``sheet_targets``)."""
     from .cameo import session
 
     return session.Frame(
@@ -140,7 +149,39 @@ def frame_of(
         thickness=reg_thickness,
         inset_y=geom.reg_inset_y_mm,
         paper_at=paper_at,
+        targets=targets,
     )
+
+
+def sheet_targets(o: CutOptions, geom: layout.Geometry) -> tuple:
+    """The proof targets printed on the sheet, numbered in the order the rounds take them, less the
+    first ``proof_from``: ``--proof-target``'s, else the layout's (layouts.json), which an --svg sheet
+    doesn't have, since the engine didn't print it."""
+    from .cameo import proof
+
+    if o.proof_targets is not None:
+        centres, size = o.proof_targets, o.proof_target_size or proof.SIZE
+    elif o.svg is None:
+        centres, size = geom.proof_targets, o.proof_target_size or geom.proof_target_mm or proof.SIZE
+    else:
+        centres, size = (), proof.SIZE
+    return proof.targets(centres, size)[o.proof_from :]
+
+
+def no_targets(o: CutOptions, geom: layout.Geometry) -> str:
+    """Why --proof has no target to cut on this sheet, for the message."""
+    printed = len(o.proof_targets if o.proof_targets is not None else () if o.svg else geom.proof_targets)
+    if printed:
+        return (
+            f"all {printed} proof targets on this sheet are cut already (--proof-from {o.proof_from}): "
+            "cut it without --proof; the sensor check still reads every mark"
+        )
+    if o.svg is not None:
+        return (
+            f"{o.svg.name} has no proof targets: give each one printed on the sheet as --proof-target X,Y "
+            "(its centre, page mm from the top-left corner), or cut without --proof"
+        )
+    return f"the {o.layout} layout on {o.paper} prints no proof targets: cut without --proof"
 
 
 def ble_scan() -> int:
@@ -186,7 +227,10 @@ def run_cut(o: CutOptions) -> int:
     cfg_x, cfg_y = read_cut_offset()
     bias = (cfg_x if o.x_off is None else o.x_off, cfg_y if o.y_off is None else o.y_off)
 
-    frame = frame_of(geom, o.reg_length, o.reg_thickness, o.paper_at)
+    targets = sheet_targets(o, geom) if o.proof else ()
+    if o.proof and not targets and not (o.probe or o.sense or o.diagnose):
+        raise CutError(no_targets(o, geom))
+    frame = frame_of(geom, o.reg_length, o.reg_thickness, o.paper_at, targets)
     try:
         blade = protocol.Blade(o.force, o.speed, o.depth)
         score = None
@@ -225,6 +269,14 @@ def run_cut(o: CutOptions) -> int:
             print(f"cut-proxies: {uncut} scored line(s) left uncut (--no-scores)")
     if frame.paper_at != (0, 0):
         print(f"cut-proxies: the paper's top-left corner {frame.placed()}")
+    proof_blade = proof_blade_of(o)
+    if o.proof and targets:
+        b, first = proof_blade, targets[0]
+        print(
+            f"cut-proxies: proof: {len(targets)} target(s) left on the sheet, {first.size:g} mm, the first "
+            f"at {first.x:g}, {first.y:g} mm; each cut one pass at force {b.force} · speed {b.speed} · "
+            f"depth {b.depth}"
+        )
     top, left = starts[0]
     more = f"; a miss tries {len(starts) - 1} more around it" if len(starts) > 1 else ""
     print(f"cut-proxies: scan starts at ({top:g}, {left:g}) mm, {origin}{more}")
@@ -255,9 +307,24 @@ def run_cut(o: CutOptions) -> int:
             confirm = dry_confirm if o.dry_run else ask_operator
         if o.check and o.dry_run:
             print("cut-proxies: dry run: the mark check is skipped (it needs the machine's sensor)")
-        result = driver.cut(job, t, log, starts, confirm, check=o.check and not o.dry_run)
+        start_from = o.proof_from
+
+        def cut_target(target) -> None:  # a retry on this sheet takes the next one
+            o.proof_from = target.number
+
+        result = driver.cut(
+            job,
+            t,
+            log,
+            starts,
+            confirm,
+            check=o.check and not o.dry_run,
+            proof_blade=proof_blade,
+            on_target=cut_target,
+        )
     except (session.CutError, TransportError) as e:
-        raise CutError(f"{e}\ncut-proxies: session log: {log_path}") from e
+        note = "" if o.proof_from == start_from else proof_note(o)
+        raise CutError(f"{e}\ncut-proxies: session log: {log_path}{note}") from e
     finally:
         log.close()
     x0, y0, x1, y1 = result.extent
@@ -271,6 +338,20 @@ def run_cut(o: CutOptions) -> int:
     if job.scores:
         print("cut-proxies: its folds are scored: another pass wants --no-scores, or they are scored again.")
     return 0
+
+
+def proof_blade_of(o: CutOptions):
+    """The proof cut's blade: ``--proof-blade``'s, else cameo.proof.BLADE."""
+    from .cameo import proof, protocol
+
+    return proof.BLADE if o.proof_blade is None else protocol.Blade(*o.proof_blade)
+
+
+def proof_note(o: CutOptions) -> str:
+    """How far this sheet's proof targets are cut, for a rerun on it."""
+    n = o.proof_from
+    which = "proof target 1 on this sheet is" if n == 1 else f"proof targets 1-{n} on this sheet are"
+    return f"\ncut-proxies: {which} cut: a rerun on it takes --proof-from {n}"
 
 
 def wait_for_next_sheet(o: CutOptions, interrupted) -> bool:
@@ -291,34 +372,31 @@ def wait_for_next_sheet(o: CutOptions, interrupted) -> bool:
 
 
 PROOF_HELP = """\
-cut-proxies: proof cuts are down, on the marks: the square's outline, along the edge of the
-black, and each L scored along its centre lines, with a gap across each leg where the sensor
-reads it. Lift the lid and look at every mark. Registered right, the outline traces the square's
-edge and every L cut runs down the middle of the black and ends where the leg ends. A misread
-mark's cuts sit beside it: how far beside is the misread.
-    y  every cut on its mark: cut the job
-    r  a cut is off its mark: scan the marks again (the new cuts go on the same marks)
+cut-proxies: the proof cut is down: the blade has traced the edge of the small black square named
+above, one of the proof targets printed with the marks. Lift the lid and look at it. Registered
+right, the cut runs along the edge of the black all round. Registered off, white shows between
+the black and the cut on one side, and the cut runs inside the black on the other: the width of
+the white is how far off, its side which way.
+    y  the cut on the square's edge all round: cut the job
+    r  white between the black and the cut: scan the marks again (the next round cuts the next square)
     q  stop: nothing more is cut, the head goes home"""
 
 
-def ask_operator(attempt: int, rescan: bool) -> str:
-    """Asked on the terminal between the proof cuts and the cut (cameo.driver.prove)."""
-    if attempt == 0:
+def ask_operator(round_: int, rescan: bool) -> str:
+    """Asked on the terminal between the proof cut and the cut (cameo.driver.prove)."""
+    if round_ == 0:
         print(PROOF_HELP)
     else:
-        print(
-            f"cut-proxies: round {attempt + 1}'s cuts went on the same marks: a cut beside a mark that "
-            "wasn't there before is this round's."
-        )
+        print(f"cut-proxies: round {round_ + 1}'s cut went on the next square: look at that one.")
     choices = "y/r/q" if rescan else "y/q"
     while True:
-        a = input(f"cut-proxies: every cut on its mark? [{choices}] ").strip().lower()[:1]
+        a = input(f"cut-proxies: the cut on the square's edge all round? [{choices}] ").strip().lower()[:1]
         if a in ("y", "q") or (rescan and a == "r"):
             return a
 
 
-def dry_confirm(attempt: int, rescan: bool) -> str:
-    print("cut-proxies: dry run: proof cuts answered y")
+def dry_confirm(round_: int, rescan: bool) -> str:
+    print("cut-proxies: dry run: the proof cut answered y")
     return "y"
 
 

@@ -530,16 +530,16 @@ def test_a_machine_that_loses_its_place_cutting_says_so_before_the_sheet_is_unlo
     assert "D" in sent(t).replace("TB", "")
 
 
-def test_a_machine_that_loses_its_place_on_the_proof_cuts_never_cuts_the_job():
-    t = checked([INK, *FLAT, *MARKS_OK, PAPER])  # after the proof cuts the square reads paper
+def test_a_machine_that_loses_its_place_on_the_proof_cut_never_cuts_the_job():
+    t = checked([INK, *FLAT, *MARKS_OK, PAPER])  # after the proof cut the square reads paper
     asked = []
-    with pytest.raises(session.CutError, match="after the proof cuts the marks no longer read"):
+    targeted = replace(job(), frame=replace(FRAME, targets=proof.targets([(100, 80), (120, 80)])))
+    with pytest.raises(session.CutError, match="after the proof cut the marks no longer read"):
         driver.cut(
-            job(), t, log(), [driver.default_start(FRAME)], lambda *a: asked.append(a) or "y", check=True
+            targeted, t, log(), [driver.default_start(FRAME)], lambda *a: asked.append(a) or "y", check=True
         )
     assert not asked  # stopped before anyone was asked
-    cuts = sent(t).replace("TB", "").count("D")
-    assert 0 < cuts <= len(list(proof.cuts(FRAME)))  # the proof cuts and nothing more
+    assert sent(t).replace("TB", "").count("D") == 1  # the target's outline and nothing more
 
 
 def test_a_pause_on_the_machine_waits_for_the_operator_and_the_cut_carries_on():
@@ -682,3 +682,56 @@ def test_a_machine_that_loses_its_place_changing_blades_never_cuts_the_outline()
         session.cut_commands(replace(scored_job(), lines=ls))[0] for ls in (scored_job().scores, job().lines)
     )
     assert fold in out and square not in out[out.index(fold) :]  # scored, not cut
+
+
+def steps(out: str, marks: dict[str, str]) -> list[str]:
+    """What a transcript does, step by step: each blade setup by its depth, each first move in
+    ``marks`` by its name, a run of mark readings as how many there were (status polls left out)."""
+    named: list[str] = []
+    for c in out.replace("\x1b\x05", "").split("\x03"):
+        if c.startswith("TB123,"):
+            step = "scan"
+        elif c.startswith("TF") and c.endswith(",1"):
+            step = f"blade at depth {c[2:-2]}"
+        elif c == "TB63,4":
+            n = int(named.pop().split()[0]) if named and named[-1].endswith(" readings") else 0
+            step = f"{n + 1} readings"
+        else:
+            step = marks.get(c)
+        if step:
+            named.append(step)
+    return named
+
+
+def test_a_proofed_scored_job_proves_then_scores_then_cuts_reading_the_marks_after_each():
+    targeted = replace(scored_job(), frame=replace(FRAME, targets=proof.targets([(100, 80), (120, 80)])))
+    t, asked = checked([INK, *FLAT, *MARKS_OK]), []
+    driver.cut(
+        targeted, t, log(), [driver.default_start(FRAME)], lambda *a: asked.append(a) or "y", check=True
+    )
+    first = {
+        session.cut_commands(replace(targeted, lines=ls))[0]: name
+        for name, ls in (
+            ("proof cut", [targeted.frame.targets[0].outline()]),
+            ("scores", targeted.scores),
+            ("cuts", targeted.lines),
+        )
+    }
+    assert asked == [(0, True)]
+    assert steps(sent(t), {**first, protocol.move(0, FRAME.width / 2): "park"}) == [
+        "5 readings",  # the square's placement and blank paper beside the marks
+        "scan",
+        "blade at depth 5",
+        "9 readings",  # the check: every mark where the scan put it
+        "blade at depth 2",  # proof.BLADE
+        "proof cut",
+        "blade at depth 5",  # the job's own blade again
+        "5 readings",  # held: the marks' ink after the proof cut
+        "park",  # then the operator is asked
+        "blade at depth 3",  # the score blade
+        "scores",
+        "blade at depth 5",
+        "5 readings",  # kept_place
+        "cuts",
+        "5 readings",  # held after the job
+    ]

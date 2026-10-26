@@ -169,6 +169,19 @@ a laminated sheet, three scans out of three; at 7 mm its search began on the bot
 corner and once read that (2026-10-24). Now every pass stays 1.2–2.6 mm clear of the card print
 (simulated on a real sheet), and four laminated sheets registered and cut in a row (2026-10-25).
 
+Both A4 layouts also print four proof targets, the 3 mm black squares `cut-proxies --proof` traces
+(see Cutting), in the strip between the top marks' row and the cards: 11.75 mm down at x 120, 142,
+164 and 186 mm on a 3x3 sheet, 12.9 mm down at x 165, 190, 215 and 240 mm on a 4x2 one
+(layouts.json `proof_targets`, which the engine prints from and `cut-proxies` cuts from). On a 3x3
+sheet that strip runs from the marks' line 9 mm down to the cards' print at 14.5 mm (the print
+bleeds 0.7 mm past the cards' cut), and the bottom one, from 282.4 mm to 288, is the same height;
+the side strips are 5 mm wide and the gaps between cards 1.3 mm, filled with the cards' bleed. The
+top strip keeps the targets inside the mark frame and between the two marks the scan reads
+first, where the registration is best. They leave 1.25 mm of paper above and below, keep 6 mm and
+more from every mark, and stay out of the square's search area, the readings of the sensor check
+and the place a third of the way along where the firmware reads its light for a retry. Layouts on
+other paper and card sizes have none.
+
 Check a new mark layout offline before printing it. `mtg-proxy simulate sheet.pdf` (inside a run
 folder, just `mtg-proxy simulate`) walks the scan's passes over the page's print: the area search,
 the two passes that measure the square, and two across each L. It takes `--layout`, `--reg-inset`,
@@ -286,7 +299,7 @@ cut-proxies --probe        # scans the marks, logs what the machine reports, cut
 cut-proxies --sense        # scans, then reads each mark back with the sensor (TB63), cuts nothing
 cut-proxies --no-check     # skips the sensor check of the marks before and after the scan
 cut-proxies --diagnose     # before any scan: where each mark sits and how it reads; cuts nothing
-cut-proxies --proof        # scores the square and each L after the scan; y cuts, r rescans, q stops
+cut-proxies --proof        # traces a printed proof target after the scan; y cuts, r rescans, q stops
 cut-proxies --layout 4x2   # a 4x2 sheet without its run.json (a plain sheet is 3x3)
 cut-proxies --paper-at 3   # the paper's corner 3 mm right of and below the grid's (see Placement)
 cut-proxies --svg job.svg --layout 4x2 --reg-inset 5   # any SVG the size of that layout's page
@@ -350,7 +363,7 @@ The job follows Silhouette Studio's own conversation with this machine, recorded
 - `session`: preflight (refuses without a loaded mat), mark description and scan, blade setup,
   the scores with their own blade, and the cut in ≤1 KB pieces with a status wait between them.
   It always returns to the origin and never moves it.
-- `proof`: the proof cuts over the marks, and whether one would touch the job.
+- `proof`: the proof targets, the edge a proof cut traces, and whether one would touch the job.
 
 Registration:
 
@@ -424,16 +437,32 @@ TB123 and registered first time as TB122. When all three disagree, nothing is cu
 `cut-proxies --diagnose` shows why: before any scan it reads across the square and each leg in the
 loaded mat's frame (about 4 minutes), and says where the sheet sits, how it is turned and
 stretched, which marks never read as full ink or sit on unusually bright paper, and what the blank
-paper beside each mark reads, in the words a cut would stop or warn with. A misread can
-also be caught by eye: `--proof` scores the square's outline, along the edge of the black, and each L
-along its centre lines after the scan, then waits. Lift the lid: registered right, the outline
-traces the square's edge and every L cut runs down the middle of the black and ends where the leg
-ends; a misread mark's cuts sit beside it, by the size of the misread. Each leg is left uncut for 1.5 mm either side of where the sensor crosses it, so a
-rescan reads clean ink: what stays is an L at each corner and a piece at each leg's end. `y`
-cuts the job, `r` goes home and scans again (the new cuts go on the same marks; up to three
-rounds), `q` stops with nothing more cut. Every run writes its own
-`output/cut/<name>.<date>-<time>.session.jsonl`: each byte sent and received, with timestamps,
-plus the Bluetooth movement events.
+paper beside each mark reads, in the words a cut would stop or warn with.
+
+A misread can also be caught by eye. With `--proof` the blade traces the edge of one proof target
+after the scan, in one light pass at force 10, speed 5, depth 2 (`--proof-blade FORCE,SPEED,DEPTH`
+changes it), then sets the job's own blade again and waits. The targets are 3 mm filled black
+squares printed with the marks, inside the mark frame and clear of the marks and the job: four on
+every sheet the engine prints (see Sheet layouts), or one `--proof-target X,Y` for each on a sheet
+it didn't, such as the paper deck box (their centres in page mm, `--proof-target-size` if they
+aren't 3 mm). Lift the lid and look at the target. Registered right, the cut runs along the edge of
+the black all round. Registered off, white shows between the black and the cut on one side and the
+cut runs inside the black on the other; the width of the white is the error, its side the
+direction. `y` cuts the job, `r` goes home and scans again and the next round traces the next
+target (up to three rounds), `q` stops with nothing more cut. A target whose outline would touch the
+job is left out. Force 10 at depth 2 is a first guess, untried on the machine: meant to score the
+laminate's film and stay far from cutting through, and the first proof on a laminated sheet shows
+whether its groove is easy to see.
+
+Each target is cut once, so the marks stay as printed and no round cuts on an earlier round's
+groove. Until 2026-10-26 the proof cuts went on the marks themselves, at the job's own blade, and
+after three rounds on one deck box sheet the grooves on and around the square kept the firmware's
+area search from finding it. A retry from the menu after a stop goes on with the next target by
+itself; a later run on the same sheet takes `--proof-from N`, N being the targets cut so far, which
+a run that stopped after a proof cut prints. A sheet built before the targets existed is refused
+with `--proof` (its `run.json` says so): rebuild and reprint it, or cut it without. Every run writes
+its own `output/cut/<name>.<date>-<time>.session.jsonl`: each byte sent and received, with
+timestamps, plus the Bluetooth movement events.
 
 Placement: sheet top-left on the mat grid, aligned to the paper edge, not the laminate edge.
 Stick it down with the mat on a table or another hard, flat surface: on a soft one the mat bends

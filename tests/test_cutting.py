@@ -2,12 +2,13 @@
 
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from conftest import needs_engine
-from mtgproxy import cli, cutting
+from mtgproxy import cli, cutting, layout
 
 
 def geometry():
@@ -134,8 +135,120 @@ def test_an_unknown_preset_is_refused(monkeypatch, tmp_path):
     assert result.exit_code == 1 and "--preset must be one of laminate, paper" in result.output
 
 
+# --- proof targets ------------------------------------------------------------------
+def test_the_proof_flags_name_the_targets_where_to_start_and_the_blade(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    o = cut_options(
+        monkeypatch,
+        *("--proof", "--proof-target", "281.5,179.5", "--proof-target", "288.5, 179.5"),
+        *("--proof-target-size", "3", "--proof-from", "1", "--proof-blade", "8,4,1"),
+    )
+    assert o.proof_targets == [(281.5, 179.5), (288.5, 179.5)] and o.proof_target_size == 3
+    assert (o.proof_from, o.proof_blade) == (1, (8, 4, 1))
+    o = cut_options(monkeypatch, "--proof")
+    assert (o.proof_targets, o.proof_target_size, o.proof_from, o.proof_blade) == (None, None, 0, None)
+
+
+@pytest.mark.parametrize(
+    ("flag", "value", "want"),
+    [
+        ("--proof-target", "3", "--proof-target wants X,Y in mm"),
+        ("--proof-target", "0,5", "--proof-target wants X,Y in mm"),
+        ("--proof-target", "5,x", "--proof-target wants X,Y in mm"),
+        ("--proof-blade", "10,5", "--proof-blade wants FORCE,SPEED,DEPTH"),
+        ("--proof-blade", "50,5,2", "--proof-blade wants FORCE,SPEED,DEPTH"),
+    ],
+)
+def test_proof_flags_that_cant_be_cut_are_refused(monkeypatch, tmp_path, flag, value, want):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cutting, "run_cut", lambda o: pytest.fail(f"cut with {flag} {value!r}"))
+    result = CliRunner().invoke(cli.app, ["cut", "--proof", f"{flag}={value}"])
+    assert result.exit_code == 1 and want in result.output
+
+
+@needs_engine
+def test_a_proxy_sheets_targets_are_its_layouts_and_an_svg_sheet_has_only_its_flags():
+    g = layout.build_cut_svg("a4", "standard", None, "3x3")
+    sheet = cutting.sheet_targets(cutting.CutOptions(proof=True), g)
+    assert [(t.x, t.y, t.size, t.number) for t in sheet] == [
+        (120, 11.75, 3, 1),
+        (142, 11.75, 3, 2),
+        (164, 11.75, 3, 3),
+        (186, 11.75, 3, 4),
+    ]
+    assert [t.number for t in cutting.sheet_targets(cutting.CutOptions(proof=True, proof_from=3), g)] == [4]
+    g4 = layout.build_cut_svg("a4", "standard", None, "4x2")
+    box = cutting.CutOptions(svg=Path("box.svg"), layout="4x2", proof=True)
+    assert cutting.sheet_targets(box, g4) == ()  # the engine didn't print it: its layout's aren't there
+    assert "box.svg has no proof targets: give each one" in cutting.no_targets(box, g4)
+    flagged = replace(
+        box, proof_targets=[(281.5, 179.5), (288.5, 179.5)], proof_target_size=3.5, proof_from=1
+    )
+    assert [(t.x, t.y, t.size, t.number) for t in cutting.sheet_targets(flagged, g4)] == [
+        (288.5, 179.5, 3.5, 2)
+    ]
+    used = cutting.no_targets(replace(flagged, proof_from=2), g4)
+    assert "all 2 proof targets on this sheet are cut already (--proof-from 2)" in used
+
+
+@needs_engine
+def test_a_stop_at_the_proof_cut_says_how_far_the_targets_are_cut_and_a_retry_takes_the_next(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(cutting, "dry_confirm", lambda round_, rescan: "q")
+    o = cutting.CutOptions(proof=True, dry_run=True, out_dir=tmp_path)
+    with pytest.raises(
+        cutting.CutError, match="proof target 1 on this sheet is cut: a rerun on it takes --proof-from 1"
+    ):
+        cutting.run_cut(o)
+    assert o.proof_from == 1
+    monkeypatch.setattr(cutting, "dry_confirm", lambda round_, rescan: "y")
+    assert cutting.run_cut(o) == 0 and o.proof_from == 2  # the retry traced target 2
+    transcript = (tmp_path / "a4-standard-3x3.cmds").read_text("latin1")
+    assert "FX10,1\x03TJ0\x03!5,1" in transcript  # with proof.BLADE
+
+
+@needs_engine
+def test_proof_with_every_target_cut_already_stops_before_connecting(monkeypatch, tmp_path):
+    o = cutting.CutOptions(proof=True, dry_run=True, out_dir=tmp_path, proof_from=4)
+    monkeypatch.setattr(cutting, "frame_of", lambda *a, **k: pytest.fail("planned a cut"))
+    with pytest.raises(cutting.CutError, match="all 4 proof targets on this sheet are cut already"):
+        cutting.run_cut(o)
+
+
+def test_a_sheet_printed_before_proof_targets_is_refused_for_proof(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    write_run(tmp_path, "olddeck", paper="a4", layout="3x3", cards=9, proof_targets=False)
+    monkeypatch.setattr(cutting, "run_cut", lambda o: pytest.fail("cut with --proof"))
+    result = CliRunner().invoke(cli.app, ["cut", "--proof"])
+    assert (
+        result.exit_code == 1
+        and "olddeck was printed before its sheets carried proof targets" in result.output
+    )
+    o = cut_options(monkeypatch, "--dry-run")  # without --proof it cuts
+    assert (o.label, o.proof) == ("olddeck", False)
+
+
+def test_a_retry_on_the_same_sheet_takes_the_next_target_and_the_next_sheet_its_first(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    menu(monkeypatch, "retry", "next-proof", "done")
+    seen: list[int] = []
+
+    def run_cut(o):
+        seen.append(o.proof_from)
+        o.proof_from += 1  # each run traces one target
+        if len(seen) == 1:
+            raise cutting.CutError("stopped at the proof cut: nothing else was cut")
+        return 0
+
+    monkeypatch.setattr(cutting, "run_cut", run_cut)
+    result = CliRunner().invoke(cli.app, ["cut", "--proof", "--proof-from", "1"])
+    assert result.exit_code == 0, result.output
+    assert seen == [1, 2, 0]
+
+
 # --- the menu a bare cut-proxies shows at a terminal ---------------------------
-def write_run(where, name, paper="letter", layout="4x2", cards=8, registration="3"):
+def write_run(where, name, paper="letter", layout="4x2", cards=8, registration="3", proof_targets=True):
     from mtgproxy.sidecar import RunInfo
 
     where.mkdir(parents=True, exist_ok=True)
@@ -148,6 +261,7 @@ def write_run(where, name, paper="letter", layout="4x2", cards=8, registration="
         generated="2026-10-01",
         registration=registration,
         layout=layout,
+        proof_targets=proof_targets,
     )
     return info.write(where)
 

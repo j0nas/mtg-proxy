@@ -607,6 +607,7 @@ def run_build(opts: BuildOptions) -> BuildResult:
         fronts_only=opts.fronts_only,
         generated=date.today().isoformat(),
         layout=opts.layout,
+        proof_targets=bool(layout.proof_targets_mm(opts.paper, opts.card_size, opts.layout)[0]),
         pdf=pdfs.pdf.name if pdfs.pdf else None,
         duplex_pdf=pdfs.duplex_pdf.name if pdfs.duplex_pdf else None,
         dfc_count=pdfs.dfc_count,

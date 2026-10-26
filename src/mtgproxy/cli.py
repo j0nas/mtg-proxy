@@ -56,6 +56,28 @@ def parse_paper_at(value: str) -> tuple[float, float]:
     return right, down
 
 
+def parse_target(value: str) -> tuple[float, float]:
+    """--proof-target X,Y: a target's centre, page mm."""
+    try:
+        x, y = (float(v) for v in value.split(","))
+    except ValueError:
+        x = y = math.nan
+    if not (math.isfinite(x) and math.isfinite(y) and x > 0 and y > 0):
+        fail(f"--proof-target wants X,Y in mm from the page's top-left corner, got {value!r}")
+    return x, y
+
+
+def parse_blade(value: str) -> tuple[int, int, int]:
+    """--proof-blade FORCE,SPEED,DEPTH, each in the Cameo's range."""
+    try:
+        force, speed, depth = (int(v) for v in value.split(","))
+    except ValueError:
+        force = speed = depth = -1
+    if not (1 <= force <= 40 and 1 <= speed <= 30 and 0 <= depth <= 10):
+        fail(f"--proof-blade wants FORCE,SPEED,DEPTH (1-40, 1-30, 0-10), got {value!r}")
+    return force, speed, depth
+
+
 LAYOUT_HELP = (
     "3x3 (the default on A4 with standard cards): 9 cards on portrait A4, marks 3.5 mm from the sides "
     "and 9 mm from the top and bottom | 4x2: 8 cards on landscape A4, the engine's own "
@@ -393,10 +415,39 @@ def cut(
         bool,
         typer.Option(
             "--proof",
-            help="after the scan, score the square's outline and each L over the print and wait: y cuts, "
-            "r rescans, q stops",
+            help="after the scan, trace one of the sheet's proof targets (small black squares printed with "
+            "the marks) and wait: y cuts, r rescans and traces the next, q stops",
         ),
     ] = False,
+    proof_target: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--proof-target",
+            metavar="X,Y",
+            help="a proof target's centre, mm from the page's top-left corner (y down); repeat for each, "
+            "in the order the rounds take them (default: the layout's; an --svg sheet has only these)",
+        ),
+    ] = None,
+    proof_target_size: Annotated[
+        float | None,
+        typer.Option("--proof-target-size", min=1, max=10, help="the proof targets' side in mm (default 3)"),
+    ] = None,
+    proof_from: Annotated[
+        int,
+        typer.Option(
+            "--proof-from",
+            min=0,
+            help="the sheet's first N proof targets are cut already, by an earlier run: start at the next",
+        ),
+    ] = 0,
+    proof_blade: Annotated[
+        str | None,
+        typer.Option(
+            "--proof-blade",
+            metavar="FORCE,SPEED,DEPTH",
+            help="the proof cut's blade, one pass (default 10,5,2: scores laminate, nowhere near through)",
+        ),
+    ] = None,
     scan_start: Annotated[
         list[str] | None,
         typer.Option(
@@ -446,6 +497,11 @@ def cut(
         typer.echo(
             f"cut-proxies: using {sidecar} ({info.name}: {info.paper}/{info.card_size}, {info.layout})"
         )
+        if proof and not info.proof_targets and not proof_target:
+            fail(
+                f"{info.name} was printed before its sheets carried proof targets ({sidecar}): rebuild and "
+                "reprint it for --proof, or cut it without; the sensor check still reads every mark"
+            )
     elif run is not None:
         fail(f"no run.json at {run}")
     elif not plain:
@@ -468,6 +524,9 @@ def cut(
         reg_length=reg_length, reg_thickness=reg_thickness, reg_inset=reg_inset,
         label=info.name if info else None,
         probe=probe, sense=sense, diagnose=diagnose, check=not no_check, proof=proof, scan_starts=[parse_start(v) for v in scan_start or []] or None,
+        proof_targets=[parse_target(v) for v in proof_target] if proof_target else None,
+        proof_target_size=proof_target_size, proof_from=proof_from,
+        proof_blade=parse_blade(proof_blade) if proof_blade else None,
         paper_at=parse_paper_at(paper_at),
     )  # fmt: skip
     try:
@@ -497,8 +556,8 @@ def cut(
             then = cutmenu.after_cut(sheet, proof=job.proof)
         if then == "next":  # a batch is proofed once: its first sheet's marks passed
             o, sheet = replace(job, proof=False), sheet + 1
-        elif then == "next-proof":
-            o, sheet = job, sheet + 1
+        elif then == "next-proof":  # a new sheet: its proof targets are all uncut
+            o, sheet = replace(job, proof_from=0), sheet + 1
         elif then == "pass":
             # Same sheet, marks already proven, folds already scored.
             o = replace(job, passes=1, proof=False, scores=False)
