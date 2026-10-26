@@ -550,3 +550,103 @@ def test_a_pause_on_the_machine_waits_for_the_operator_and_the_cut_carries_on():
     assert s.wait_ready(5, poll=0) == "ready"  # moving, paused three polls, moving, then done
     assert said.count("paused on the Cameo: press its pause button again to carry on") == 1
     assert protocol.status_of(b"3\x03") == "paused"
+
+
+# --- scored folds and pass by pass ----------------------------------------------------
+def page(tmp_path, body):
+    f = tmp_path / "job.svg"
+    f.write_text(
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="297mm" height="210mm" viewBox="0 0 297 210">{body}</svg>'
+    )
+    return f
+
+
+OUTLINE = '<path d="M20,20 L120,20 L120,120 L20,120 Z" fill="none" stroke="#ff0000"/>'
+DASH = '<path d="M60,40 L60,42" fill="none" stroke="#0000ff"/>'
+FOLDS = (
+    '<path d="M70,22 L70,118" fill="none" stroke="#00ff00"/>'
+    '<path d="M22,70 L118,70" fill="none" stroke="#00ff00"/>'
+)
+BOX, SCORE = protocol.Blade(33, 4, 6), protocol.Blade(15, 4, 3)
+
+
+def test_scores_go_first_in_one_light_pass_then_the_cut_with_its_own_blade(tmp_path):
+    job = driver.plan(page(tmp_path, OUTLINE + FOLDS), FRAME, BOX, 3, (0.0, 0.0), SCORE)
+    assert (len(job.scores), len(job.lines), job.score_blade) == (2, 1, SCORE)
+    t, said = machine(), []
+    driver.cut(job, t, session.SessionLog(None, echo=said.append), [driver.default_start(FRAME)])
+    out = sent(t)
+    # The scan, the box's blade, then the score blade, both folds once, the box's blade again and the
+    # outline (registered from the top-left mark at 5, 5 mm: the fold at x 70 starts at y 17, x 65).
+    scan, box = out.index("TB123,"), out.index("TF6,1")
+    score = out.index("TF3,1")
+    again = out.index("TF6,1", score)
+    assert (
+        scan < box < score < out.index("M340,1300") < out.index("M1300,340") < again < out.index("M300,300")
+    )
+    assert out.count("M340,1300") == out.count("M1300,340") == out.count("M300,300") == 1
+    assert out.count("FX15,1") == 2 and out.count("\\0,0\x03Z4140,5880\x03") == 3  # one area throughout
+    assert "scored 2 line(s) at force 15, speed 4, depth 3; cutting now" in said
+
+
+def test_an_svg_without_scores_cuts_exactly_as_before(tmp_path):
+    f = page(tmp_path, OUTLINE + DASH)
+    job = driver.plan(f, FRAME, BOX, 3, (0.0, 1.0), SCORE)
+    ordered = geometry.order(geometry.load_svg(f), start=(FRAME.inset, FRAME.top))
+    before = session.Job(geometry.passes(ordered, 3), FRAME, BOX, (0.0, 1.0), shapes=ordered)
+    assert job == before
+    t, t0 = machine(), machine()
+    driver.cut(job, t, log(), [driver.default_start(FRAME)])
+    driver.cut(before, t0, log(), [driver.default_start(FRAME)])
+    assert t.sent == t0.sent and sent(t).count("TF6,1") == 1
+
+
+def test_a_score_blade_as_heavy_as_the_cut_is_refused_and_none_leaves_the_scores_out(tmp_path):
+    f = page(tmp_path, OUTLINE + FOLDS)
+    paper = protocol.Blade(10, 5, 1)  # the paper preset: one pass at force 15 would cut the folds through
+    with pytest.raises(
+        session.CutError, match=r"score blade \(force 15, depth 3\) is no lighter than the cut's"
+    ):
+        driver.plan(f, FRAME, paper, 1, (0.0, 0.0), protocol.Blade(15, 5, 3))
+    assert driver.plan(f, FRAME, paper, 1, (0.0, 0.0), protocol.Blade(5, 5, 1)).scores  # lighter in force
+    job = driver.plan(f, FRAME, BOX, 1, (0.0, 0.0), None)  # --no-scores: one more pass on a scored sheet
+    assert (job.scores, job.score_blade, len(job.lines)) == ([], None, 1)
+    t = machine()
+    driver.cut(job, t, log(), [driver.default_start(FRAME)])
+    assert "M340,1300" not in sent(t) and sent(t).count("TF6,1") == 1
+
+
+def test_pass_by_pass_cuts_every_path_once_then_again_saying_when_each_pass_is_done(tmp_path):
+    f = page(tmp_path, OUTLINE + DASH)
+    job = driver.plan(f, FRAME, BOX, 3, (0.0, 0.0), SCORE, pass_by_pass=True)
+    ordered = geometry.order(geometry.load_svg(f), start=(FRAME.inset, FRAME.top))
+    assert job.lines == geometry.passes(ordered, 1) and job.repeat == 3
+    t, said = machine(), []
+    driver.cut(job, t, session.SessionLog(None, echo=said.append), [driver.default_start(FRAME)])
+    out = sent(t)
+    dash, outline = "M700,1100", "M300,300"  # inside the outline, so cut first in every pass
+    assert out.count(dash) == out.count(outline) == 3
+    assert out.index(dash) < out.index(outline) < out.index(dash, out.index(outline))
+    assert [m for m in said if m.startswith("pass ")] == [
+        "pass 1 of 3 done",
+        "pass 2 of 3 done",
+        "pass 3 of 3 done",
+    ]
+    # Each lap of the outline is its own move: one lap and the overcut a pass, not three in a row.
+    draws = [c for c in out.split("\x03") if c.startswith("D")]
+    assert len(draws) == 6
+    # By default the laps stay in a row, and nothing says "pass".
+    t, said = machine(), []
+    driver.cut(
+        driver.plan(f, FRAME, BOX, 3, (0.0, 0.0), SCORE),
+        t,
+        session.SessionLog(None, echo=said.append),
+        [driver.default_start(FRAME)],
+    )
+    assert sent(t).count(outline) == 1 and not any(m.startswith("pass ") for m in said)
+
+
+def test_scores_and_cuts_both_stay_on_the_paper(tmp_path):
+    off = '<path d="M290,20 L300,20" fill="none" stroke="#00ff00"/>'
+    with pytest.raises(session.CutError, match="off the 297 x 210 mm page"):
+        driver.plan(page(tmp_path, OUTLINE + off), FRAME, BOX, 3, (0.0, 0.0), SCORE)

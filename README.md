@@ -276,6 +276,9 @@ cut-proxies                # menu; Enter cuts the newest run (paper, card size, 
 cut-proxies --run mydeck   # a named run in ~/Desktop/proxies, no menu
 cut-proxies --preset paper # plain paper instead of laminate
 cut-proxies --passes 4     # also --force/--speed/--depth, --x-off/--y-off
+cut-proxies --pass-by-pass # every path once, then every path again, --passes times
+cut-proxies --score-force 12 --score-depth 2   # the blade for an SVG's scored lines (see below)
+cut-proxies --no-scores    # leaves an SVG's scored lines uncut: another pass on a scored sheet
 cut-proxies --usb          # over the cable instead of Bluetooth LE
 cut-proxies --scan         # list the Bluetooth devices in range
 cut-proxies --dry-run      # no machine: runs the whole job against a stand-in, checks the bounds
@@ -296,7 +299,33 @@ Settings, AutoBlade only (the Kraft blade can't turn the 3 mm corners):
 | `laminate` (default): 130–135 gsm glossy in 80 µm pouches | 20 | 25 | 5 | 3 |
 | `paper`: plain copier paper, cut through | 10 | 5 | 1 | 1 |
 
-Explicit flags override the preset. Don't eject after a cut: lift a corner. At a terminal,
+Explicit flags override the preset.
+
+An `--svg` can mark lines to score: a path stroked `#00ff00` (its own stroke or its group's, in
+any spelling of the colour, `#0f0` or `lime` too) is cut in one pass with a light blade, meant to
+mark a laminated sheet's top film along a fold and leave the sheet whole. Every other stroke is cut
+through. After the scan and any proof cuts, every scored line is cut once with `--score-force`
+(default 15), `--score-speed` (default the cut's speed) and `--score-depth` (default 3); then the
+blade is set back to the job's, in the same cutting area, and everything else is cut. The default is
+a guess that hasn't been on the machine: the 220 gsm paper deck box in an 80 µm pouch cuts through
+at force 33, depth 6 and 3 passes, and at force 20 even depth 9 stopped short in 3 passes, so one
+pass at force 15 should stay well inside the sheet. A score blade at least as heavy as the cut's in
+both force and depth is refused, since its one pass would go as deep as a pass of the cut; with
+`--preset paper` that means giving a lighter score. An SVG without scored lines cuts as it always
+has, and so does every proxy sheet. `--no-scores` leaves the scored lines uncut, for another pass on
+a sheet whose folds are scored already: the menu's "one more pass" does that by itself, and a
+scored job's last line says so.
+
+Each closed path is cut `--passes` times in a row by default, as continuous laps with no lift, so
+the laps lie on top of each other. `--pass-by-pass` cuts every path once, then every path again,
+`--passes` times over, with "pass 1 of 3 done" after each whole pass. It is for re-cutting a sheet
+that already has grooves, where one or two passes may be enough. The next pass starts as soon as
+one ends, so press the Cameo's pause button at that line: it stops early in the next pass, the
+driver waits for as long as it stays paused, and pressing pause again carries on. Inside-first
+order holds within each pass, so a part whose outline goes through in an early pass is loose for
+the later passes of the slits and holes inside it.
+
+Don't eject after a cut: lift a corner. At a terminal,
 cut-proxies then watches the mat. Unload it, load the next sheet, and five seconds after the mat
 is back in, the same job starts on it, counting sheets as it goes. It only starts after it has
 seen the mat leave, and Enter during the countdown holds it. A batch started with proof cuts has
@@ -306,20 +335,21 @@ Enter while it watches brings up the menu instead: "next sheet" cuts a sheet tha
 loaded, "next sheet, proof cuts first" asks for proof cuts again, "one more pass" rescans the
 marks and cuts this sheet once more, for a cut that isn't through, and "done" stops. Ctrl-C stops
 at any point. When a job fails (marks not found, proof stopped, the connection lost), it offers to
-try the same job again. From a script, a failure exits, and `--passes 1` is the extra pass.
+try the same job again. From a script, a failure exits, and `--passes 1` is the extra pass
+(`--passes 1 --no-scores` for a sheet with scored folds).
 Rippled edges mean too much force or a dull blade. Max force or speed makes the machine skip; power-cycle to rehome.
 
 The job follows Silhouette Studio's own conversation with this machine, recorded over Bluetooth
 (`docs/studio-capture.md`). `mtgproxy.cameo`:
 
-- `geometry`: the SVG → polylines in page mm, curves flattened to a 0.02 mm chord. Everything
-  inside an outline is cut before it, nearest start first. Closed loops are cut as continuous
-  laps with a 0.5 mm overcut.
+- `geometry`: the SVG → polylines in page mm, curves flattened to a 0.02 mm chord, each a cut or
+  a score by its stroke. Everything inside an outline is cut before it, nearest start first.
+  Closed loops are cut as continuous laps with a 0.5 mm overcut.
 - `protocol`: the GP-GL strings, pinned by the tests to Studio's.
 - `transport`: Bluetooth LE (bleak), USB (libusb1), or a recording stand-in for dry runs.
 - `session`: preflight (refuses without a loaded mat), mark description and scan, blade setup,
-  and the cut in ≤1 KB pieces with a status wait between them. It always returns to the origin
-  and never moves it.
+  the scores with their own blade, and the cut in ≤1 KB pieces with a status wait between them.
+  It always returns to the origin and never moves it.
 - `proof`: the proof cuts over the marks, and whether one would touch the job.
 
 Registration:

@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import protocol as p
@@ -74,7 +74,13 @@ class Job:
     frame: Frame
     blade: p.Blade
     bias: tuple[float, float] = (0.0, 0.0)  # (x, y) mm, the machine's measured cut offset
-    shapes: list[Polyline] = field(default_factory=list)  # each path once, before passes
+    shapes: list[Polyline] = field(default_factory=list)  # each path once, before passes, scores too
+    # Scored in one pass with ``score_blade`` before anything is cut (an SVG's SCORE strokes).
+    scores: list[Polyline] = field(default_factory=list)
+    score_blade: p.Blade | None = None
+    # How many times ``lines`` is cut, one whole pass after another (--pass-by-pass); 1 when
+    # ``lines`` already holds every pass, each closed loop's laps in a row.
+    repeat: int = 1
 
 
 def registered(job: Job) -> list[list[tuple[float, float]]]:
@@ -84,15 +90,16 @@ def registered(job: Job) -> list[list[tuple[float, float]]]:
 
 
 def check_bounds(job: Job) -> tuple[float, float, float, float]:
-    """The commanded extent (x0, y0, x1, y1) from the top-left mark. Raises if the design itself
-    (page coordinates, before the machine's bias) leaves the paper. A cut may reach above or left
-    of the top-left mark (negative coordinates, down to the paper's edge): the cutting area is
-    widened to cover it (see ``low_corner``)."""
-    pts = [pt for line in registered(job) for pt in line]
+    """The commanded extent (x0, y0, x1, y1) from the top-left mark, scores and cuts alike. Raises
+    if the design itself (page coordinates, before the machine's bias) leaves the paper. A cut may
+    reach above or left of the top-left mark (negative coordinates, down to the paper's edge): the
+    cutting area is widened to cover it (see ``low_corner``)."""
+    every = replace(job, lines=[*job.scores, *job.lines]) if job.scores else job
+    pts = [pt for line in registered(every) for pt in line]
     x0, y0 = min(x for x, _ in pts), min(y for _, y in pts)
     x1, y1 = max(x for x, _ in pts), max(y for _, y in pts)
     f = job.frame
-    px0, py0, px1, py1 = bbox(job.lines)
+    px0, py0, px1, py1 = bbox(every.lines)
     if px0 < 0 or py0 < 0 or px1 > f.page_w or py1 > f.page_h:
         raise CutError(
             f"the cut runs off the {f.page_w:g} x {f.page_h:g} mm page "
@@ -288,6 +295,27 @@ class Session:
                 raise CutError(f"the Cameo stopped mid-cut (status {state})")
             i = end
         self.log("cut_done", bytes=len(data))
+
+    def cut_job(self, job: Job, low: tuple[float, float] = (0.0, 0.0)) -> None:
+        """The job after its scan: its scores first, in one pass with the score blade, then the
+        blade set back to the job's (``setup``, the same cutting area reaching back to ``low``) and
+        its cuts, ``job.repeat`` times over with a note after each whole pass. A job without scores
+        goes straight to its cuts with the blade already set up."""
+        if job.scores:
+            if job.score_blade is None:
+                raise CutError("the job has scored lines but no blade to score them with")
+            b = job.score_blade
+            self.setup(b, job.frame, low)
+            self.cut(replace(job, lines=job.scores))
+            self.log.say(
+                f"scored {len(job.scores)} line(s) at force {b.force}, speed {b.speed}, depth {b.depth}; "
+                "cutting now"
+            )
+            self.setup(job.blade, job.frame, low)
+        for n in range(1, job.repeat + 1):
+            self.cut(job)
+            if job.repeat > 1:
+                self.log.say(f"pass {n} of {job.repeat} done")
 
     def finish(self) -> None:
         """Return to the origin (never move it). Safe to call after an error."""

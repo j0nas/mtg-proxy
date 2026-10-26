@@ -1,5 +1,8 @@
 """Cut geometry: a page-sized SVG → polylines in page millimetres (y down), ordered for the blade.
 
+Kinds: a shape stroked ``SCORE`` (#00ff00) is scored, cut in one light pass that marks the
+laminate's film without going through (a fold); every other shape is cut through.
+
 Order: whatever lies inside a closed outline is cut before that outline (slits, holes and
 perforations before the edge that frees the part, so the part never shifts while still being
 cut), and within one nesting depth the nearest next start wins. Passes: a closed loop is cut as
@@ -46,15 +49,33 @@ def _same(a: Point, b: Point) -> bool:
     return abs(a[0] - b[0]) < CLOSE_EPS and abs(a[1] - b[1]) < CLOSE_EPS
 
 
+# The stroke that marks a scored line. Any other stroke, or none, is a cut.
+SCORE = "#00ff00"
+
+
 def load_svg(path: Path) -> list[Polyline]:
     """Every visible shape's subpaths, flattened, in page mm (the SVG's own units, transforms applied)."""
-    from svgelements import SVG, Arc, Close, CubicBezier, Line, Move, Path, QuadraticBezier, Shape
+    return [pl for pl, _ in _load(path)]
+
+
+def load_kinds(path: Path) -> tuple[list[Polyline], list[Polyline]]:
+    """``load_svg``'s polylines by kind, (cuts, scores): a score is a shape stroked ``SCORE``, by its
+    own stroke or its group's, in any spelling of the colour (#0f0, lime, rgb(0,255,0))."""
+    loaded = _load(path)
+    return [pl for pl, score in loaded if not score], [pl for pl, score in loaded if score]
+
+
+def _load(path: Path) -> list[tuple[Polyline, bool]]:
+    """Every visible shape's subpaths in document order, each with whether its shape is a score."""
+    from svgelements import SVG, Arc, Close, Color, CubicBezier, Line, Move, Path, QuadraticBezier, Shape
 
     svg = SVG.parse(str(path), reify=True)
-    out: list[Polyline] = []
+    score = Color(SCORE)
+    out: list[tuple[Polyline, bool]] = []
     for element in svg.elements():
         if not isinstance(element, Shape) or element.values.get("visibility") == "hidden":
             continue
+        scored = element.stroke == score
         shape = element if isinstance(element, Path) else Path(element)
         subpaths: list[list[Point]] = [[]]
         for seg in shape.segments():
@@ -69,7 +90,7 @@ def load_svg(path: Path) -> list[Polyline]:
                 current.append(_mm(seg.end))
             elif isinstance(seg, Arc | CubicBezier | QuadraticBezier):
                 current.extend(_mm(pt) for pt in _flatten(seg, FLAT_TOL_MM / MM_PER_PX))
-        out.extend(Polyline(tuple(sp)) for sp in subpaths if len(sp) > 1)
+        out.extend((Polyline(tuple(sp)), scored) for sp in subpaths if len(sp) > 1)
     return out
 
 

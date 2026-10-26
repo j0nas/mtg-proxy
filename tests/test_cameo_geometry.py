@@ -70,3 +70,28 @@ def test_passes_lap_closed_loops_continuously_and_repeat_open_paths():
     assert loop.points[:5] == square.points and len(loop.points) == 5 + 4 + 4 + 1
     assert loop.points[-1] == pytest.approx((0.5, 0))  # overcut past the start, no lift
     assert dashes == [dash, dash, dash]
+
+
+def test_a_shape_stroked_score_green_is_scored_and_every_other_is_cut(tmp_path):
+    body = (
+        '<path d="M10,10 L20,10 L20,20 Z" stroke="#ff0000"/>'  # an outline: cut
+        '<path d="M30,10 L40,10" stroke="#0000ff"/>'  # a perforation dash: cut
+        '<path d="M50,10 L60,10"/>'  # no stroke at all: cut
+        '<path d="M10,30 L20,30" stroke="#00ff00"/>'
+        '<path d="M10,40 L20,40" stroke="#0F0"/>'
+        '<path d="M10,50 L20,50" style="stroke:lime"/>'
+        '<g stroke="rgb(0,255,0)"><line x1="10" y1="60" x2="20" y2="60"/></g>'  # its group's stroke
+    )
+    cuts, scores = g.load_kinds(svg(tmp_path, body))
+    assert [pl.points[0] for pl in cuts] == [(10, 10), (30, 10), (50, 10)]
+    assert [pl.points[0] for pl in scores] == [(10, 30), (10, 40), (10, 50), (10, 60)]
+    # load_svg still gives every shape, in document order.
+    assert [pl.points[0][1] for pl in g.load_svg(svg(tmp_path, body))] == [10, 10, 10, 30, 40, 50, 60]
+
+
+def test_an_svg_without_scores_loads_as_cuts_only(tmp_path):
+    f = svg(
+        tmp_path, '<path d="M10,20 L30,20 L30,40 Z" stroke="#ff0000"/><path d="M5,5 L6,5" stroke="#0000ff"/>'
+    )
+    cuts, scores = g.load_kinds(f)
+    assert cuts == g.load_svg(f) and scores == []
