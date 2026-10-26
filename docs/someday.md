@@ -40,4 +40,4 @@ These came out of a day of cutting one box. Jonas wants them built.
 Cut settings found that day for Epson Premium Glossy 220 gsm in an 80 µm pouch: force 33, speed 4,
 depth 6, 3 passes cut through. At force 20, depths 7, 8 and 9 all cut equally deep and none went
 through in 3 passes: past depth 6, the force is what limits it. Force 30 at speed 10 and depth 8,
-on a whole box, slipped the carriage 2.5 mm partway in.
+on a whole box, cut the whole outline 2.5 mm left in x: the carriage slipped once, before or at its first cut.
