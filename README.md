@@ -11,19 +11,22 @@ cards cost and why the stack looks like this is written up at
 [jona.no/docs/mtg-proxying](https://jona.no/docs/mtg-proxying).
 
 ```
-mtg-proxy make      decklist -> ./<deck>/{<deck>.pdf, <deck>-duplex.pdf?, CUT-NOTES.md, run.json}
+mtg-proxy make      decklist -> ~/Desktop/proxies/<deck>/{<deck>.pdf, <deck>-duplex.pdf?, CUT-NOTES.md, run.json}
 mtg-proxy cut       cut a printed sheet on the Cameo; reads run.json from the deck folder
 mtg-proxy redo      queue miscuts / a skipped page of a run for reprinting (BACKLOG.txt)
 mtg-proxy backlog   show the queue, `backlog build` prints it as one sheet, `backlog drop` edits it
 mtg-proxy offset    store the printer's duplex offset once
-mtg-proxy notes     show the newest CUT-NOTES.md below the cwd
+mtg-proxy notes     show the newest CUT-NOTES.md in ~/Desktop/proxies
 mtg-proxy cache     Scryfall image cache stats / --clear (~/.cache/mtg-proxy)
 mtg-proxy print     print a PDF on the PC's Epson queues (--paper plain|glossy|premium, --dry-run)
 mtg-proxy doctor    check engine and data files
 ```
 
 `make-proxies.sh`, `cut-proxies.sh`, `print-sheet.sh` and `save-offset.sh` are shims onto those commands, and
-`mtg-proxy.sh` onto the whole CLI. Output lands in the current directory, one folder per deck. Under WSL it is also mirrored flat into
+`mtg-proxy.sh` onto the whole CLI. Output lands in `~/Desktop/proxies`, one folder per deck, wherever the command
+runs from; `-o` or `MTG_PROXY_OUT` puts it elsewhere. `cut-proxies`, `redo`, `backlog`, `notes` and `simulate` look there
+too, unless you are standing in an older output folder (a deck folder, or the folder above one), which
+they use instead. `--run` takes a run's folder name: `cut-proxies --run mydeck`. Under WSL output is also mirrored flat into
 `%USERPROFILE%\Desktop\projects\mtg-proxy` (`MTG_PROXY_WIN_OUT` overrides).
 
 ```
@@ -205,14 +208,14 @@ given `--layout 4x2`.
 
 A deck rarely ends clean: a miscut or two, a card that laminated badly, and a last page that
 was only half full and not worth a sheet. All of that goes into one queue, `BACKLOG.txt`, in
-the directory the deck folders live in, and gets printed as one well-filled sheet later.
+the directory the deck folders live in (`~/Desktop/proxies`), and gets printed as one well-filled sheet later.
 
 ```sh
 make-proxies decks/mydeck.txt --defer-partial   # partial last page → BACKLOG.txt, not the PDF
-cd mydeck && mtg-proxy redo "Sol Ring" p3.5 last  # after cutting: by name, page.slot, or a whole page
-mtg-proxy redo dlast                            # d = the duplex PDF (d1, d1.2, dlast)
-cd .. && mtg-proxy backlog                      # 11 fronts = 1 full sheet + 2 waiting, 2 duplex
-mtg-proxy backlog build                         # ./backlog-<date>/ — a run folder like any deck
+mtg-proxy redo "Sol Ring" p3.5 last             # after cutting the newest run: by name, page.slot, or a whole page
+mtg-proxy redo dlast --run mydeck               # d = the duplex PDF (d1, d1.2, dlast); --run names another run
+mtg-proxy backlog                               # 11 fronts = 1 full sheet + 2 waiting, 2 duplex
+mtg-proxy backlog build                         # backlog-<date>/ next to the decks, a run folder like any deck
 mtg-proxy backlog build --full-only             # full sheets now, the rest stays queued
 mtg-proxy backlog drop "Sol Ring"               # or by the number the listing shows
 ```
@@ -262,14 +265,15 @@ Registration). It follows the sheet's `run.json`, which holds the paper, card si
 `make-proxies` printed.
 
 Run bare at a terminal, `cut-proxies` asks first. Enter cuts the default: this folder's
-`run.json`, or a plain A4 sheet (standard cards, the default layout) when there is none, with the
-laminate preset over Bluetooth LE. "Choose…" picks another run below this folder, the preset, and
+`run.json`, else the newest run in `~/Desktop/proxies`, or a plain A4 sheet (standard cards, the
+default layout) when there is none, with the laminate preset over Bluetooth LE. "Choose…" picks
+another run, the preset, and
 cut, proof first, dry run or probe. `--usb` and `--ble-name` keep the menu; any other flag, or a
 pipe, skips it and cuts as told.
 
 ```sh
-cd mydeck && cut-proxies   # menu; Enter cuts this run (paper, card size, layout from run.json)
-cut-proxies --run mydeck   # same, from the parent folder
+cut-proxies                # menu; Enter cuts the newest run (paper, card size, layout from run.json)
+cut-proxies --run mydeck   # a named run in ~/Desktop/proxies, no menu
 cut-proxies --preset paper # plain paper instead of laminate
 cut-proxies --passes 4     # also --force/--speed/--depth, --x-off/--y-off
 cut-proxies --usb          # over the cable instead of Bluetooth LE

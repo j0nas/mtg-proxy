@@ -1,7 +1,8 @@
 """The menu a bare ``cut-proxies`` shows at a terminal.
 
-Enter on the first question cuts the default: this folder's run.json, or a plain A4 sheet
-(standard cards, the default layout) when there is none, with the laminate preset. "Choose…" asks
+Enter on the first question cuts the default: this folder's run.json, else the newest run
+below it, or a plain A4 sheet (standard cards, the default layout) when there is none, with the
+laminate preset. "Choose…" asks
 which run, which preset and what to do (cut, proof first, dry run, probe). The connection is
 never asked: Bluetooth LE unless ``--usb`` is given.
 
@@ -60,7 +61,7 @@ def ask(where: Path, via: str) -> Picked | None:
     """Ask at the terminal; None when the operator quits. Ctrl-C raises KeyboardInterrupt."""
     runs = runs_below(where)
     here = where / SIDECAR_NAME
-    default = Picked(here if here in runs else None)
+    default = Picked(here if here in runs else (runs[0] if runs else None))
     sheet = describe(default.run) if default.run else PLAIN
     first = _select(
         "cut-proxies:",

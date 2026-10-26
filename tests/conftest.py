@@ -12,6 +12,14 @@ FIXTURES = Path(__file__).parent / "fixtures"
 needs_engine = pytest.mark.skipif(not (SCM / "create_pdf.py").is_file(), reason="vendored engine not cloned")
 
 
+@pytest.fixture(autouse=True)
+def proxies_root(tmp_path_factory, monkeypatch) -> Path:
+    """Builds without -o go to $MTG_PROXY_OUT: point it at a fresh, not yet created folder, never ~/Desktop."""
+    root = tmp_path_factory.mktemp("home") / "proxies"
+    monkeypatch.setenv("MTG_PROXY_OUT", str(root))
+    return root
+
+
 @pytest.fixture
 def archidekt_json() -> dict:
     return json.loads((FIXTURES / "archidekt_deck.json").read_text())

@@ -23,8 +23,8 @@ from .layout import NOMINAL_CARDS, LayoutError
 from .layout import check as check_layout
 from .layout import default as default_layout
 from .manifest import ManifestError
-from .paths import DEFAULT_BACK, NOTES_NAME, SCM, cache_dir
-from .sidecar import RunInfo, find_sidecar
+from .paths import DEFAULT_BACK, NOTES_NAME, SCM, SIDECAR_NAME, cache_dir, out_root
+from .sidecar import RunInfo, find_run, find_sidecar, runs_parent
 
 app = typer.Typer(
     add_completion=False,
@@ -97,8 +97,14 @@ def make(
     ] = None,
     fmt: Annotated[str, typer.Option("-f", "--format", help="decklist format")] = "mtga",
     out: Annotated[
-        Path, typer.Option("-o", "--out", help="parent dir for <deckname>/", file_okay=False)
-    ] = Path("."),
+        Path | None,
+        typer.Option(
+            "-o",
+            "--out",
+            help="parent dir for <deckname>/ (default ~/Desktop/proxies, $MTG_PROXY_OUT)",
+            file_okay=False,
+        ),
+    ] = None,
     paper: Annotated[str, typer.Option("-p", "--paper", help="a4 | letter | a3 ...")] = "a4",
     sheet_layout: Annotated[str | None, typer.Option("--layout", help=LAYOUT_HELP)] = None,
     board: Annotated[str, typer.Option(help="deck URL board: main | side | considering")] = "main",
@@ -183,7 +189,7 @@ def make(
     ] = None,
 ) -> None:
     if show_notes:
-        _notes(deck, out)
+        _notes(deck, out or runs_parent())
         return
     if test and deck is not None:
         fail(f"--test takes no decklist (got {deck!r})")
@@ -196,7 +202,7 @@ def make(
     opts = build.BuildOptions(
         deck=deck,
         fmt=fmt,
-        out_parent=out,
+        out_parent=out or out_root(),
         paper=paper,
         layout=sheet_layout,
         board=board,
@@ -243,27 +249,29 @@ def _notes(name: str | None, parent: Path) -> None:
     notes.show(path)
 
 
-@app.command(name="notes", help="Show the CUT-NOTES of a previous run (newest below cwd by default).")
+@app.command(
+    name="notes", help="Show the CUT-NOTES of a previous run (the newest in ~/Desktop/proxies by default)."
+)
 def notes_cmd(
     name: Annotated[str | None, typer.Argument(help="run folder name")] = None,
-    out: Annotated[Path, typer.Option("-o", "--out", help="parent dir to search", file_okay=False)] = Path(
-        "."
-    ),
+    out: Annotated[
+        Path | None, typer.Option("-o", "--out", help="parent dir to search", file_okay=False)
+    ] = None,
 ) -> None:
-    _notes(name, out)
+    _notes(name, out or runs_parent())
 
 
 @app.command(
     help=(
         "Cut a printed sheet on the Cameo 5 Alpha. Reads run.json from the current directory (or --run) "
         "for paper/card/layout; flags override. With no flags at a terminal, asks first "
-        "(Enter cuts the default)."
+        "(Enter cuts this folder's run, else the newest in ~/Desktop/proxies)."
     ),
 )
 def cut(
     ctx: typer.Context,
     run: Annotated[
-        Path | None, typer.Option("--run", help="run.json (or its folder) of the sheet to cut")
+        Path | None, typer.Option("--run", help="run.json, its folder, or a run name in ~/Desktop/proxies")
     ] = None,
     paper: Annotated[str | None, typer.Option("-p", "--paper")] = None,
     card: Annotated[str | None, typer.Option("-c", "--card")] = None,
@@ -387,7 +395,10 @@ def cut(
         fail(f"--preset must be one of {', '.join(cutting.PRESETS)}, got {preset!r}")
     plain = False
     if _cut_menu_wanted(ctx):
-        picked = cutmenu.ask(Path.cwd(), "Bluetooth" if ble else "USB")
+        here = Path.cwd()
+        picked = cutmenu.ask(
+            here if (here / SIDECAR_NAME).is_file() else runs_parent(), "Bluetooth" if ble else "USB"
+        )
         if picked is None:
             raise typer.Exit()
         run, plain, preset = picked.run, picked.run is None, picked.preset
@@ -502,13 +513,16 @@ def _enter_within(seconds: float) -> bool:
     help=(
         "Walk the Cameo's TB123 mark scan over a sheet's PDF and report, per pass, the dark runs it "
         "crosses and the nearest print that is not a mark; exits 1 when print sits where a pass "
-        "walks. Needs no machine. Reads run.json from the current directory (or --run) for the "
+        "walks. Needs no machine. Reads run.json from --run, the current directory, or the newest run for the "
         "sheet's PDF, paper, card and layout; flags override (README, Sheet layouts)."
     ),
 )
 def simulate(
     pdf: Annotated[Path | None, typer.Argument(help="the sheet's PDF (default: run.json's)")] = None,
-    run: Annotated[Path | None, typer.Option("--run", help="run.json (or its folder) of the sheet")] = None,
+    run: Annotated[
+        Path | None,
+        typer.Option("--run", help="run.json, its folder, or a run name (default: the newest run)"),
+    ] = None,
     paper: Annotated[str | None, typer.Option("-p", "--paper")] = None,
     card: Annotated[str | None, typer.Option("-c", "--card")] = None,
     sheet_layout: Annotated[
@@ -535,9 +549,10 @@ def simulate(
 ) -> None:
     from . import simulate as sim
 
-    sidecar = find_sidecar(run)
+    sidecar = find_run(run)
     if run is not None and sidecar is None:
         fail(f"no run.json at {run}")
+    _say_implicit_run(run, sidecar)
     info = RunInfo.read(sidecar) if sidecar else None
     if pdf is None:
         if info is None or not info.pdf:
@@ -614,14 +629,23 @@ def cache(clear: Annotated[bool, typer.Option("--clear", help="delete every cach
 
 
 # --- backlog: miscuts and skipped pages, across decks ------------------------
-def _load_run(run: Path | None) -> tuple[Path, RunInfo]:
-    sidecar = find_sidecar(run)
-    if sidecar is None:
-        where = run or Path.cwd()
-        fail(
-            f"no run.json in {where} — run this inside a deck's output folder "
-            "(the real one, not the flat Windows mirror), or point --run at it"
+def _say_implicit_run(run: Path | None, sidecar: Path | None) -> None:
+    """Without --run, outside a deck folder, the newest run was taken: say which."""
+    if run is None and sidecar is not None and sidecar.parent != Path.cwd():
+        typer.echo(
+            f"run: {sidecar.parent.name} (the newest in {sidecar.parent.parent}; --run NAME for another)"
         )
+
+
+def _load_run(run: Path | None) -> tuple[Path, RunInfo]:
+    sidecar = find_run(run)
+    if sidecar is None:
+        where = run or runs_parent()
+        fail(
+            f"no run.json in {where} — point --run at a deck's output folder or name it "
+            "(the real folder, not the flat Windows mirror)"
+        )
+    _say_implicit_run(run, sidecar)
     return sidecar.parent, RunInfo.read(sidecar)
 
 
@@ -647,13 +671,14 @@ def _sheets_of(run_dir: Path, info: RunInfo, overrides: dict) -> dict[str, manif
         "Queue cards of this run for reprinting (miscuts, bad laminations, the page you skipped). "
         "REF: a card name (unique match), p3 (whole page 3), p3.5 (page 3 slot 5), last (last page); "
         "d1 / d1.2 / dlast for the duplex sheet. Repeat a name for more copies. Appends to BACKLOG.txt "
-        "next to the deck folder."
+        "next to the deck folder. Takes the deck folder you're in, else the newest run (--run NAME for another)."
     )
 )
 def redo(
     refs: Annotated[list[str], typer.Argument(help="card names, pN, pN.S, last, dN, dN.S, dlast")],
     run: Annotated[
-        Path | None, typer.Option("--run", help="run.json (or its folder) — default: current directory")
+        Path | None,
+        typer.Option("--run", help="run.json, its folder, or a run name — default: the newest run"),
     ] = None,
     dry_run: Annotated[bool, typer.Option("-n", "--dry-run", help="show what would be queued")] = False,
     tokens: Annotated[
@@ -712,13 +737,18 @@ def _per_page(paper: str, card_size: str, sheet_layout: str) -> int:
 backlog_app = typer.Typer(
     invoke_without_command=True,
     no_args_is_help=False,
-    help="Cards still owed across decks (BACKLOG.txt in the current directory): show, build, drop.",
+    help="Cards still owed across decks (BACKLOG.txt beside the deck folders, ~/Desktop/proxies): show, build, drop.",
 )
 app.add_typer(backlog_app, name="backlog")
 
 OutOpt = Annotated[
-    Path,
-    typer.Option("-o", "--out", help="directory holding BACKLOG.txt and the deck folders", file_okay=False),
+    Path | None,
+    typer.Option(
+        "-o",
+        "--out",
+        help="directory holding BACKLOG.txt and the deck folders (default ~/Desktop/proxies)",
+        file_okay=False,
+    ),
 ]
 
 
@@ -755,26 +785,26 @@ SheetLayoutOpt = Annotated[
 @backlog_app.callback()
 def backlog_main(
     ctx: typer.Context,
-    out: OutOpt = Path("."),
+    out: OutOpt = None,
     paper: Annotated[str, typer.Option("-p", "--paper")] = "a4",
     sheet_layout: SheetLayoutOpt = None,
 ) -> None:
     if ctx.invoked_subcommand is None:
-        _show_backlog(out, paper, sheet_layout)
+        _show_backlog(out or runs_parent(), paper, sheet_layout)
 
 
 @backlog_app.command(name="show", help="List the queued cards and how many full sheets they make.")
 def backlog_show(
-    out: OutOpt = Path("."),
+    out: OutOpt = None,
     paper: Annotated[str, typer.Option("-p", "--paper")] = "a4",
     sheet_layout: SheetLayoutOpt = None,
 ) -> None:
-    _show_backlog(out, paper, sheet_layout)
+    _show_backlog(out or runs_parent(), paper, sheet_layout)
 
 
 @backlog_app.command(name="drop", help="Remove entries: by listed number or by (unique) card name.")
-def backlog_drop(refs: Annotated[list[str], typer.Argument()], out: OutOpt = Path(".")) -> None:
-    bl = Backlog.at(out.resolve())
+def backlog_drop(refs: Annotated[list[str], typer.Argument()], out: OutOpt = None) -> None:
+    bl = Backlog.at((out or runs_parent()).resolve())
     for ref in refs:
         try:
             for e in bl.drop(ref):
@@ -788,12 +818,12 @@ def backlog_drop(refs: Annotated[list[str], typer.Argument()], out: OutOpt = Pat
 @backlog_app.command(
     name="build",
     help=(
-        "Turn the backlog into a run folder ./backlog-<date>/ (PDF, duplex PDF, cut file, run.json) like any "
+        "Turn the backlog into a run folder backlog-<date>/ next to the decks (PDF, duplex PDF, cut file, run.json) like any "
         "deck, then clear the built cards from BACKLOG.txt. --full-only keeps a partial last page queued."
     ),
 )
 def backlog_build(
-    out: OutOpt = Path("."),
+    out: OutOpt = None,
     paper: Annotated[str, typer.Option("-p", "--paper", help="a4 | letter | a3 ...")] = "a4",
     sheet_layout: Annotated[str | None, typer.Option("--layout", help=LAYOUT_HELP)] = None,
     backs: Annotated[
@@ -822,7 +852,7 @@ def backlog_build(
     ] = False,
     dry_run: Annotated[bool, typer.Option("-n", "--dry-run", help="show what would be built")] = False,
 ) -> None:
-    out = out.resolve()
+    out = (out or runs_parent()).resolve()
     try:  # before anything is looked up or written; run_build checks the same
         opts = build.resolve_layout(
             build.BuildOptions(paper=paper, layout=sheet_layout, fronts_only=not backs)

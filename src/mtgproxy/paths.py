@@ -18,6 +18,12 @@ SIDECAR_NAME = "run.json"
 NOTES_NAME = "CUT-NOTES.md"
 
 
+def out_root() -> Path:
+    """Where builds land, one folder per deck: $MTG_PROXY_OUT, else ~/Desktop/proxies."""
+    env = os.environ.get("MTG_PROXY_OUT")
+    return Path(env).expanduser() if env else Path.home() / "Desktop" / "proxies"
+
+
 def cache_dir() -> Path:
     """Persistent Scryfall image cache: $MTG_PROXY_CACHE, else ~/.cache/mtg-proxy."""
     env = os.environ.get("MTG_PROXY_CACHE")

@@ -1,7 +1,7 @@
 """The build: decklist → ./<deck>/{<deck>.pdf, <deck>-duplex.pdf?, CUT-NOTES.md, run.json}.
 
-Output goes to ``<out_parent>/<name>/`` (default: the current directory — the
-repo itself is an implementation detail). Only OUR artifacts from a previous
+Output goes to ``<out_parent>/<name>/`` (default: paths.out_root(), ~/Desktop/proxies;
+the repo itself is an implementation detail). Only OUR artifacts from a previous
 run are removed, never the folder itself.
 """
 
@@ -21,7 +21,7 @@ from . import engine, layout, local, manifest, mirror, notes, printing, printing
 from .backlog import Backlog, Entry
 from .cache import ImageCache
 from .decks import FetchedDeck, fetch_deck, is_deck_url
-from .paths import DEFAULT_BACK, DUPLEX_OFFSET_FILE, NOTES_NAME, SCM, cache_dir
+from .paths import DEFAULT_BACK, DUPLEX_OFFSET_FILE, NOTES_NAME, SCM, cache_dir, out_root
 from .sidecar import RunInfo
 from .testcards import write_test_cards
 
@@ -36,7 +36,7 @@ class BuildError(Exception):
 class BuildOptions:
     deck: str | None = None
     fmt: str = "mtga"
-    out_parent: Path = field(default_factory=Path.cwd)
+    out_parent: Path = field(default_factory=out_root)
     paper: str = "a4"
     card_size: str = "standard"
     layout: str | None = None  # 3x3 | 4x2, see layout.py; None: layout.default for the paper and card
@@ -144,7 +144,9 @@ def resolve_deck(opts: BuildOptions) -> ResolvedDeck:
 
 def prepare_out(out_parent: Path, name: str) -> Path:
     if not out_parent.is_dir():
-        raise BuildError(f"--out dir not found: {out_parent}")
+        if out_parent != out_root():
+            raise BuildError(f"--out dir not found: {out_parent}")
+        out_parent.mkdir(parents=True)  # the default proxies folder, first build
     out = out_parent.resolve() / name
     out.mkdir(parents=True, exist_ok=True)
     return out
@@ -663,7 +665,10 @@ def print_summary(r: BuildResult, opts: BuildOptions) -> None:
     if r.duplex_pdf:
         log(f"  Duplex:   {r.duplex_pdf} ({r.dfc_count} double-sided cards — manual duplex, long-edge flip)")
     log(f"  Notes:    make-proxies --notes {r.name}")
-    log(f"  Cut:      cd {os.path.relpath(r.out)} && cut-proxies   (reads run.json)")
+    if r.out.parent == out_root().resolve():
+        log("  Cut:      cut-proxies   (Enter cuts the newest run, this one)")
+    else:
+        log(f"  Cut:      cd {os.path.relpath(r.out)} && cut-proxies   (reads run.json)")
     if r.deferred:
         log(f"  Backlog:  {len(r.deferred)} card(s) deferred → {r.backlog}   (mtg-proxy backlog)")
     if r.windows_path:

@@ -240,9 +240,30 @@ def test_enter_cuts_this_folders_run_with_laminate_over_bluetooth(monkeypatch, t
     assert (o.force, o.passes, o.dry_run, o.proof, o.probe) == (20, 3, False, False, False)
 
 
-def test_with_no_run_here_the_default_is_a_plain_a4_sheet(monkeypatch, tmp_path):
+def test_with_no_run_here_enter_cuts_the_newest_run_below(monkeypatch, tmp_path):
+    import os
+
     monkeypatch.chdir(tmp_path)
+    old = write_run(tmp_path / "olddeck", "olddeck")
+    os.utime(old, (1, 1))
     write_run(tmp_path / "otherdeck", "otherdeck")
+    asked = menu(monkeypatch, "default", "done")
+    o = cut_options(monkeypatch)
+    assert asked[0][1][0] == "Cut otherdeck: 8 cards, letter/standard 4x2 · laminate · Bluetooth"
+    assert (o.label, o.paper) == ("otherdeck", "letter")
+
+
+def test_outside_a_deck_folder_the_menu_lists_the_proxies_folder(monkeypatch, tmp_path, proxies_root):
+    monkeypatch.chdir(tmp_path)  # nothing here or below
+    write_run(proxies_root / "built", "built")
+    asked = menu(monkeypatch, "default", "done")
+    o = cut_options(monkeypatch)
+    assert asked[0][1][0].startswith("Cut built: 8 cards")
+    assert o.label == "built"
+
+
+def test_with_no_run_anywhere_the_default_is_a_plain_a4_sheet(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     asked = menu(monkeypatch, "default", "done")
     o = cut_options(monkeypatch)
     assert asked[0][1][0].startswith("Cut plain A4 sheet")
@@ -254,7 +275,7 @@ def test_choose_picks_a_run_below_a_preset_and_a_mode(monkeypatch, tmp_path):
     sub = write_run(tmp_path / "otherdeck", "otherdeck", paper="a4")
     asked = menu(monkeypatch, "choose", str(sub), "paper", "proof", "done")
     o = cut_options(monkeypatch)
-    assert asked[1][1][0].startswith("plain A4 sheet")  # nothing here, so plain stays the default
+    assert asked[1][1][0].startswith("otherdeck: ")  # nothing here, so the newest run below is the default
     assert (o.label, o.force, o.passes, o.proof, o.dry_run) == ("otherdeck", 10, 1, True, False)
 
 

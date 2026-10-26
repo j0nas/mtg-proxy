@@ -8,6 +8,6 @@ __pycache__/
 .ruff_cache/
 # cut-proxies transcripts/logs and any stray build output inside the repo
 output/
-# your decklists (build output goes wherever you run the command)
+# your decklists (build output goes to ~/Desktop/proxies, see paths.out_root)
 decks/
 .DS_Store
