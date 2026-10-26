@@ -296,11 +296,14 @@ class Session:
             i = end
         self.log("cut_done", bytes=len(data))
 
-    def cut_job(self, job: Job, low: tuple[float, float] = (0.0, 0.0)) -> None:
+    def cut_job(
+        self, job: Job, low: tuple[float, float] = (0.0, 0.0), between: Callable[[], None] | None = None
+    ) -> None:
         """The job after its scan: its scores first, in one pass with the score blade, then the
-        blade set back to the job's (``setup``, the same cutting area reaching back to ``low``) and
-        its cuts, ``job.repeat`` times over with a note after each whole pass. A job without scores
-        goes straight to its cuts with the blade already set up."""
+        blade set back to the job's (``setup``, the same cutting area reaching back to ``low``),
+        ``between`` (the driver's check that the machine kept its place through the blade change),
+        and its cuts, ``job.repeat`` times over with a note after each whole pass. A job without
+        scores goes straight to its cuts with the blade already set up."""
         if job.scores:
             if job.score_blade is None:
                 raise CutError("the job has scored lines but no blade to score them with")
@@ -312,6 +315,8 @@ class Session:
                 "cutting now"
             )
             self.setup(job.blade, job.frame, low)
+            if between:
+                between()
         for n in range(1, job.repeat + 1):
             self.cut(job)
             if job.repeat > 1:

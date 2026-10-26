@@ -650,3 +650,35 @@ def test_scores_and_cuts_both_stay_on_the_paper(tmp_path):
     off = '<path d="M290,20 L300,20" fill="none" stroke="#00ff00"/>'
     with pytest.raises(session.CutError, match="off the 297 x 210 mm page"):
         driver.plan(page(tmp_path, OUTLINE + off), FRAME, BOX, 3, (0.0, 0.0), SCORE)
+
+
+def scored_job():
+    fold = geometry.Polyline(((20, 80), (60, 80)))
+    return replace(job(), scores=[fold], score_blade=protocol.Blade(15, 25, 3))
+
+
+def test_a_scored_job_reads_the_marks_after_the_blade_change_before_it_cuts():
+    t = checked([INK, *FLAT, *MARKS_OK])  # every reading after the check reads ink too
+    said = []
+    driver.cut(
+        scored_job(), t, session.SessionLog(None, echo=said.append), [driver.default_start(FRAME)], check=True
+    )
+    out = sent(t)
+    fold, square = (
+        session.cut_commands(replace(scored_job(), lines=ls))[0] for ls in (scored_job().scores, job().lines)
+    )
+    scores_at, outline_at = out.index(fold), out.index(square)  # the fold's first move, then the square's
+    between = out[scores_at:outline_at]
+    assert between.count("TB63,4") == 5 and "TF5,1" in between  # the cut blade back, then the marks
+    assert "check: the marks still read where the scan put them after the scores" in said
+
+
+def test_a_machine_that_loses_its_place_changing_blades_never_cuts_the_outline():
+    t = checked([INK, *FLAT, *MARKS_OK, PAPER])  # after the scores the square reads paper
+    with pytest.raises(session.CutError, match="after the scores the marks no longer read"):
+        driver.cut(scored_job(), t, log(), [driver.default_start(FRAME)], check=True)
+    out = sent(t)
+    fold, square = (
+        session.cut_commands(replace(scored_job(), lines=ls))[0] for ls in (scored_job().scores, job().lines)
+    )
+    assert fold in out and square not in out[out.index(fold) :]  # scored, not cut

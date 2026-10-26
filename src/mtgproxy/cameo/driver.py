@@ -231,7 +231,7 @@ def cut(
             verify = partial(held, s, job.frame, log, flat, slot) if check else None
             if confirm is None or prove(s, job, log, confirm, attempt, attempt + 1 < rounds, verify):
                 break
-        s.cut_job(job, low)
+        s.cut_job(job, low, partial(kept_place, s, job.frame, log, flat, slot) if check else None)
         if check:
             lost = held(s, job.frame, log, flat, slot)
             if lost:
@@ -258,6 +258,19 @@ def held(s: Session, frame: Frame, log: SessionLog, flat: sensing.Flatness, slot
     failed = check_marks(s, frame, log, flat, ink_only=True)
     s.send(protocol.select_light(slot))
     return failed
+
+
+def kept_place(s: Session, frame: Frame, log: SessionLog, flat: sensing.Flatness, slot: int) -> None:
+    """Between a job's scores and its cuts: the marks' ink still where the frame puts it (``held``),
+    or nothing more is cut. The blade changes depth there (the score's to the cut's), and on
+    2026-10-26 the one run that changed depth mid-session cut 2.5 mm off."""
+    lost = held(s, frame, log, flat, slot)
+    if lost:
+        raise CutError(
+            f"after the scores the marks no longer read where the scan put them ({'; '.join(lost)}): the "
+            "machine lost its place changing blades, so nothing else was cut"
+        )
+    log.say("check: the marks still read where the scan put them after the scores")
 
 
 # The scans a checked job tries, in order, until one agrees with the print. TB122 reads only the square
