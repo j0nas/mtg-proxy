@@ -29,3 +29,20 @@ cleaner unidirectional passes).
 "Holo Proxy with CC" has more under its Advanced… color dialog and the Maintenance tab
 (thick-paper mode) that the screenshots don't show; the panel text lists "Thick paper"
 and "Adobe RGB".
+
+## Setting a queue's paper type from a script
+
+Jobs sent over SSH use a queue's printer-wide default DEVMODE, so a queue's paper type, feeder
+and quality live there. The driver reads them from its private bytes as well as the public
+fields: media at offset 364, quality at 344, 370, 374 and 8008; the public dmPrintQuality is
+ignored. Patching bytes by hand leaves the old paper's derived settings behind. Handing the
+edited DEVMODE to DocumentProperties makes the driver update its private media, but it resets
+quality to Standard, so copy the quality bytes back, run DocumentProperties once more, and write
+the result with SetPrinter level 8. `premium-glossy-queue.ps1` does this for the
+`Premium glossy paper` queue. `Set-PrintConfiguration` drops the Epson fields.
+
+The driver's media ids (DeviceCapabilities DC_MEDIATYPES): Plain paper 1, Epson Premium Glossy
+325, Photo Paper Glossy 396, Epson Ultra Glossy 352, Epson Premium Semigloss 275, Epson Matte
+326, Epson Photo Quality Ink Jet 318, Velvet Fine Art Paper 314, Epson Photo Stickers 338, Thin
+paper 844, Thick paper1 (0.61-0.80 mm) 415, Thick paper2 (0.81-1.30 mm) 416, Envelope 353,
+Letterhead 828. The plain queue's default paper is Letter; print-sheet's `paper=A4` overrides it.
