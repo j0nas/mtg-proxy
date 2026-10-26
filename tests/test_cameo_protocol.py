@@ -29,17 +29,18 @@ SHEET_3X3 = session.Frame(page_w=210, page_h=297, inset=3.5, width=203, height=2
     [
         (SHEET_3X3, (11, 1)),  # registered on laminated 3x3 sheets, 2026-10-25; inset - 6 is off the paper
         (session.Frame(page_w=297, page_h=210, inset=10, width=277, height=190), (12, 4)),
-        (session.Frame(page_w=297, page_h=210, inset=5, width=287, height=200), (7, 1)),  # the deck box
+        (session.Frame(page_w=297, page_h=210, inset=5, width=287, height=200), (8.5, 1)),  # the deck box
     ],
     ids=["3x3", "4x2", "deck box"],
 )
-def test_every_scan_starts_2_mm_into_the_square_inside_the_area_searchs_window(frame, start):
+def test_every_scan_starts_into_the_square_inside_the_area_searchs_window(frame, start):
     """TB123 catches the square with its top-left corner from 5 mm above the start to 30 mm below,
     and from about 1 mm to 24 mm right of it (cameo-re NOTES.md)."""
     top, left = driver.default_start(frame)
     assert (top, left) == start
     corner_x, corner_y = frame.inset, frame.top  # the square's ink: 5 mm from the insets, no stroke
-    assert top - corner_y == 2  # the first row runs through the square
+    assert 2 <= top - corner_y <= 3.5  # the first row runs through the square ...
+    assert top - driver.BACKUP >= driver.EDGE_CLEAR  # ... and the pass measuring it starts on paper
     assert -5 <= corner_y - top <= 30 and 1 <= corner_x - left <= 24
     assert left < corner_x  # the sweep crosses the square's left edge from white paper
 

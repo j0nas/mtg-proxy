@@ -75,14 +75,15 @@ class CutOptions:
 
 def scan_starts(o: CutOptions, frame) -> tuple[list[tuple[float, float]], str]:
     """The starts to try in order, and where the first came from: ``--scan-start`` as given (it is
-    in the loaded mat's frame already), else the one start 2 mm into the square, moved with the
-    paper (``driver.default_start``). TB123's area search covers the millimetre or two the marks
-    move from one load to the next."""
+    in the loaded mat's frame already), else the one start 2 mm or more into the square, moved
+    with the paper (``driver.default_start``). TB123's area search covers the millimetre or two the
+    marks move from one load to the next."""
     from .cameo import driver
 
     if o.scan_starts:
         return o.scan_starts, "--scan-start"
-    return [driver.default_start(frame)], "2 mm into the square"
+    top, left = driver.default_start(frame)
+    return [(top, left)], f"{top - frame.on_mat(frame.top, 0)[0]:g} mm into the square"
 
 
 def read_cut_offset(path: Path = CUT_OFFSET_FILE) -> tuple[float, float]:

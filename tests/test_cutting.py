@@ -45,7 +45,7 @@ def test_the_scan_starts_once_2_mm_into_the_square(tmp_path):
     """TB123's area search finds the square from one start: nothing is remembered between sheets."""
     o = cutting.CutOptions(out_dir=tmp_path)
     assert cutting.scan_starts(o, frame()) == ([(12, 4)], "2 mm into the square")
-    assert cutting.scan_starts(o, frame(inset=5)) == ([(7, 1)], "2 mm into the square")
+    assert cutting.scan_starts(o, frame(inset=5)) == ([(8.5, 1)], "3.5 mm into the square")
 
 
 def test_given_starts_are_tried_as_given(tmp_path):
@@ -56,7 +56,7 @@ def test_given_starts_are_tried_as_given(tmp_path):
 def test_the_default_start_follows_the_paper_and_a_given_one_stays_as_given(tmp_path):
     laid = replace(frame(inset=5), paper_at=(3.0, 3.0))  # the paper deck box, its pouch on the tack
     o = cutting.CutOptions(out_dir=tmp_path)
-    assert cutting.scan_starts(o, laid) == ([(10, 4)], "2 mm into the square")
+    assert cutting.scan_starts(o, laid) == ([(11.5, 4)], "3.5 mm into the square")
     o = cutting.CutOptions(out_dir=tmp_path, scan_starts=[(5.5, 14.5)])
     assert cutting.scan_starts(o, laid) == ([(5.5, 14.5)], "--scan-start")
 
@@ -203,11 +203,11 @@ def test_a_dry_run_says_where_the_paper_lies_only_when_its_off_the_grids_corner(
     assert cutting.run_cut(o) == 0
     out = capsys.readouterr().out
     assert "cut-proxies: the paper's top-left corner 3 mm right and 3 mm down of the mat grid's\n" in out
-    assert "scan starts at (10, 4) mm, 2 mm into the square" in out
-    assert "TB123,4000,5740,200,80" in (tmp_path / "box.cmds").read_bytes().decode().split("\x03")
+    assert "scan starts at (11.5, 4) mm, 3.5 mm into the square" in out
+    assert "TB123,4000,5740,230,80" in (tmp_path / "box.cmds").read_bytes().decode().split("\x03")
     assert cutting.run_cut(replace(o, paper_at=(0.0, 0.0))) == 0
     out = capsys.readouterr().out
-    assert "scan starts at (7, 1) mm" in out and "paper's top-left corner" not in out
+    assert "scan starts at (8.5, 1) mm" in out and "paper's top-left corner" not in out
 
 
 def menu(monkeypatch, *answers):

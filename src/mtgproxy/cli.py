@@ -373,7 +373,7 @@ def cut(
             "--scan-start",
             metavar="TOP,LEFT",
             help="where the mark search starts, mm from the loaded origin, used as given (--paper-at "
-            "moves only the default); repeat to retry in order (default: 2 mm into the square, 6 mm "
+            "moves only the default); repeat to retry in order (default: 2 mm or more into the square, 6 mm "
             "left of it or 1 mm from the paper's edge: 11,1 on a 3x3 sheet, 12,4 on a 4x2)",
         ),
     ] = None,
@@ -542,7 +542,7 @@ def simulate(
         typer.Option(
             "--scan-start",
             metavar="TOP,LEFT",
-            help="where the mark search starts, as cut-proxies (default: 2 mm into the square)",
+            help="where the mark search starts, as cut-proxies (default: 2 mm or more into the square)",
         ),
     ] = None,
     page: Annotated[int, typer.Option("--page", min=1, help="which page of the PDF")] = 1,

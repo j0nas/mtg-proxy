@@ -44,11 +44,11 @@ def test_a_good_job_scans_cuts_and_returns_to_the_origin_without_moving_it():
     out = sent(t)
     ending = "TB0\x03L0\x03\\0,0\x03M0,0\x03TR0,0\x03J0\x03FN0\x03TB50,0\x03"
     # Studio's order: prepare, describe + scan, then the blade inside the frame, cut, go home.
-    assert out.index("TR0,1") < out.index("TB123,4000,5740,140,20\x03TB99") < out.index("FX20,1")
+    assert out.index("TR0,1") < out.index("TB123,4000,5740,170,20\x03TB99") < out.index("FX20,1")
     assert out.index("FX20,1") < out.index("D") < out.rindex(ending)
     assert "Z4140,5880\x03" in out  # the cutting area reaches the paper's far edges (+2 mm)
     assert "SO0" not in out
-    assert result.start == (7, 1)  # 2 mm into the 5 mm deck box's square, 1 mm from the edge
+    assert result.start == (8.5, 1)  # 3.5 mm into the 5 mm deck box's square, 1 mm from the edge
 
 
 def test_a_status_reply_during_the_scan_is_not_mistaken_for_its_result():
@@ -405,9 +405,9 @@ def test_a_page_point_moves_onto_the_mat_by_where_the_paper_lies():
 
 
 def test_the_default_start_moves_with_the_paper():
-    assert driver.default_start(FRAME) == (7, 1)
-    assert driver.default_start(SHIFTED) == (9, 4)
-    assert driver.default_start(replace(FRAME, paper_at=(3.0, 3.0))) == (10, 4)  # the deck box on the tack
+    assert driver.default_start(FRAME) == (8.5, 1)
+    assert driver.default_start(SHIFTED) == (10.5, 4)
+    assert driver.default_start(replace(FRAME, paper_at=(3.0, 3.0))) == (11.5, 4)  # the deck box on the tack
 
 
 def test_every_reading_before_the_scan_moves_with_the_paper_and_none_after_it():
@@ -423,7 +423,7 @@ def test_every_reading_before_the_scan_moves_with_the_paper_and_none_after_it():
     assert len(moves(before)) == 5  # the square's middle, then the blank paper
     assert moves(moved_before) == [(y + 40, x + 60) for y, x in moves(before)]  # 2 mm down, 3 mm right
     assert moves(moved_before)[0] == (190, 210)  # the square's middle, page (7.5, 7.5)
-    assert "TB123,4000,5740,180,80\x03" in moved_before  # from (9, 4)
+    assert "TB123,4000,5740,210,80\x03" in moved_before  # from (10.5, 4)
     assert moved_after == after  # the check after the scan, the cutting area and the cut: from the mark
 
 

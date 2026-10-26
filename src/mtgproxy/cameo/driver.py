@@ -35,14 +35,24 @@ PROBE_QUERIES = ("FQ0", "FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6", "FQ7", "FQ8", 
 
 
 LOWEST = 1.0  # mm: no start above or left of this
+BACKUP = 7.0  # mm the head backs up above the search row that caught the square, to measure it down
+EDGE_CLEAR = 1.5  # mm inside the paper's top edge that measuring pass must start
 
 
 def default_start(frame: Frame) -> tuple[float, float]:
     """Where the mark search starts, (top, left) mm from the origin: 2 mm below the square's top
-    edge and 6 mm left of it, or as far left as LOWEST allows from the paper's edge, then moved
-    with the paper (``Frame.on_mat``). (11, 1) on a 3x3 sheet (the square at 3.5-8.5 mm across,
-    9-14 mm down), (12, 4) on a 4x2 sheet (10-15 mm both ways), (7, 1) on the 5 mm deck box,
-    (10, 4) with its pouch on the tack and the paper 3 mm in both ways.
+    edge, or lower so the pass that measures the square starts EDGE_CLEAR inside the paper, and 6
+    mm left of it, or as far left as LOWEST allows from the paper's edge, then moved with the paper
+    (``Frame.on_mat``). (11, 1) on a 3x3 sheet (the square at 3.5-8.5 mm across, 9-14 mm down),
+    (12, 4) on a 4x2 sheet (10-15 mm both ways), (8.5, 1) on the 5 mm deck box, (11.5, 4) with its
+    pouch on the tack and the paper 3 mm in both ways.
+
+    Once a search row catches the square, the head backs up BACKUP above that row and measures the
+    square's middle down from there (cameo-re NOTES.md, "Locating it"). On 2026-10-26 the deck box
+    started 2 mm into its square, 7 mm below the paper's top edge: that pass began on the edge,
+    which a laminated sheet's pouch shows as dark as ink, and every scan, TB123 twice and TB122,
+    found the square and failed to measure it (reply -1). Starting 3.5 mm into the square, the pass
+    starts 1.5 mm inside the paper.
 
     The machine finds the square by an area search: rows 3 mm apart from the start to 30 mm below
     it, each sweeping 30 mm to its right, for a dark run 3.5-9 mm long (firmware V1.04, cameo-re
@@ -57,9 +67,9 @@ def default_start(frame: Frame) -> tuple[float, float]:
     took the firmware's second try (28 s) and registered off the top of the sheet, while a start
     2 mm into it found the marks first time twice (13-14 s) and then registered four sheets cut in
     a row. A 4x2 sheet's start follows that: (8, 4), 2 mm above its square, registered once, on
-    plain A4 (2026-10-24); (12, 4) has not been tried on the machine, nor have (7, 1) and (10, 4)
-    on the deck box."""
-    return frame.on_mat(frame.top + 2, max(LOWEST, frame.inset - 6))
+    plain A4 (2026-10-24); (12, 4) has not been tried on the machine."""
+    top = max(frame.top + 2, min(BACKUP + EDGE_CLEAR, frame.top + proof.SQUARE - 1.5))
+    return frame.on_mat(top, max(LOWEST, frame.inset - 6))
 
 
 def plan(svg: Path, frame: Frame, blade: protocol.Blade, passes: int, bias: tuple[float, float]) -> Job:
