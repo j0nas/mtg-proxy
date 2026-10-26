@@ -214,16 +214,32 @@ def read_loaded(s: Session, frame: Frame, pt: sensing.Point | sensing.Check) -> 
 
 
 def check_placement(s: Session, frame: Frame, log: SessionLog) -> None:
-    """Before the scan: ink under the square's middle, or the sheet isn't where its marks should be."""
+    """Before the scan: ink under the square's middle, or the sheet isn't where its marks should be.
+    A landscape sheet without it is read once more where the square lies when the sheet is loaded
+    portrait, as it leaves the printer (``sensing.turned``): ink there says so.
+
+    On 2026-10-26 a laminated deck box went on the mat as it came out of the printer, its square
+    top-right. The millimetres in the stop are where the head read, on the mat."""
     c = sensing.placement(frame)
     level, reply = read_loaded(s, frame, c)
     log("placement", x=c.x, y=c.y, level=level, reply=reply)
-    if c.reads(level) is not True:
-        raise CutError(
-            f"no ink at the square's middle before the scan ({c.y:g} mm down, {c.x:g} mm in; it read "
-            f"{level!r}): the sheet isn't where its marks should be. Put its top-left corner "
-            f"{frame.placed()}, reload and rerun"
-        )
+    if c.reads(level) is True:
+        return
+    t = sensing.turned(frame)
+    if t is not None:
+        t_level, t_reply = read_loaded(s, frame, t)
+        log("placement_turned", x=t.x, y=t.y, level=t_level, reply=t_reply)
+        if t.reads(t_level) is True:
+            raise CutError(
+                "the sheet lies portrait, as it leaves the printer: turn it a quarter anticlockwise so "
+                "the square is top-left, reload and rerun"
+            )
+    y, x = frame.on_mat(c.y, c.x)
+    raise CutError(
+        f"no ink at the square's middle before the scan ({y:g} mm down, {x:g} mm in from the mat grid's "
+        f"corner; it read {level!r}): the sheet isn't where its marks should be. Put its top-left corner "
+        f"{frame.placed()}, reload and rerun"
+    )
 
 
 def read_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:

@@ -4,10 +4,14 @@ import base64
 import subprocess
 from pathlib import Path
 
+import numpy as np
+import pypdfium2 as pdfium
 import pytest
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import ContentStream
 
 from mtgproxy import printing
+from mtgproxy.cameo import proof, sensing, session
 from mtgproxy.printing import PrintError, print_pdf
 
 
@@ -48,7 +52,41 @@ def test_landscape_rotated_portrait_untouched(tmp_path):
     print_pdf(pdf, "plain", dry_run=True, runner=pc, say=lines.append)
     pages = pc.copied[0][3].pages
     assert [p.get("/Rotate") or 0 for p in pages] == [90, 0]
-    assert any("1 turned upright" in line and "2 page(s)" in line for line in lines)
+    assert "d-portrait.pdf: A4, 2 page(s), 1 turned upright; on the mat the square goes top-left" in lines
+
+
+def test_a_portrait_sheet_says_nothing_about_the_mat(tmp_path):
+    lines = []
+    print_pdf(
+        _pdf(tmp_path / "d.pdf", [(210, 297)]), "plain", dry_run=True, runner=FakePc(), say=lines.append
+    )
+    assert "d-portrait.pdf: A4, 1 page(s), 0 turned upright" in lines
+
+
+def test_a_turned_page_prints_its_square_where_the_check_looks_on_a_sheet_loaded_as_printed(tmp_path):
+    """sensing.turned assumes make_upright turns a page a quarter clockwise: render the upright page
+    (pdfium applies /Rotate) and find the deck box's square on it."""
+    frame = session.Frame(page_w=297, page_h=210, inset=5, width=287, height=200)
+    k, side = 1 / printing.PT_MM, proof.SQUARE
+    w = PdfWriter()
+    page = w.add_blank_page(frame.page_w * k, frame.page_h * k)
+    square = ContentStream(None, w)  # PDF y runs up from the bottom edge
+    square.set_data(
+        f"0 g {frame.inset * k} {(frame.page_h - frame.top - side) * k} {side * k} {side * k} re f".encode()
+    )
+    page.replace_contents(square)
+    w.write(tmp_path / "box.pdf")
+    printing.make_upright(tmp_path / "box.pdf", tmp_path / "upright.pdf")
+    per_mm = 10
+    doc = pdfium.PdfDocument(str(tmp_path / "upright.pdf"))
+    grey = doc[0].render(scale=per_mm / k, grayscale=True).to_numpy()
+    doc.close()
+    grey = grey[..., 0] if grey.ndim == 3 else grey
+    assert (grey.shape[1] / per_mm, grey.shape[0] / per_mm) == pytest.approx((210, 297), abs=0.2)  # portrait
+    ys, xs = np.nonzero(grey < 128)
+    middle = ((xs.min() + xs.max() + 1) / 2 / per_mm, (ys.min() + ys.max() + 1) / 2 / per_mm)
+    t = sensing.turned(frame)
+    assert middle == pytest.approx((t.x, t.y), abs=0.1)  # (202.5, 7.5): top-right
 
 
 def test_dry_run_copies_but_never_prints(tmp_path):

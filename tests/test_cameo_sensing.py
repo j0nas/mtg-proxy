@@ -87,6 +87,13 @@ def test_the_placement_reading_is_the_square_middle_in_page_mm():
     assert (p.x, p.y, p.ink) == (6.0, 11.5, True)
 
 
+def test_a_landscape_sheet_loaded_as_printed_has_its_square_top_right():
+    deck_box = session.Frame(page_w=297, page_h=210, inset=5, width=287, height=200)
+    t = sensing.turned(deck_box)
+    assert (t.x, t.y, t.ink) == (202.5, 7.5, True)  # page (7.5, 7.5) turned a quarter clockwise
+    assert sensing.turned(FRAME) is None  # a portrait sheet goes on the mat as it prints
+
+
 def test_the_square_on_a_good_sheet_reads_a_quarter_mm_left_of_true():
     # The laminated lands sheet's square across x on 2026-10-25, -2.5..7.5 mm from its near edge.
     levels = [161, 168, 176, 196, *[255] * 11, 253, 238, 232, 228, 230, 236]

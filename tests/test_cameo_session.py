@@ -1,6 +1,7 @@
 """Our driver's session against a scripted machine: registration retries, the guaranteed return to
 the origin, preflight refusals, bounds and cut pacing."""
 
+import json
 import re
 from dataclasses import replace
 
@@ -431,15 +432,19 @@ def test_diagnose_reads_every_row_where_the_paper_lies():
 
 
 @pytest.mark.parametrize(
-    "frame, corner", [(FRAME, "on the mat grid's"), (SHIFTED, "3 mm right and 2 mm down of the mat grid's")]
+    "frame, mat, corner",
+    [
+        (FRAME, "7.5 mm down, 7.5 mm in", "on the mat grid's"),
+        (SHIFTED, "9.5 mm down, 10.5 mm in", "3 mm right and 2 mm down of the mat grid's"),
+    ],
 )
-def test_a_sheet_without_ink_under_the_square_is_told_where_its_corner_goes(frame, corner):
-    t = checked([PAPER])
+def test_a_sheet_without_ink_under_the_square_is_told_where_its_corner_goes(frame, mat, corner):
+    t = checked([PAPER])  # the square and, on this landscape sheet, where it lies on a portrait one
     with pytest.raises(session.CutError) as e:
         driver.cut(replace(job(), frame=frame), t, log(), [driver.default_start(frame)], check=True)
     assert str(e.value) == (
-        "no ink at the square's middle before the scan (7.5 mm down, 7.5 mm in; it read 180): the sheet "
-        f"isn't where its marks should be. Put its top-left corner {corner}, reload and rerun"
+        f"no ink at the square's middle before the scan ({mat} from the mat grid's corner; it read 180): "
+        f"the sheet isn't where its marks should be. Put its top-left corner {corner}, reload and rerun"
     )
 
 
@@ -449,3 +454,58 @@ def test_the_stops_after_a_scan_say_where_the_papers_corner_goes():
         driver.cut(replace(job(), frame=SHIFTED), machine({b"TB123": NOT_FOUND}), log(), [(9, 4)])
     with pytest.raises(session.CutError, match=f"lies flat with its paper's {corner} and its marks"):
         driver.cut(replace(job(), frame=SHIFTED), checked([INK, PAPER]), log(), [(9, 4)], check=True)
+
+
+# --- a landscape sheet loaded as it leaves the printer ---------------------------------------------
+# print-sheet turns a landscape page a quarter clockwise for the PC's driver, so the sheet comes out
+# portrait with its square top-right. On 2026-10-26 a laminated deck box went on the mat that way and
+# the placement reading read 246 at page (7.5, 7.5), mat (10.5, 10.5).
+DECK_BOX = replace(FRAME, paper_at=(3.0, 3.0))  # A4 landscape, marks 5 mm in, the pouch on the tack
+TURNED = (
+    "the sheet lies portrait, as it leaves the printer: turn it a quarter anticlockwise so the square "
+    "is top-left, reload and rerun"
+)
+
+
+def placement_readings(frame, readings, tmp_path):
+    """Cut with the check on a sheet whose readings before the scan are ``readings``: the error, the
+    readings' moves (y, x SU) and the logged placement events."""
+    path = tmp_path / "session.jsonl"
+    t, s_log = checked(readings), session.SessionLog(path)
+    with pytest.raises(session.CutError) as e:
+        driver.cut(replace(job(), frame=frame), t, s_log, [driver.default_start(frame)], check=True)
+    s_log.close()
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    placed = [(r["event"], r["x"], r["y"], r["level"]) for r in events if r["event"].startswith("placement")]
+    assert "TB123" not in sent(t) and "TB122" not in sent(t)  # nothing scanned, nothing cut
+    return str(e.value), moves(sent(t).replace("\x1b\x05", "")), placed
+
+
+def test_a_landscape_sheet_loaded_as_printed_is_told_to_turn_a_quarter(tmp_path):
+    error, at, placed = placement_readings(DECK_BOX, [b"  246\x03", INK], tmp_path)
+    assert error == TURNED
+    assert at == [(210, 210), (210, 4110)]  # mat (10.5, 10.5), then (10.5, 205.5): page (202.5, 7.5) + 3 mm
+    assert placed == [("placement", 7.5, 7.5, 246), ("placement_turned", 202.5, 7.5, 255)]
+
+
+def test_a_landscape_sheet_with_paper_where_a_turned_square_lies_gets_the_placement_stop(tmp_path):
+    error, at, placed = placement_readings(DECK_BOX, [PAPER], tmp_path)
+    assert error.startswith("no ink at the square's middle before the scan (10.5 mm down, 10.5 mm in from")
+    assert at == [(210, 210), (210, 4110)]
+    assert [p[0] for p in placed] == ["placement", "placement_turned"]
+
+
+def test_a_portrait_sheet_without_ink_under_the_square_is_read_once(tmp_path):
+    portrait = session.Frame(page_w=210, page_h=297, inset=3.5, width=203, height=279, length=6, inset_y=9)
+    error, at, placed = placement_readings(portrait, [PAPER, INK], tmp_path)  # ink after it goes unread
+    assert error.startswith("no ink at the square's middle before the scan (11.5 mm down, 6 mm in from")
+    assert at == [(230, 120)]
+    assert [p[0] for p in placed] == ["placement"]
+
+
+def test_a_square_that_reads_ink_is_never_read_turned():
+    t = checked([INK, *FLAT, *MARKS_OK])
+    driver.cut(replace(job(), frame=DECK_BOX), t, log(), [driver.default_start(DECK_BOX)], check=True)
+    out = sent(t).replace("\x1b\x05", "")
+    before = out[: out.index("TB123")]
+    assert moves(before)[0] == (210, 210) and (210, 4110) not in moves(before)

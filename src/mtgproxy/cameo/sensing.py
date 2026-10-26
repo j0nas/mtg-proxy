@@ -124,6 +124,18 @@ def placement(frame: Frame) -> Check:
     )
 
 
+def turned(frame: Frame) -> Check | None:
+    """Where ``placement`` lies on a landscape sheet loaded as it leaves the printer, mm from that
+    sheet's top-left corner: print-sheet turns a landscape page a quarter clockwise onto portrait
+    paper (``printing.make_upright``), so page (x, y) prints at (page_h − y, x), the square
+    top-right. Read like ``placement`` (``driver.read_loaded``), only when that finds no ink. None
+    on a portrait sheet, which goes on the mat as it prints."""
+    if frame.page_w <= frame.page_h:
+        return None
+    c = placement(frame)
+    return replace(c, what="the square, on a sheet loaded portrait", x=frame.page_h - c.y, y=c.x)
+
+
 def checks(frame: Frame) -> list[Check]:
     """The readings a cut takes after the scan, page mm: the square's middle and a paper point
     OUTSIDE_SQUARE beyond each of its edges, then each L leg's centre line halfway along it."""

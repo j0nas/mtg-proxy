@@ -155,7 +155,10 @@ def print_pdf(
         paper, pages, rotated = make_upright(pdf, upright)
         check_queue(queue, runner)  # before anything is copied
         say(f"queue '{queue}' ok")
-        say(f"{name}: {paper}, {pages} page(s), {rotated} turned upright")
+        # A turned 4x2 or deck box sheet comes out with its square top-right and goes on the mat
+        # landscape; the engine's 3x3 pages are landscape too and come out right. Both: square top-left.
+        mat = "; on the mat the square goes top-left" if rotated else ""
+        say(f"{name}: {paper}, {pages} page(s), {rotated} turned upright{mat}")
         remote = copy_to_pc(upright, name, runner)
         say(f"copied to {remote} ({upright.stat().st_size} bytes)")
     command = print_command(queue, remote, paper)

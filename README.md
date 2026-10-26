@@ -365,6 +365,12 @@ fails. A leg that never reads full ink still passes when it is a narrow line dar
 on both sides by 40 (a double-sided sheet's leg peaked at 239 over paper at 91-132); the edge of a
 shadow is dark on one side only.
 
+A landscape sheet (4x2, the deck box) comes out of the printer portrait with its square top-right,
+and goes on the mat landscape with the square top-left. When the square's middle reads no ink on a
+landscape sheet, the head reads once more where the square lies on a sheet loaded as printed, and
+ink there stops the run with "the sheet lies portrait, as it leaves the printer: turn it a quarter
+anticlockwise so the square is top-left, reload and rerun".
+
 Before the scan it also reads blank paper beside each mark: 3 mm above the square, inside each L's
 elbow 3 mm from its corner, and the middle of the top margin for comparison. On glossy film the
 sensor reads the light the film mirrors back, so it sees the film's angle: where the sheet doesn't
