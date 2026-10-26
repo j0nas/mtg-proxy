@@ -80,10 +80,12 @@ def plan(
     passes: int,
     bias: tuple[float, float],
     score_blade: protocol.Blade | None = None,
+    pass_by_pass: bool = False,
 ) -> Job:
     """The job an SVG describes. Its scores (``geometry.SCORE`` strokes) are scored once with
     ``score_blade`` before anything is cut, or left out when it is None (a sheet scored already).
-    The cuts go ``passes`` times, each closed loop's laps in a row. A score blade at least as heavy as the cut's in both force
+    The cuts go ``passes`` times: each closed loop's laps in a row, or with ``pass_by_pass`` every
+    path once, then every path again. A score blade at least as heavy as the cut's in both force
     and depth is refused: its one pass would go as deep as a pass of the cut."""
     cuts, scores = geometry.load_kinds(svg)
     if score_blade is None:
@@ -99,7 +101,7 @@ def plan(
     start = (frame.inset, frame.top)
     ordered = geometry.order(cuts, start=start)
     folds = geometry.order(scores, start=start)
-    lines = geometry.passes(ordered, passes)
+    lines = geometry.passes(ordered, 1 if pass_by_pass else passes)
     job = Job(
         lines,
         frame,
@@ -108,6 +110,7 @@ def plan(
         shapes=[*folds, *ordered],
         scores=geometry.passes(folds, 1),
         score_blade=score_blade if scores else None,
+        repeat=passes if pass_by_pass else 1,
     )
     check_bounds(job)
     return job

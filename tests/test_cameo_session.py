@@ -552,7 +552,7 @@ def test_a_pause_on_the_machine_waits_for_the_operator_and_the_cut_carries_on():
     assert protocol.status_of(b"3\x03") == "paused"
 
 
-# --- scored folds ----------------------------------------------------------------
+# --- scored folds and pass by pass ----------------------------------------------------
 def page(tmp_path, body):
     f = tmp_path / "job.svg"
     f.write_text(
@@ -614,6 +614,36 @@ def test_a_score_blade_as_heavy_as_the_cut_is_refused_and_none_leaves_the_scores
     t = machine()
     driver.cut(job, t, log(), [driver.default_start(FRAME)])
     assert "M340,1300" not in sent(t) and sent(t).count("TF6,1") == 1
+
+
+def test_pass_by_pass_cuts_every_path_once_then_again_saying_when_each_pass_is_done(tmp_path):
+    f = page(tmp_path, OUTLINE + DASH)
+    job = driver.plan(f, FRAME, BOX, 3, (0.0, 0.0), SCORE, pass_by_pass=True)
+    ordered = geometry.order(geometry.load_svg(f), start=(FRAME.inset, FRAME.top))
+    assert job.lines == geometry.passes(ordered, 1) and job.repeat == 3
+    t, said = machine(), []
+    driver.cut(job, t, session.SessionLog(None, echo=said.append), [driver.default_start(FRAME)])
+    out = sent(t)
+    dash, outline = "M700,1100", "M300,300"  # inside the outline, so cut first in every pass
+    assert out.count(dash) == out.count(outline) == 3
+    assert out.index(dash) < out.index(outline) < out.index(dash, out.index(outline))
+    assert [m for m in said if m.startswith("pass ")] == [
+        "pass 1 of 3 done",
+        "pass 2 of 3 done",
+        "pass 3 of 3 done",
+    ]
+    # Each lap of the outline is its own move: one lap and the overcut a pass, not three in a row.
+    draws = [c for c in out.split("\x03") if c.startswith("D")]
+    assert len(draws) == 6
+    # By default the laps stay in a row, and nothing says "pass".
+    t, said = machine(), []
+    driver.cut(
+        driver.plan(f, FRAME, BOX, 3, (0.0, 0.0), SCORE),
+        t,
+        session.SessionLog(None, echo=said.append),
+        [driver.default_start(FRAME)],
+    )
+    assert sent(t).count(outline) == 1 and not any(m.startswith("pass ") for m in said)
 
 
 def test_scores_and_cuts_both_stay_on_the_paper(tmp_path):

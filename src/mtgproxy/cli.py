@@ -293,6 +293,14 @@ def cut(
     speed: Annotated[int | None, typer.Option(min=1, max=30)] = None,
     depth: Annotated[int | None, typer.Option(min=0, max=10, help="AutoBlade depth")] = None,
     passes: Annotated[int | None, typer.Option(min=1, max=8)] = None,
+    pass_by_pass: Annotated[
+        bool,
+        typer.Option(
+            "--pass-by-pass",
+            help="cut every path once, then every path again, --passes times, saying when each whole "
+            "pass is done (pause the Cameo there to check the sheet); default: each loop's passes in a row",
+        ),
+    ] = False,
     score_force: Annotated[
         int,
         typer.Option(
@@ -452,6 +460,7 @@ def cut(
         speed=blade.speed if speed is None else speed,
         depth=blade.depth if depth is None else depth,
         passes=blade.passes if passes is None else passes,
+        pass_by_pass=pass_by_pass,
         scores=not no_scores, score_force=score_force, score_speed=score_speed, score_depth=score_depth,
         x_off=x_off, y_off=y_off,
         connection="ble" if ble else "usb", ble_name=ble_name,

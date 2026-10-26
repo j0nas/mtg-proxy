@@ -276,6 +276,7 @@ cut-proxies                # menu; Enter cuts the newest run (paper, card size, 
 cut-proxies --run mydeck   # a named run in ~/Desktop/proxies, no menu
 cut-proxies --preset paper # plain paper instead of laminate
 cut-proxies --passes 4     # also --force/--speed/--depth, --x-off/--y-off
+cut-proxies --pass-by-pass # every path once, then every path again, --passes times
 cut-proxies --score-force 12 --score-depth 2   # the blade for an SVG's scored lines (see below)
 cut-proxies --no-scores    # leaves an SVG's scored lines uncut: another pass on a scored sheet
 cut-proxies --usb          # over the cable instead of Bluetooth LE
@@ -314,6 +315,15 @@ both force and depth is refused, since its one pass would go as deep as a pass o
 has, and so does every proxy sheet. `--no-scores` leaves the scored lines uncut, for another pass on
 a sheet whose folds are scored already: the menu's "one more pass" does that by itself, and a
 scored job's last line says so.
+
+Each closed path is cut `--passes` times in a row by default, as continuous laps with no lift, so
+the laps lie on top of each other. `--pass-by-pass` cuts every path once, then every path again,
+`--passes` times over, with "pass 1 of 3 done" after each whole pass. It is for re-cutting a sheet
+that already has grooves, where one or two passes may be enough. The next pass starts as soon as
+one ends, so press the Cameo's pause button at that line: it stops early in the next pass, the
+driver waits for as long as it stays paused, and pressing pause again carries on. Inside-first
+order holds within each pass, so a part whose outline goes through in an early pass is loose for
+the later passes of the slits and holes inside it.
 
 Don't eject after a cut: lift a corner. At a terminal,
 cut-proxies then watches the mat. Unload it, load the next sheet, and five seconds after the mat

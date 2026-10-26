@@ -115,10 +115,17 @@ def test_paper_at_refuses_anything_but_one_or_two_lengths_of_0_or_more(monkeypat
 def test_scored_lines_get_their_own_light_blade_unless_told_otherwise(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     o = cut_options(monkeypatch)
-    assert (o.scores, o.score_force, o.score_speed, o.score_depth) == (True, 15, None, 3)
+    assert (o.scores, o.score_force, o.score_speed, o.score_depth, o.pass_by_pass) == (
+        True,
+        15,
+        None,
+        3,
+        False,
+    )
     o = cut_options(monkeypatch, "--score-force", "12", "--score-speed", "6", "--score-depth", "2")
     assert (o.score_force, o.score_speed, o.score_depth) == (12, 6, 2)
-    assert not cut_options(monkeypatch, "--no-scores").scores
+    o = cut_options(monkeypatch, "--no-scores", "--pass-by-pass", "--passes", "2")
+    assert (o.scores, o.pass_by_pass, o.passes) == (False, True, 2)
 
 
 def test_an_unknown_preset_is_refused(monkeypatch, tmp_path):
@@ -483,3 +490,11 @@ def test_a_dry_run_with_scored_folds_says_how_they_are_cut(tmp_path, capsys):
     )
     with pytest.raises(cutting.CutError, match="no lighter than the cut's"):
         cutting.run_cut(replace(o, force=10, speed=5, depth=1))  # --preset paper's blade
+
+
+@needs_engine
+def test_a_dry_run_pass_by_pass_says_so(tmp_path, capsys):
+    o = cutting.CutOptions(layout="3x3", dry_run=True, out_dir=tmp_path, label="t", pass_by_pass=True)
+    assert cutting.run_cut(o) == 0
+    out = capsys.readouterr().out
+    assert "passes 3, pass by pass ·" in out and "pass 3 of 3 done" in out and "scored line" not in out

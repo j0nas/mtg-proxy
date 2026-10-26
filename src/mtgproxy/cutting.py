@@ -84,6 +84,7 @@ class CutOptions:
     score_force: int = SCORE_FORCE
     score_speed: int | None = None  # None = the cut's speed
     score_depth: int = SCORE_DEPTH
+    pass_by_pass: bool = False  # every path once, then every path again, `passes` times
 
 
 def scan_starts(o: CutOptions, frame) -> tuple[list[tuple[float, float]], str]:
@@ -192,7 +193,7 @@ def run_cut(o: CutOptions) -> int:
         if o.scores:
             speed = o.speed if o.score_speed is None else o.score_speed
             score = protocol.Blade(o.score_force, speed, o.score_depth)
-        job = driver.plan(svg, frame, blade, o.passes, bias, score)
+        job = driver.plan(svg, frame, blade, o.passes, bias, score, o.pass_by_pass)
     except (ValueError, session.CutError) as e:
         raise CutError(str(e)) from e
     starts, origin = scan_starts(o, frame)
@@ -206,8 +207,9 @@ def run_cut(o: CutOptions) -> int:
         f"{frame.length:g} x {frame.thickness:g} mm)"
     )
     print(
-        f"cut-proxies: force {o.force} · speed {o.speed} · depth {o.depth} · passes {o.passes} · "
-        f"offset x={bias[0]:g}mm y={bias[1]:g}mm · via {via}"
+        f"cut-proxies: force {o.force} · speed {o.speed} · depth {o.depth} · passes {o.passes}"
+        + (", pass by pass" if o.pass_by_pass else "")
+        + f" · offset x={bias[0]:g}mm y={bias[1]:g}mm · via {via}"
     )
     if job.scores:
         b = job.score_blade

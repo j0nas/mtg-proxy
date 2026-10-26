@@ -78,6 +78,9 @@ class Job:
     # Scored in one pass with ``score_blade`` before anything is cut (an SVG's SCORE strokes).
     scores: list[Polyline] = field(default_factory=list)
     score_blade: p.Blade | None = None
+    # How many times ``lines`` is cut, one whole pass after another (--pass-by-pass); 1 when
+    # ``lines`` already holds every pass, each closed loop's laps in a row.
+    repeat: int = 1
 
 
 def registered(job: Job) -> list[list[tuple[float, float]]]:
@@ -296,7 +299,8 @@ class Session:
     def cut_job(self, job: Job, low: tuple[float, float] = (0.0, 0.0)) -> None:
         """The job after its scan: its scores first, in one pass with the score blade, then the
         blade set back to the job's (``setup``, the same cutting area reaching back to ``low``) and
-        its cuts. A job without scores goes straight to its cuts with the blade already set up."""
+        its cuts, ``job.repeat`` times over with a note after each whole pass. A job without scores
+        goes straight to its cuts with the blade already set up."""
         if job.scores:
             if job.score_blade is None:
                 raise CutError("the job has scored lines but no blade to score them with")
@@ -308,7 +312,10 @@ class Session:
                 "cutting now"
             )
             self.setup(job.blade, job.frame, low)
-        self.cut(job)
+        for n in range(1, job.repeat + 1):
+            self.cut(job)
+            if job.repeat > 1:
+                self.log.say(f"pass {n} of {job.repeat} done")
 
     def finish(self) -> None:
         """Return to the origin (never move it). Safe to call after an error."""
