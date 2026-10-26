@@ -5,6 +5,7 @@ below live there as the defaults of the PC's print queues: `Glossy photo paper p
 sheets, `ET-8550 Series(Network)` for plain-paper test sheets, `Premium glossy paper` for Epson
 Premium Glossy 220 gsm. The job only names the queue and sends the page at 100 %, so the queue's
 defaults decide paper type, quality and feeder.
+The plain queue (`ET-8550 Series(Network)`) defaults to A4 since 2026-10-26 (Standard quality, plain paper).
 
 The five custom presets saved in the Windows Epson driver, read straight
 off the driver's Printing Preferences dialog (screenshots alongside: `<preset>-main.png`,
