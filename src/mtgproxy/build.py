@@ -50,7 +50,6 @@ class BuildOptions:
     skip_fetch: bool = False
     test_mode: bool = False
     print_mode: bool = False
-    printer: str | None = None
     fetch_args: list[str] = field(default_factory=list)
     use_cache: bool = True
     dry_run: bool = False
@@ -622,20 +621,17 @@ def run_build(opts: BuildOptions) -> BuildResult:
         backlog.save()
         result.deferred, result.backlog = deferred, backlog.path
 
-    # Optional: print via CUPS at exact size. The duplex PDF is deliberately NOT
+    # Optional: print through the PC's Epson driver. The duplex PDF is deliberately NOT
     # sent — manual duplex on photo paper is a hands-on job.
     if opts.print_mode and pdfs.pdf:
-        if not printing.lp_available():
-            warn(f"warning: --print needs CUPS (lp) — not available here, print {pdfs.pdf} by hand")
-        else:
-            job = printing.build_job(pdfs.pdf, opts.paper, test_sheet=opts.test_mode, printer=opts.printer)
-            log(f"printing {pdfs.pdf.name} → {job.description}")
-            if not printing.send(job):
-                warn(f"warning: lp failed — print {pdfs.pdf} by hand ({' '.join(job.argv)})")
-            if pdfs.duplex_pdf:
-                log(
-                    f"NOTE: {pdfs.duplex_pdf.name} not sent — print it by hand with manual duplex (long-edge flip)."
-                )
+        try:
+            printing.print_pdf(pdfs.pdf, "plain" if opts.test_mode else "glossy", say=log)
+        except printing.PrintError as e:
+            warn(f"warning: print failed: {e}. Print {pdfs.pdf} with: print-sheet {pdfs.pdf}")
+        if pdfs.duplex_pdf:
+            log(
+                f"NOTE: {pdfs.duplex_pdf.name} not sent — print it by hand with manual duplex (long-edge flip)."
+            )
 
     win_out = mirror.windows_out_dir()
     if win_out is not None and (win_out.parent.is_dir() or Path("/mnt/c/Users").is_dir()):
