@@ -190,6 +190,7 @@ def test_sensing_refuses_when_the_scan_restores_its_light_from_the_slot_it_would
 INK, PAPER = b"  255\x03", b"  180\x03"
 SQUARE_OK = [INK, PAPER, PAPER, PAPER, PAPER]  # its middle, then left, right, above, below it
 MARKS_OK = SQUARE_OK + [INK] * 4  # then the top-right L's two legs' centre lines, then the bottom-left's
+FLAT = [PAPER] * 4  # before the scan, after the placement: blank paper above the square, mid-top, in each L
 
 
 def checked(readings):
@@ -197,10 +198,10 @@ def checked(readings):
 
 
 def test_a_frame_the_print_agrees_with_is_cut_after_nine_readings():
-    t = checked([INK, *MARKS_OK])  # the placement reading first
+    t = checked([INK, *FLAT, *MARKS_OK])  # the placement reading first, then the blank paper
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
-    assert out.count("TB63,4") == 10 and out.count("TB123") == 1
+    assert out.count("TB63,4") == 1 + 4 + 9 and out.count("TB123") == 1
     assert out.index("TB60") < out.index("TB63,4") < out.index("TB123")  # slot, placement, scan
     assert "\\-35,-35\x03" in out  # the area reaches the paper points 1.25 mm left of and above the square
     assert out.rindex("TB63,4") < out.index("D")  # every reading before the first cut
@@ -208,7 +209,7 @@ def test_a_frame_the_print_agrees_with_is_cut_after_nine_readings():
 
 def test_a_misread_rescans_and_cuts_once_the_marks_agree():
     misread = [PAPER, *SQUARE_OK[1:], INK, INK, INK, INK]  # the square's middle reads paper
-    t = checked([INK, *misread, *MARKS_OK])
+    t = checked([INK, *FLAT, *misread, *MARKS_OK])
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
     assert out.count("TB123") == 2 and "D" in out.replace("TB", "")
@@ -233,7 +234,7 @@ def test_a_sheet_without_ink_under_the_square_is_never_scanned():
 
 def test_a_leg_centre_that_misses_by_a_hair_is_read_a_quarter_mm_either_side():
     nudged = [b"  240\x03", INK]  # the centre in between, the first nudge on ink
-    t = checked([INK, *SQUARE_OK, *nudged, INK, INK, INK])
+    t = checked([INK, *FLAT, *SQUARE_OK, *nudged, INK, INK, INK])
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t).replace("\x1b\x05", "")
     assert "M94,5735\x03TB63,4" in out  # the top-right vertical leg, 0.25 mm left of its centre line
@@ -248,17 +249,19 @@ def test_the_light_slot_the_scan_uses_is_never_overwritten():
 
 
 def test_the_scan_and_the_next_sheet_get_the_scans_own_light_back_after_every_reading():
-    t = checked([INK, *MARKS_OK])
+    t = checked([INK, *FLAT, *MARKS_OK])
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t).replace("\x1b\x05", "")
-    placement = out.index("TB63,4")
-    assert placement < out.index("TB61,0", placement) < out.index("TB123")  # TB63 leaves its light on
+    before = out.rindex("TB63,4", 0, out.index("TB123"))  # the last reading before the scan
+    assert before < out.index("TB61,0", before) < out.index("TB123")  # TB63 leaves its light on
     last = out.rindex("TB63,4")
     assert last < out.index("TB61,0", last) < out.index("D")
 
 
 def test_two_failed_three_mark_scans_fall_back_to_two_marks_and_cut_when_the_check_agrees():
-    t = machine({b"TB60": b"    0\x03", b"TB63": [INK, *MARKS_OK], b"TB123": NOT_FOUND, b"TB122": FOUND})
+    t = machine(
+        {b"TB60": b"    0\x03", b"TB63": [INK, *FLAT, *MARKS_OK], b"TB123": NOT_FOUND, b"TB122": FOUND}
+    )
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
     assert out.count("TB123") == 2 and out.count("TB122,4000,5740") == 1
@@ -278,17 +281,17 @@ FAINT = [b"  189\x03", b"  177\x03", b"  168\x03", b"  130\x03", b"  125\x03"]  
 
 
 def test_a_faint_leg_passes_when_it_is_darker_than_the_paper_on_both_sides():
-    t = checked([INK, *SQUARE_OK, INK, INK, *FAINT, INK])  # the bottom-left vertical leg on 2026-10-26
+    t = checked([INK, *FLAT, *SQUARE_OK, INK, INK, *FAINT, INK])  # the bottom-left vertical leg on 2026-10-26
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     assert "D" in sent(t).replace("TB", "")
 
 
 def test_a_shadow_edge_dark_on_one_side_only_is_no_leg():
     edge = [b"  215\x03", b"  220\x03", b"  205\x03", b"  230\x03", b"  180\x03"]
-    t = checked([INK, *[*SQUARE_OK, *edge, INK, INK, INK] * 3])  # placement, then the same on all three scans
+    t = checked([INK, *FLAT, *[*SQUARE_OK, *edge, INK, INK, INK] * 3])  # the same on all three scans
     with pytest.raises(session.CutError, match="after 3 scans"):
         driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
-    assert sent(t).count("TB63,4") == 1 + 3 * 13  # each scan: 5 for the square, 5 for the edge, 3 legs
+    assert sent(t).count("TB63,4") == 1 + 4 + 3 * 13  # each scan: 5 for the square, 5 for the edge, 3 legs
 
 
 def test_diagnose_reads_the_square_then_legs_where_the_square_says_and_never_scans():
@@ -306,7 +309,7 @@ def test_diagnose_reads_the_square_then_legs_where_the_square_says_and_never_sca
         + [r for row in legs for r in mark(row, 1.0 if row.axis == "x" else 0.0, 0.3)]
     )
     t = machine({b"TB60": b"    0\x03", b"TB63": readings})
-    seen = driver.diagnose(FRAME, t, log())
+    seen, flat = driver.diagnose(FRAME, t, log())
     out = sent(t).replace("\x1b\x05", "")
     assert [s.shift for s in seen] == [1.0, 0.0, 1.0, 0.0, 1.0, 0.0]
     first = legs[0].points[0]  # the top-right vertical leg's row starts 2 mm left of where the square says
@@ -314,5 +317,51 @@ def test_diagnose_reads_the_square_then_legs_where_the_square_says_and_never_sca
         f"M{protocol.su(first.y)},{protocol.su(first.x)}\x03TB63,4" in out
         and first.x == FRAME.inset + FRAME.width - 1.0
     )
-    assert out.count("TB63,4") == 2 * 21 + 4 * 9 and "TB123" not in out and "TB122" not in out
+    assert out.count("TB63,4") == 2 * 21 + 4 * 9 + 4 and "TB123" not in out and "TB122" not in out
+    assert flat.stop() is None and flat.reference == 170  # the blank paper a cut reads, last
     assert out.rindex("TB63,4") < out.rindex("TB61,0")  # the scan's own light back for whatever comes next
+
+
+def test_a_sheet_that_doesnt_lie_flat_by_a_mark_is_never_scanned():
+    # 2026-10-26: blank paper inside the top-right L read 255, like ink; mid-top read 171.
+    t = checked([INK, PAPER, b"  171\x03", INK, PAPER])  # placement, above the square, mid-top, the L's
+    with pytest.raises(session.CutError, match="inside the top-right L reads 255, like black ink") as e:
+        driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    assert "middle of the top margin reads 171" in str(e.value) and "Nothing was scanned or cut" in str(
+        e.value
+    )
+    out = sent(t).replace("\x1b\x05", "")
+    assert "TB123" not in out and "TB122" not in out and out.count("TB63,4") == 5
+    assert out.rindex("TB63,4") < out.rindex("TB61,0")  # the light back for the next job, checked or not
+    assert out.endswith("TB0\x03L0\x03\\0,0\x03M0,0\x03TR0,0\x03J0\x03FN0\x03TB50,0\x03")
+
+
+def test_blank_paper_where_the_scan_moves_matches_the_page():
+    t = checked([INK, *FLAT, *MARKS_OK])
+    driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    out = sent(t).replace("\x1b\x05", "")
+    pre = out[: out.index("TB123")]  # before the scan the head moves in page mm (inset 5, top 5)
+    for c in [*sensing.quiet(FRAME), sensing.reference(FRAME)]:
+        assert f"M{protocol.su(c.y)},{protocol.su(c.x)}\x03TB63,4" in pre
+
+
+def test_paper_that_barely_stands_out_warns_and_still_cuts():
+    said = []
+    t = checked([INK, PAPER, PAPER, PAPER, b"  232\x03", *MARKS_OK])  # the bottom-left L's paper at 232
+    driver.cut(
+        job(), t, session.SessionLog(None, echo=said.append), [driver.default_start(FRAME)], check=True
+    )
+    assert any(line.startswith("check: blank paper inside the bottom-left L reads 232") for line in said)
+    assert "D" in sent(t).replace("TB", "")
+
+
+def test_ink_on_a_mark_whose_paper_read_like_ink_proves_nothing():
+    flat = sensing.Flatness(tuple(zip(sensing.quiet(FRAME), (180, 255, 180), strict=True)), 171)
+    t = checked(MARKS_OK)
+    failed = driver.check_marks(session.Session(t, log()), FRAME, log(), flat)
+    assert failed == [
+        "top-right, the vertical leg: reads ink, but blank paper beside it didn't read as paper before the "
+        "scan, so ink there proves nothing",
+        "top-right, the horizontal leg: reads ink, but blank paper beside it didn't read as paper before the "
+        "scan, so ink there proves nothing",
+    ]

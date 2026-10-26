@@ -17,6 +17,9 @@ not to): ink in the middle of the square and on each L leg's centre line, paper 
 square. A frame off by about half a millimetre or more fails it. A leg needs no paper reading: it
 is 1 mm wide, so its centre reads paper once the frame is off by about 0.4 mm across it, and
 nothing else printed comes within 3 mm of it. The 5 mm square needs its four.
+
+``quiet`` is blank paper beside each mark, read before the scan: it must read as paper, or the
+sheet doesn't lie flat there and an ink reading at that mark would prove nothing (``Flatness``).
 """
 
 from __future__ import annotations
@@ -142,6 +145,94 @@ def checks(frame: Frame) -> list[Check]:
     return out
 
 
+# --- does the sheet lie flat? Blank paper beside each mark, read before the scan ------------------
+#
+# On glossy film the sensor reads the light the film mirrors back, so it sees the film's angle: on
+# 2026-10-26 a laminated sheet that didn't lie flat read 255, like black ink, on blank paper along
+# its top strip, inside the top-right L and around both its legs, while flat paper mid-top read 171.
+# The scan then misread or found nothing, and the check's top-right leg readings passed only because
+# everything there read 255. Paper read 150-210 beside the marks of sheets that registered, 91-132 on
+# double-sided paper; 205-243 beside the legs of one that misread on every scan.
+
+QUIET = 3.0  # mm from a mark to the blank paper read beside it: 2.5 mm clear of a 1 mm leg's edge
+LOW_CONTRAST = 220  # above: paper that barely stands out from ink (210 the most a sheet that registered read)
+
+
+def quiet(frame: Frame) -> list[Check]:
+    """Blank paper beside each mark, page mm: QUIET above the square's top edge at its middle, and
+    inside each L's elbow, QUIET along both legs from its corner, between the legs and clear of the
+    cards (which start past the marks' frame)."""
+    x0, y0 = frame.inset, frame.top
+    out = [Check("top-left", f"{QUIET:g} mm above the square", x0 + SQUARE / 2, y0 - QUIET, False)]
+    for name, (i, j), (sx, sy) in L_MARKS:
+        cx, cy = frame.inset + i * frame.width, frame.top + j * frame.height
+        out.append(Check(name, f"inside the {name} L", cx + sx * QUIET, cy + sy * QUIET, False))
+    return out
+
+
+def reference(frame: Frame) -> Check:
+    """Blank paper in the middle of the top margin, level with the square's quiet point: what the
+    paper reads where nothing printed is near, for the messages."""
+    return Check("top", "in the middle of the top margin", frame.page_w / 2, frame.top - QUIET, False)
+
+
+def blank(level: int | None) -> bool:
+    """Reads as paper."""
+    return level is not None and level <= PAPER
+
+
+@dataclass(frozen=True)
+class Flatness:
+    """The quiet points' readings, each with its Check, and the reference's."""
+
+    readings: tuple[tuple[Check, int | None], ...]
+    reference: int | None
+
+    def paper_beside(self, mark: str) -> bool:
+        """Blank paper beside ``mark`` read as paper, so an ink reading on that mark means ink. A
+        mark without a quiet point has nothing to compare with: False."""
+        return any(c.mark == mark and blank(level) for c, level in self.readings)
+
+    def _mid(self) -> str:
+        return "gave no reading" if self.reference is None else f"reads {self.reference}"
+
+    def stop(self) -> str | None:
+        """Why the scan can't be trusted, when blank paper beside a mark doesn't read as paper."""
+        dark = []
+        for c, level in self.readings:
+            if blank(level):
+                continue
+            if level is None:
+                dark.append(f"blank paper {c.what} gave no reading")
+            elif level >= INK:
+                dark.append(f"blank paper {c.what} reads {level}, like black ink")
+            else:
+                dark.append(f"blank paper {c.what} reads {level}, nearly as dark as black ink")
+        if not dark:
+            return None
+        return (
+            f"{'; '.join(dark)} (blank paper in the middle of the top margin {self._mid()}): the sheet "
+            "doesn't lie flat there. On glossy film the sensor sees the film's angle, so a slight wave or "
+            "a lifted corner does this: press it flat, or unload, flatten it and reload"
+        )
+
+    def notes(self) -> list[str]:
+        """Blank paper beside a mark that reads paper, but only just: the scan may misread there."""
+        return [
+            f"blank paper {c.what} reads {level} (in the middle of the top margin it {self._mid()}; beside the "
+            "marks of sheets that registered, 150-210): little contrast with the mark, so the scan may "
+            "misread it, which the check after the scan catches"
+            for c, level in self.readings
+            if blank(level) and level is not None and level > LOW_CONTRAST
+        ]
+
+    def lines(self) -> list[str]:
+        """Every reading, one line."""
+        each = [f"{c.what} {'?' if level is None else level}" for c, level in self.readings]
+        mid = "?" if self.reference is None else self.reference
+        return [f"blank paper beside the marks: {', '.join(each)}; in the middle of the top margin {mid}"]
+
+
 # --- diagnose: rows across every mark before any scan (cut-proxies --diagnose) -------------------
 
 DIAG_STEP = 0.5  # mm between readings
@@ -231,11 +322,15 @@ def see(row: Row, levels: list[int | None]) -> Seen:
     return Seen(row, tuple(levels), peak, away[len(away) // 2], (away[0], away[-1]), shift)
 
 
-def verdict(seen: list[Seen], frame: Frame) -> list[str]:
+def verdict(seen: list[Seen], frame: Frame, flat: Flatness | None = None) -> list[str]:
     """Plain lines: where the sheet sits, how it is turned and stretched, and which marks will be
-    hard for the scan."""
+    hard for the scan; with ``flat``, whether blank paper beside the marks reads as paper, in the
+    words a cut stops or warns with."""
     by = {(s.row.mark, s.row.what): s for s in seen}
     out = []
+    if flat is not None:
+        stop = flat.stop()
+        out += [*([f"a cut stops here: {stop}"] if stop else []), *flat.notes()]
 
     def shift(mark: str, what: str) -> float | None:
         s = by.get((mark, what))
@@ -289,4 +384,6 @@ def verdict(seen: list[Seen], frame: Frame) -> list[str]:
             out.append(
                 f"{name}: the paper reads unusually bright ({s.paper}): glare, a lifted sheet, or no print behind it"
             )
+    if flat is not None:
+        out += flat.lines()
     return out

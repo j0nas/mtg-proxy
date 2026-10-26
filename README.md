@@ -326,8 +326,20 @@ be, and after it 9 points through the frame the scan made: ink in the middle of 
 each L leg's centre line, paper just outside the square. A frame off by about half a millimetre
 fails. A leg that never reads full ink still passes when it is a narrow line darker than the paper
 on both sides by 40 (a double-sided sheet's leg peaked at 239 over paper at 91-132); the edge of a
-shadow is dark on one side only. It adds about 35 s a sheet, and each reading stores a light level
-in the machine's slot 4, which the scan never uses (it checks that first, and gives the scan its
+shadow is dark on one side only.
+
+Before the scan it also reads blank paper beside each mark: 3 mm above the square, inside each L's
+elbow 3 mm from its corner, and the middle of the top margin for comparison. On glossy film the
+sensor reads the light the film mirrors back, so it sees the film's angle: where the sheet doesn't
+lie flat, blank paper reads 255 like black ink, the scan misreads or finds nothing, and an ink
+reading there proves nothing. When paper beside a mark reads like ink, the run stops before
+scanning and names the mark ("blank paper inside the top-right L reads 255, like black ink (blank
+paper in the middle of the top margin reads 171): the sheet doesn't lie flat there"): press the
+sheet flat there, or unload it, flatten it and reload. Paper above 220 there is only a warning: the
+scan may misread, and the check after it catches a misread. Sheets that registered read 150-210
+beside their marks; a sheet that didn't lie flat along its top edge (2026-10-26) read 255 inside
+the top-right L with 171 in the middle of the top margin. The check adds about 50 s a sheet,
+and each reading stores a light level in the machine's slot 4, which the scan never uses (it checks that first, and gives the scan its
 own light back afterwards: TB63 leaves the light where its ramp stopped, and TB123 starts with the
 light as it finds it).
 
@@ -338,7 +350,8 @@ the top-right L, so a two-mark frame is cut only when that L reads where it puts
 TB123 and registered first time as TB122. When all three disagree, nothing is cut, and
 `cut-proxies --diagnose` shows why: before any scan it reads across the square and each leg in the
 loaded mat's frame (about 4 minutes), and says where the sheet sits, how it is turned and
-stretched, and which marks never read as full ink or sit on unusually bright paper. A misread can
+stretched, which marks never read as full ink or sit on unusually bright paper, and what the blank
+paper beside each mark reads, in the words a cut would stop or warn with. A misread can
 also be caught by eye: `--proof` scores the square's outline, along the edge of the black, and each L
 along its centre lines after the scan, then waits. Lift the lid: registered right, the outline
 traces the square's edge and every L cut runs down the middle of the black and ends where the leg

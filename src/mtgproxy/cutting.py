@@ -189,8 +189,8 @@ def run_cut(o: CutOptions) -> int:
             print(f"cut-proxies: probe done; log {log_path}")
             return 0
         if o.diagnose:
-            seen = driver.diagnose(frame, t, log)
-            print(diagnose_report(seen, frame))
+            seen, flat = driver.diagnose(frame, t, log)
+            print(diagnose_report(seen, frame, flat))
             print(f"cut-proxies: diagnose done; log {log_path}")
             return 0
         if o.sense:
@@ -290,13 +290,13 @@ def sense_table(readings) -> str:
     return "\n".join(rows)
 
 
-def diagnose_report(seen, frame) -> str:
-    """The verdict first, then each row: where the mark is (+ right or down), its peak, the paper
-    beside it, and the readings as bars."""
+def diagnose_report(seen, frame, flat=None) -> str:
+    """The verdict first (with ``flat``, the blank paper beside the marks too), then each row:
+    where the mark is (+ right or down), its peak, the paper beside it, and the readings as bars."""
     from .cameo import sensing
 
     rows = ["cut-proxies: before any scan, in the loaded mat's frame (page mm):"]
-    rows += [f"  {line}" for line in sensing.verdict(seen, frame)]
+    rows += [f"  {line}" for line in sensing.verdict(seen, frame, flat)]
     for s in seen:
         where = "no clear mark" if s.shift is None else f"{s.shift:+.2f} mm"
         paper = "?" if s.paper_range is None else f"{s.paper_range[0]}-{s.paper_range[1]}"

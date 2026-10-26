@@ -163,3 +163,45 @@ def test_cards_per_page_follows_the_layout():
 
     assert manifest.cards_per_page("a4", "standard", "4x2") == 8
     assert manifest.cards_per_page("a4", "standard", "3x3") == 9
+
+
+@needs_engine
+def test_the_blank_paper_a_cut_reads_beside_each_mark_is_white_and_clear_of_the_cards(tmp_path):
+    """cameo.sensing.quiet and reference: no ink within a millimetre (the sensor reads a 1 mm leg about
+    2 mm wide), on the engine's own 3x3 marks; and at least 2 mm from every card on both layouts."""
+    import numpy as np
+
+    from mtgproxy import engine
+    from mtgproxy.cameo import geometry, sensing, session
+
+    engine.ensure_engine()
+    from enums import Registration
+    from page_manager import generate_reg_mark
+
+    with generate_reg_mark(
+        "210mm", "297mm", "3.5mm", "1mm", "6mm", 300, Registration.THREE, inset_y="9mm"
+    ) as im:
+        dark = np.asarray(im.convert("L")) < 128
+    px = 300 / 25.4
+    for name in ("3x3", "4x2"):
+        svg = tmp_path / f"{name}.svg"
+        g = build_cut_svg("a4", "standard", svg, name)
+        f = session.Frame(
+            g.page_w_mm,
+            g.page_h_mm,
+            g.reg_inset_mm,
+            g.reg_x_mm,
+            g.reg_y_mm,
+            g.reg_length_mm,
+            1.0,
+            g.reg_inset_y_mm,
+        )
+        cards = [line.bbox() for line in geometry.load_svg(svg)]
+        for c in [*sensing.quiet(f), sensing.reference(f)]:
+            assert 1.0 <= c.x <= f.page_w - 1.0 and 1.0 <= c.y <= f.page_h - 1.0
+            assert min(_gap((c.x, c.y, c.x, c.y), b) for b in cards) >= 2.0, (name, c.what)
+            if name == "3x3":
+                spot = dark[
+                    int((c.y - 1) * px) : int((c.y + 1) * px), int((c.x - 1) * px) : int((c.x + 1) * px)
+                ]
+                assert spot.size and not spot.any(), c.what

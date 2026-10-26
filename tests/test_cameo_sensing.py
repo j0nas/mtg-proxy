@@ -141,3 +141,77 @@ def test_a_leg_that_barely_stands_out_is_called_faint_not_missing():
         "barely stands out (darkest 255, everything around it 231-255)" in line
         for line in sensing.verdict([seen], FRAME)
     )
+
+
+# The 3x3 marks as printed (tests/test_layout.py measures them on the engine's own image).
+PRINTED = {
+    "top-left": [(3.5, 9.0, 8.5, 14.0)],
+    "top-right": [(200.5, 8.5, 207.0, 9.5), (206.0, 8.5, 207.0, 15.0)],
+    "bottom-left": [(3.0, 287.5, 9.5, 288.5), (3.0, 282.0, 4.0, 288.5)],
+}
+
+
+def _gap(x, y, r):
+    dx, dy = max(0.0, r[0] - x, x - r[2]), max(0.0, r[1] - y, y - r[3])
+    return (dx * dx + dy * dy) ** 0.5
+
+
+def test_blank_paper_is_read_above_the_square_and_inside_each_l_clear_of_the_ink():
+    q = {c.mark: c for c in sensing.quiet(FRAME)}
+    assert {k: (c.x, c.y) for k, c in q.items()} == {
+        "top-left": (6.0, 6.0),
+        "top-right": (203.5, 12.0),
+        "bottom-left": (6.5, 285.0),
+    }
+    assert not any(c.ink for c in q.values())
+    for mark, c in q.items():  # 3 mm above the square, 2.5 mm from each leg's inner edge
+        assert min(_gap(c.x, c.y, r) for r in PRINTED[mark]) == pytest.approx(
+            3.0 if mark == "top-left" else 2.5
+        )
+    ref = sensing.reference(FRAME)
+    assert (ref.x, ref.y) == (105.0, 6.0)  # the middle of the top margin, level with the square's
+
+
+def _flat(tl=180, tr=180, bl=180, mid=171):
+    return sensing.Flatness(tuple(zip(sensing.quiet(FRAME), (tl, tr, bl), strict=True)), mid)
+
+
+def test_blank_paper_that_reads_like_ink_says_the_sheet_doesnt_lie_flat_and_where():
+    stop = _flat(tr=255).stop()
+    assert stop.startswith(
+        "blank paper inside the top-right L reads 255, like black ink (blank paper in the middle of the top "
+        "margin reads 171): the sheet doesn't lie flat there."
+    )
+    assert "a slight wave or a lifted corner" in stop and "flatten it and reload" in stop
+    both = _flat(tl=248, tr=255).stop()
+    assert (
+        "3 mm above the square reads 248, nearly as dark as black ink; blank paper inside the top-right L"
+        in both
+    )
+    assert _flat().stop() is None and _flat(tl=245).stop() is None  # 245 is still paper (PAPER)
+    assert "gave no reading" in _flat(bl=None).stop()
+
+
+def test_paper_that_only_just_reads_as_paper_is_a_warning_not_a_stop():
+    f = _flat(bl=232)
+    assert f.stop() is None
+    (note,) = f.notes()
+    assert note.startswith("blank paper inside the bottom-left L reads 232") and "may misread" in note
+    assert _flat(tl=210, tr=220, bl=150).notes() == []  # what sheets that registered read
+
+
+def test_ink_on_a_mark_counts_only_where_the_paper_beside_it_read_as_paper():
+    f = _flat(tr=255)
+    assert f.paper_beside("top-left") and f.paper_beside("bottom-left")
+    assert not f.paper_beside("top-right")
+    assert not f.paper_beside("bottom-right")  # no quiet point: nothing to compare with
+
+
+def test_diagnose_says_what_a_cut_would_stop_or_warn_with():
+    lines = sensing.verdict([], FRAME, _flat(tr=255, bl=232))
+    assert lines[0].startswith("a cut stops here: blank paper inside the top-right L reads 255")
+    assert any(line.startswith("blank paper inside the bottom-left L reads 232") for line in lines)
+    assert lines[-1] == (
+        "blank paper beside the marks: 3 mm above the square 180, inside the top-right L 255, "
+        "inside the bottom-left L 232; in the middle of the top margin 171"
+    )
