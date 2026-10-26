@@ -245,7 +245,7 @@ def test_a_misread_on_every_scan_stops_before_anything_is_cut():
 
 def test_a_sheet_without_ink_under_the_square_is_never_scanned():
     t = checked([PAPER])
-    with pytest.raises(session.CutError, match="no square within 9 mm"):
+    with pytest.raises(session.CutError, match="no square at "):
         driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     assert "TB123" not in sent(t)
 
@@ -461,8 +461,9 @@ def test_a_sheet_without_ink_under_the_square_is_told_where_its_corner_goes(fram
         driver.cut(replace(job(), frame=frame), t, log(), [driver.default_start(frame)], check=True)
     my, mx = frame.on_mat(7.5, 7.5)
     assert str(e.value) == (
-        f"no square within 9 mm of {my:g} mm down, {mx:g} mm in on the mat: put the paper's top-left "
-        f"corner {corner}, reload and rerun"
+        f"no square at {my:g} mm down, {mx:g} mm in on the mat, where it should be, nor up to 3 mm above "
+        f"or left of it or 6 mm below or right of it: put the paper's top-left corner {corner}, reload and "
+        "rerun"
     )
 
 
@@ -510,7 +511,7 @@ def test_a_landscape_sheet_loaded_as_printed_is_told_to_turn_a_quarter(tmp_path)
 def test_a_landscape_sheet_with_paper_where_a_turned_square_lies_gets_the_placement_stop(tmp_path):
     error, at, placed = placement_readings(DECK_BOX, [PAPER], tmp_path)
     assert error == (
-        "no square within 9 mm of 10.5 mm down, 10.5 mm in on the mat: put the paper's top-left corner 3 mm "
+        "no square at 10.5 mm down, 10.5 mm in on the mat, where it should be, nor up to 3 mm above or left of it or 6 mm below or right of it: put the paper's top-left corner 3 mm "
         "right and 3 mm down of the mat grid's, reload and rerun"
     )
     assert at[-1] == (210, 4110) and placed[-1][0] == "placement_turned"
@@ -519,7 +520,9 @@ def test_a_landscape_sheet_with_paper_where_a_turned_square_lies_gets_the_placem
 def test_a_portrait_sheet_without_ink_under_the_square_is_never_read_turned(tmp_path):
     portrait = session.Frame(page_w=210, page_h=297, inset=3.5, width=203, height=279, length=6, inset_y=9)
     error, at, placed = placement_readings(portrait, [PAPER], tmp_path)
-    assert error.startswith("no square within 9 mm of 11.5 mm down, 6 mm in on the mat")
+    assert error.startswith(
+        "no square at 11.5 mm down, 6 mm in on the mat, where it should be, nor up to 3 mm above or left of it or 6 mm below or right of it"
+    )
     assert at[0] == (230, 120) and "placement_turned" not in [p[0] for p in placed]
 
 

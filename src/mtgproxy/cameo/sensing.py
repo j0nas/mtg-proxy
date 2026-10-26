@@ -309,69 +309,6 @@ def leg_rows(frame: Frame, dx: float = 0.0, dy: float = 0.0) -> list[Row]:
     return rows
 
 
-# --- where is the square? Searched for before the scan when its middle reads no ink ---------------
-#
-# A pouch's margin past the paper varies by a millimetre or more between pouch makes and between
-# loads, and a sheet laid a few millimetres off fails the placement reading although the scan would
-# find it. On 2026-10-26 the deck box's sheet was placed right and its square read 242 (dim ink, see
-# DIM_INK), and the next sheet may sit 2 mm off: rather than stop and have the operator measure and
-# reload, the head looks for the square in a row across it each way and the readings before the
-# scan follow it there.
-
-SEARCH = 9.0  # mm either side of where the square's middle should be: finds it up to about 6 mm off
-REFINE = 6.0  # mm either side of where a search row met the square, for its middle each way
-SEARCH_STEP = 1.0
-SQUARE_RUN = (2.5, 7.5)  # mm from first to last reading of a run that is the square, at SEARCH_STEP
-
-
-def search_row(frame: Frame, axis: str, dx: float = 0.0, dy: float = 0.0, reach: float = SEARCH) -> Row:
-    """Readings through where the square's middle should be, moved by (``dx``, ``dy``): across x,
-    across y, or along the diagonal ("d", right and down together, as a pouch's wider margin moves a
-    sheet), ``reach`` either side at SEARCH_STEP, page mm; offsets from that middle. Points that
-    would fall off the mat (left of or above its origin) are left out."""
-    mx, my = frame.inset + SQUARE / 2 + dx, frame.top + SQUARE / 2 + dy
-    ux, uy = {"x": (1, 0), "y": (0, 1), "d": (1, 1)}[axis]
-    pts = []
-    for d in _steps(-reach, reach, SEARCH_STEP):
-        x, y = mx + ux * d, my + uy * d
-        on_y, on_x = frame.on_mat(y, x)
-        if on_x >= 0.5 and on_y >= 0.5:
-            pts.append(Point(f"square search {axis}", x, y, d))
-    return Row("square", f"search {axis}", axis, tuple(pts), 0.0)
-
-
-def square_in(row: Row, levels: list[int | None]) -> float | None:
-    """How far the square's middle sits from where it should along a search row (mm), or None when
-    the row shows no run of the square's width standing out from the paper.
-
-    A run is readings halfway or more from the row's paper (its lower quartile: the square and a
-    dark pouch edge may take half a row) to its darkest, CONTRAST at least apart. Only a run that lies whole in the row and spans
-    SQUARE_RUN counts; of those, the one nearest where the square should be. On 2026-10-26 a
-    diagonal row across the deck box's sheet read the pouch's edge as dark as ink at its start, and
-    the square 245-255 four millimetres along it."""
-    vals = [(p.offset, v) for p, v in zip(row.points, levels, strict=True) if v is not None]
-    if len(vals) < 5:
-        return None
-    ranked = sorted(v for _, v in vals)
-    paper, peak = ranked[len(ranked) // 4], ranked[-1]
-    if peak - paper < CONTRAST:
-        return None
-    mid = (paper + peak) / 2
-    runs, start = [], None
-    for i, (_, v) in enumerate([*vals, (None, -1)]):
-        if v >= mid and start is None:
-            start = i
-        elif v < mid and start is not None:
-            runs.append((start, i - 1))
-            start = None
-    whole = [
-        (vals[a][0] + vals[b][0]) / 2
-        for a, b in runs
-        if a > 0 and b < len(vals) - 1 and SQUARE_RUN[0] <= vals[b][0] - vals[a][0] <= SQUARE_RUN[1]
-    ]
-    return round(min(whole, key=abs), 2) if whole else None
-
-
 @dataclass(frozen=True)
 class Seen:
     """What one row shows: the mark's peak and the paper's median and range beside it, and how far

@@ -406,7 +406,15 @@ be, and after it 9 points through the frame the scan made: ink in the middle of 
 each L leg's centre line, paper just outside the square. A frame off by about half a millimetre
 fails. A leg that never reads full ink still passes when it is a narrow line darker than the paper
 on both sides by 40 (a double-sided sheet's leg peaked at 239 over paper at 91-132); the edge of a
-shadow is dark on one side only.
+shadow is dark on one side only. Paper just outside the square that reads dark on all four sides,
+with the square and every leg where the scan put them, is a sheet lifting off the mat there: the
+run stops at once and says to press that corner down (rescans can't help; Meren's sheet,
+2026-10-26).
+
+When the square's middle reads no ink before the scan, the head hunts for it on a 3 mm grid from 3
+mm up and left of where it should be to 6 mm down and right, nearest first, and measures its edges
+from the first reading that lands on it (`driver.hunt`, then `measure`): a sheet 3 mm off is found
+in about a minute, where rows a millimetre apart took over four.
 
 A landscape sheet (4x2, the deck box) comes out of the printer portrait with its square top-right,
 and goes on the mat landscape with the square top-left. When the square's middle reads no ink on a

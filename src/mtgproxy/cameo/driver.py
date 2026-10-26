@@ -9,6 +9,7 @@ known distance; a reply that moves with the sheet is a readback we can check aga
 from __future__ import annotations
 
 import contextlib
+import math
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -247,6 +248,13 @@ def cut(
                 if failed:
                     for line in failed:
                         log.say(f"check: {line}")
+                    if lifting(failed):
+                        raise CutError(
+                            "the paper around the square reads dark on every side while the square and "
+                            "every leg read where the scan put them: the sheet lifts off the mat near the "
+                            "square. Press that corner down onto the mat (re-tack it if it won't stay), "
+                            "reload and rerun: nothing was cut"
+                        )
                     if attempt + 1 < rounds:
                         log.say("the marks don't read where the scan put them: scanning again")
                         continue
@@ -352,8 +360,8 @@ def read_loaded(s: Session, frame: Frame, pt: sensing.Point | sensing.Check) -> 
 def check_placement(s: Session, frame: Frame, log: SessionLog) -> Frame:
     """Before the scan: is the square where the frame says? Ink under its middle passes, and so does
     dim ink, DIM_INK above the blank paper over it (``sensing.thresholds``), there or NUDGE either
-    side. Otherwise the head looks for the square (``locate``): found up to SEARCH mm off, every
-    later reading and the scan's start follow it there, in the frame this returns. Found nowhere, a
+    side. Otherwise the head hunts for the square (``hunt``): found within HUNT_RANGE, every later
+    reading and the scan's start follow it there, in the frame this returns. Found nowhere, a
     landscape sheet is read once more where the square lies when the sheet is loaded portrait, as it
     leaves the printer (``sensing.turned``): ink there says so. Either way nothing is scanned.
 
@@ -379,7 +387,7 @@ def check_placement(s: Session, frame: Frame, log: SessionLog) -> Frame:
             log("placement", x=c.x + k * sensing.NUDGE, y=c.y, level=nl, reply=reply)
             if c.reads(nl, paper) is True:
                 return frame
-    found = locate(s, frame, log)
+    found = hunt(s, frame, log, paper if sensing.blank(paper) else None)
     if found is None:
         t = sensing.turned(frame)
         if t is not None:
@@ -391,9 +399,11 @@ def check_placement(s: Session, frame: Frame, log: SessionLog) -> Frame:
                     "the square is top-left, reload and rerun"
                 )
         my, mx = frame.on_mat(c.y, c.x)
+        lo, hi = HUNT_RANGE
         raise CutError(
-            f"no square within {sensing.SEARCH:g} mm of {my:g} mm down, {mx:g} mm in on the mat: put the "
-            f"paper's top-left corner {frame.placed()}, reload and rerun"
+            f"no square at {my:g} mm down, {mx:g} mm in on the mat, where it should be, nor up to {-lo:g} mm "
+            f"above or left of it or {hi:g} mm below or right of it: put the paper's top-left corner "
+            f"{frame.placed()}, reload and rerun"
         )
     dx, dy = found
     right, down = frame.paper_at
@@ -410,34 +420,48 @@ def _off(d: float, plus: str, minus: str) -> str:
     return f"{abs(d):g} mm {plus if d >= 0 else minus}"
 
 
-def locate(s: Session, frame: Frame, log: SessionLog) -> tuple[float, float] | None:
-    """Where the square's middle sits from where the frame expects it, (right, down) mm. A row of
-    readings through the expected middle looks for it: along the diagonal first (a pouch's wider
-    margin moves the sheet right and down alike), then across x, then across y
-    (``sensing.search_row``). Where one meets it, a shorter row across x and then across y measure
-    its middle. None: no row meets it, or the measuring rows lose it."""
+HUNT_STEP = 3.0  # mm between the hunt's readings: under the square's 5 mm, so one lands on it
+# mm the square's middle may lie from where the frame expects it, left/up to right/down: a pouch on
+# the tack holds its paper about 3 mm in, so the paper sits at most that far left or up of where
+# --paper-at says, and 2026-10-26's pouches held theirs up to 3.3 mm further right. A grid over it
+# finds any square whose middle lies within HUNT_STEP / 2 + 1 mm past either end.
+HUNT_RANGE = (-3.0, 6.0)
 
-    def find(axis: str, dx: float = 0.0, dy: float = 0.0, reach: float = sensing.SEARCH) -> float | None:
-        row = sensing.search_row(frame, axis, dx, dy, reach)
-        levels = []
-        for pt in row.points:
-            level, reply = read_loaded(s, frame, pt)
-            log("search", axis=axis, x=pt.x, y=pt.y, offset=pt.offset, level=level, reply=reply)
-            levels.append(level)
-        return sensing.square_in(row, levels)
 
-    for axis, (ux, uy) in (("d", (1, 1)), ("x", (1, 0)), ("y", (0, 1))):
-        t = find(axis)
-        if t is not None:
-            hx, hy = ux * t, uy * t
-            break
-    else:
-        return None
-    sx = find("x", hx, hy, sensing.REFINE)
-    if sx is None:
-        return None
-    sy = find("y", hx + sx, hy, sensing.REFINE)
-    return None if sy is None else (round(hx + sx, 2), round(hy + sy, 2))
+def hunt(s: Session, frame: Frame, log: SessionLog, paper: int | None) -> tuple[float, float] | None:
+    """Where the square sits from where the frame expects it, (right, down) mm, or None: readings on
+    a HUNT_STEP grid over HUNT_RANGE, nearest the expected middle first, until one reads ink; from
+    there ``measure`` halves its way to the square's top and left edges. An ink reading that isn't
+    the square (the pouch's dark band past the paper's edge) has no paper within a square's width
+    above or left of it, so it measures as nothing and the hunt goes on. ``paper`` is blank paper's
+    level near the square; without it the lowest reading so far stands in.
+
+    It replaced rows of readings a millimetre apart, 64 of them at about 4 s each, which took over
+    four minutes on 2026-10-26 for a sheet lying 3 mm right: the grid finds a square that far off
+    in a few readings, and measuring it takes nine."""
+    c = sensing.placement(frame)
+    lo, hi = HUNT_RANGE
+    steps = [round(lo + i * HUNT_STEP, 4) for i in range(round((hi - lo) / HUNT_STEP) + 1)]
+    grid = sorted(
+        ((dx, dy) for dx in steps for dy in steps if (dx, dy) != (0.0, 0.0)),
+        key=lambda d: (math.hypot(*d), d[1], d[0]),
+    )
+    seen: list[int] = []
+    for dx, dy in grid:
+        pt = replace(c, x=c.x + dx, y=c.y + dy)
+        level, reply = read_loaded(s, frame, pt)
+        log("hunt", x=pt.x, y=pt.y, dx=dx, dy=dy, level=level, reply=reply)
+        base = paper if paper is not None else (min(seen) if seen else None)
+        if level is not None:
+            seen.append(level)
+        if c.reads(level, base) is not True:
+            continue
+        right, down = frame.paper_at
+        there = replace(frame, paper_at=(right + dx, down + dy))  # its middle on the ink just read
+        off = measure(s, there, log, base)
+        if off is not None:
+            return round(dx + off[0], 2), round(dy + off[1], 2)
+    return None
 
 
 EDGE_HALVINGS = 5  # the square's 5 mm halved five times: each edge to 0.16 mm
@@ -511,6 +535,21 @@ def check_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
     for line in flat.notes():
         log.say(f"check: {line}")
     return flat
+
+
+BESIDE_SQUARE = ("left of the square", "right of the square", "above the square", "below the square")
+
+
+def lifting(failed: list[str]) -> bool:
+    """A check that failed only on the paper beside the square, all four sides read as ink: the
+    sheet lifts there, nearer the sensor, and its reading blurs the square over its surroundings.
+    On 2026-10-26 Meren's sheet failed so three scans running, darker each time as the mat went in
+    and out (213-223, 226-249, 227-250 against paper at 110), and cut cleanly once its corner was
+    pressed down. A rescan can't help, so the cut stops and says so."""
+    return len(failed) == len(BESIDE_SQUARE) and all(
+        any(line.startswith(f"top-left, {what}: ") and "(ink)" in line for line in failed)
+        for what in BESIDE_SQUARE
+    )
 
 
 def check_marks(

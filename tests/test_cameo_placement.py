@@ -140,9 +140,7 @@ def test_the_scan_starts_where_the_square_was_found():
 
 def test_no_square_anywhere_near_stops_before_the_scan():
     sheet = Sheet(at=(15.0, 15.0))
-    with pytest.raises(
-        session.CutError, match=r"no square within 9 mm of 10\.5 mm down, 10\.5 mm in on the mat"
-    ):
+    with pytest.raises(session.CutError, match=r"no square at 10\.5 mm down, 10\.5 mm in on the mat"):
         run(sheet)
     assert b"TB123" not in sheet.sent
 
@@ -166,17 +164,6 @@ def test_a_pouch_edge_that_reads_like_ink_doesnt_hide_the_square():
     record = run(sheet)
     (located,) = [f for e, f in record if e == "located"]
     assert located["paper_at"] == pytest.approx((6.25, 6.25), abs=0.75) and cut_once(sheet)
-
-
-def test_the_square_is_the_whole_run_of_its_width_nearest_where_it_should_be():
-    # The diagonal search row on the deck box's sheet, --paper-at 0 with the paper 3.25 mm in each
-    # way (2026-10-26): the pouch's edge read like ink at the row's start, the square 4 mm along it.
-    row = sensing.search_row(replace(FRAME, paper_at=(0.0, 0.0)), "d")
-    levels = [255, 255, 160, 255, 181, 161, 166, 159, 245, 255, 255, 255, 254, 137, 124, 130, 119]
-    assert [p.offset for p in row.points] == [float(d) for d in range(-7, 10)]  # off-mat points left out
-    assert sensing.square_in(row, levels) == 3.0
-    x_row = [255, 146, 122, 255, 180, 172, 163, 159, 175, 172, 164, 167, 164, 154, 153, 148, 148]
-    assert sensing.square_in(sensing.search_row(replace(FRAME, paper_at=(0.0, 0.0)), "x"), x_row) is None
 
 
 def test_a_middle_that_reads_paper_is_looked_for_not_passed_on_a_try_at_its_edge():
@@ -249,3 +236,37 @@ def test_a_sheet_where_the_frame_says_scans_once():
     sheet = FussySheet()
     record = run(sheet)
     assert not any(e in ("measure", "measured") for e, _ in record) and cut_once(sheet)
+
+
+def test_a_sheet_three_millimetres_right_is_found_in_a_few_readings():
+    # 2026-10-26, Meren: the paper 6 mm in from the grid where --paper-at said 3. Rows of readings a
+    # millimetre apart took 64 readings (about 4 minutes); the hunt's grid lands on the square in
+    # one or two and measuring it takes nine.
+    sheet = Sheet(at=(6.0, 3.0))
+    record = run(sheet)
+    (located,) = [f for e, f in record if e == "located"]
+    assert located["paper_at"] == pytest.approx((6.0, 3.0), abs=0.2)
+    readings = [e for e, _ in record if e in ("hunt", "measure")]
+    assert len(readings) <= 15 and cut_once(sheet)
+
+
+class LiftingSheet(Sheet):
+    """After the scan, the paper within 2 mm of the square reads nearly black: the sheet lifts off
+    the mat there and the sensor's reading blurs (Meren's sheet, 2026-10-26)."""
+
+    def write(self, data: bytes) -> None:
+        super().write(data)
+        if self.scanned and any(cmd.startswith(b"TB63") for cmd in data.split(b"\x03")):
+            y, x = self.head
+            px, py = x + FRAME.inset, y + FRAME.top
+            square = (FRAME.inset, FRAME.top, FRAME.inset + 5, FRAME.top + 5)
+            near = square[0] - 2 <= px <= square[2] + 2 and square[1] - 2 <= py <= square[3] + 2
+            if near and not inked(px, py):
+                self.pending[-1] = b"  235\x03"
+
+
+def test_a_sheet_lifting_by_the_square_stops_after_one_scan_and_says_so():
+    sheet = LiftingSheet()
+    with pytest.raises(session.CutError, match="the sheet lifts off the mat near the square"):
+        run(sheet)
+    assert sheet.sent.count(b"TB123") == 1 and b"D" not in sheet.sent.replace(b"TB", b"")
