@@ -3,8 +3,9 @@
 The machine never reports where it found the marks: its firmware keeps them to itself (FQ5 reads
 -64 after every scan). So after the scan, before anything else is cut, the blade traces the edge
 of a proof target: a small filled black square printed with the marks, inside the mark frame and
-clear of the marks and the job. Registered right, the cut runs along the edge of the black all
-round. Registered off, it leaves a strip of white between the black and the cut on one side and
+clear of the marks and the job, and crosses it with an X corner to corner (``Target.cuts``).
+Registered right, the cut runs along the edge of the black all round and the X's arms end in its
+corners. Registered off, it leaves a strip of white between the black and the cut on one side and
 runs inside the black on the other: an error in x shows on the left and right edges, one in y on
 the top and bottom, each with its direction, and the strip's width is the size of the error. The
 operator answers y (cut the job), r (scan again; the next round cuts the next target) or q (stop).
@@ -79,6 +80,16 @@ class Target:
         h = self.size / 2
         x0, y0, x1, y1 = self.x - h, self.y - h, self.x + h, self.y + h
         return Polyline(((x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)))
+
+    def cuts(self) -> tuple[Polyline, ...]:
+        """What a proof round cuts: the edge, then an X corner to corner, bottom-right to top-left,
+        then top-right to bottom-left (neither starting where the edge does, so no stroke begins with
+        the edge's own first move). A groove along the edge of the black is hard to see; across the
+        black it shows as a light line (2026-10-26), and where the X crosses against the square's
+        middle is a second check: registered right, its arms end in the square's corners."""
+        h = self.size / 2
+        x0, y0, x1, y1 = self.x - h, self.y - h, self.x + h, self.y + h
+        return (self.outline(), Polyline(((x1, y1), (x0, y0))), Polyline(((x1, y0), (x0, y1))))
 
     def name(self, of: int) -> str:
         return f"target {self.number} of {of} ({self.x:g}, {self.y:g} mm)"

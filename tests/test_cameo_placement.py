@@ -186,3 +186,66 @@ def test_a_middle_that_reads_paper_is_looked_for_not_passed_on_a_try_at_its_edge
     record = run(sheet)
     (located,) = [f for e, f in record if e == "located"]
     assert located["paper_at"] == pytest.approx((0.4, 3.0), abs=0.75) and cut_once(sheet)
+
+
+class FussySheet(Sheet):
+    """A sheet whose scan finds the marks only as the firmware does: its first search row has to run
+    through the square at least 2 mm below its top edge and 1.5 mm above its bottom one, starting on
+    paper left of it. ``finds`` False: no scan ever finds them."""
+
+    def __init__(self, at=(3.0, 3.0), finds=True, **kw):
+        super().__init__(at=at, **kw)
+        self.finds = finds
+        self.answers[b"TB122"] = [b"    0\x03"]
+
+    def write(self, data: bytes) -> None:
+        ok = None
+        for cmd in data.split(b"\x03"):
+            if cmd.startswith((b"TB123", b"TB122")):
+                y, x = (int(v) / 20 for v in cmd.decode().split(",")[3:5])
+                top, left = self.at[1] + FRAME.top, self.at[0] + FRAME.inset
+                ok = self.finds and top + 2 <= y <= top + 3.5 and self.at[0] < x <= left - 1
+                self.answers[cmd[:5]] = [b"    0\x03" if ok else b"    1\x03"]
+        super().write(data)
+        if ok is not None:
+            self.scanned = ok
+
+
+def test_measure_pins_the_square_to_a_fraction_of_a_millimetre():
+    for off in [(0.0, 0.0), (2.0, 2.0), (-1.3, 0.7), (2.2, -2.2)]:
+        sheet = Sheet(at=(3.0 + off[0], 3.0 + off[1]))
+        s = session.Session(sheet, session.SessionLog(None))
+        got = driver.measure(s, replace(FRAME, paper_at=(3.0, 3.0)), session.SessionLog(None), PAPER)
+        assert got == pytest.approx(off, abs=0.2)
+
+
+def test_a_scan_that_finds_nothing_measures_the_square_and_scans_from_where_it_is():
+    # 2026-10-26: a laminated plain sheet 1.5 mm right of --paper-at 3 (here 2 mm right and down).
+    # Its square's middle read ink, so nothing was looked for, and every scan replied 1.
+    sheet = FussySheet(at=(5.0, 5.0))
+    record = run(sheet)
+    (measured,) = [f for e, f in record if e == "measured"]
+    assert measured["paper_at"] == pytest.approx((5.0, 5.0), abs=0.2)
+    top, left = driver.default_start(job().frame)
+    scans = [
+        m["message"] for e, m in record if e == "say" and m["message"].startswith(("scan 1/1", "marks found"))
+    ]
+    assert scans[0].startswith(f"scan 1/1 from ({top:g}, {left:g}) mm: not found")
+    found_at = [float(v) for v in scans[1].split("scan start ")[1].removesuffix(" mm)").split(", ")]
+    assert found_at == pytest.approx([top + 2, left + 2], abs=0.2)
+    assert sheet.sent.count(b"TB123") == 2
+    assert b"D" in sheet.sent.replace(b"TB", b"")
+
+
+def test_a_square_that_measures_where_it_should_be_is_scanned_again_as_before():
+    sheet = FussySheet(finds=False)
+    with pytest.raises(session.CutError):
+        run(sheet)
+    assert sheet.sent.count(b"TB123") == 2 and sheet.sent.count(b"TB122") == 1
+    assert b"D" not in sheet.sent.replace(b"TB", b"")
+
+
+def test_a_sheet_where_the_frame_says_scans_once():
+    sheet = FussySheet()
+    record = run(sheet)
+    assert not any(e in ("measure", "measured") for e, _ in record) and cut_once(sheet)

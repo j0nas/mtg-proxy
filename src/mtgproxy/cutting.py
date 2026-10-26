@@ -373,10 +373,12 @@ def wait_for_next_sheet(o: CutOptions, interrupted) -> bool:
 
 PROOF_HELP = """\
 cut-proxies: the proof cut is down: the blade has traced the edge of the small black square named
-above, one of the proof targets printed with the marks. Lift the lid and look at it. Registered
-right, the cut runs along the edge of the black all round. Registered off, white shows between
-the black and the cut on one side, and the cut runs inside the black on the other: the width of
-the white is how far off, its side which way.
+above, one of the proof targets printed with the marks, and crossed it with an X corner to corner.
+Lift the lid and look at it (tilt it toward a light: the X shows as light lines across the black).
+Registered right, the cut runs along the edge of the black all round and the X's arms end in the
+square's corners. Registered off, white shows between the black and the cut on one side, the cut
+runs inside the black on the other, and the X crosses off the square's middle: the width of the
+white is how far off, its side which way.
     y  the cut on the square's edge all round: cut the job
     r  white between the black and the cut: scan the marks again (the next round cuts the next square)
     q  stop: nothing more is cut, the head goes home"""

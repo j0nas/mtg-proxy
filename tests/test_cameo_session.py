@@ -195,6 +195,9 @@ INK, PAPER = b"  255\x03", b"  180\x03"
 SQUARE_OK = [INK, PAPER, PAPER, PAPER, PAPER]  # its middle, then left, right, above, below it
 MARKS_OK = SQUARE_OK + [INK] * 4  # then the top-right L's two legs' centre lines, then the bottom-left's
 FLAT = [PAPER] * 4  # before the scan, after the placement: blank paper above the square, mid-top, in each L
+# After a scan that found nothing: the square's middle, then its left and top edges halved down to
+# where the frame puts them (driver.measure).
+MEASURED_AS_FRAMED = [INK, *([INK, PAPER, PAPER, PAPER, PAPER] * 2)]
 
 
 def checked(readings):
@@ -276,13 +279,19 @@ def test_the_scan_and_the_next_sheet_get_the_scans_own_light_back_after_every_re
 
 def test_two_failed_three_mark_scans_fall_back_to_two_marks_and_cut_when_the_check_agrees():
     t = machine(
-        {b"TB60": b"    0\x03", b"TB63": [INK, *FLAT, *MARKS_OK], b"TB123": NOT_FOUND, b"TB122": FOUND}
+        {
+            b"TB60": b"    0\x03",
+            b"TB63": [INK, *FLAT, *MEASURED_AS_FRAMED, *MARKS_OK],
+            b"TB123": NOT_FOUND,
+            b"TB122": FOUND,
+        }
     )
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
     assert out.count("TB123") == 2 and out.count("TB122,4000,5740") == 1
     before = out[: out.index("D")]
-    assert before.count("TB63,4") == 1 + 4 + 9  # the top-right L read before the cut, though TB122 skipped it
+    # the top-right L read before the cut, though TB122 skipped it
+    assert before.count("TB63,4") == 1 + 4 + len(MEASURED_AS_FRAMED) + 9
 
 
 def test_without_the_check_a_missed_scan_never_falls_back_to_two_marks():
@@ -539,7 +548,7 @@ def test_a_machine_that_loses_its_place_on_the_proof_cut_never_cuts_the_job():
             targeted, t, log(), [driver.default_start(FRAME)], lambda *a: asked.append(a) or "y", check=True
         )
     assert not asked  # stopped before anyone was asked
-    assert sent(t).replace("TB", "").count("D") == 1  # the target's outline and nothing more
+    assert sent(t).replace("TB", "").count("D") == 3  # the target's outline and X, nothing more
 
 
 def test_a_pause_on_the_machine_waits_for_the_operator_and_the_cut_carries_on():
@@ -712,7 +721,7 @@ def test_a_proofed_scored_job_proves_then_scores_then_cuts_reading_the_marks_aft
     first = {
         session.cut_commands(replace(targeted, lines=ls))[0]: name
         for name, ls in (
-            ("proof cut", [targeted.frame.targets[0].outline()]),
+            ("proof cut", list(targeted.frame.targets[0].cuts())),
             ("scores", targeted.scores),
             ("cuts", targeted.lines),
         )

@@ -55,7 +55,7 @@ def pts(line):
 
 def traced(target):
     """The commands that trace ``target``'s edge, as the job's own cut would send them."""
-    return "".join(c + "\x03" for c in session.cut_commands(job([target.outline()])))
+    return "".join(c + "\x03" for c in session.cut_commands(job(list(target.cuts()))))
 
 
 def test_a_target_is_cut_along_its_edge_and_numbered_in_the_order_given():
@@ -69,8 +69,15 @@ def test_a_target_is_cut_along_its_edge_and_numbered_in_the_order_given():
     assert TARGETS[0].outline().closed
     assert [t.number for t in TARGETS] == [1, 2, 3, 4] and {t.size for t in TARGETS} == {proof.SIZE}
     assert TARGETS[1].name(4) == "target 2 of 4 (120, 80 mm)"
-    assert traced(TARGETS[0]) == T1
+    assert traced(TARGETS[0]).startswith(T1)
     assert pts(proof.Target(10, 20, 4).outline())[2] == (12, 22)
+
+
+def test_a_target_is_crossed_corner_to_corner_after_its_edge():
+    edge, down, up = TARGETS[0].cuts()
+    assert edge == TARGETS[0].outline()
+    assert pts(down) == [(101.5, 81.5), (98.5, 78.5)] and pts(up) == [(101.5, 78.5), (98.5, 81.5)]
+    assert traced(TARGETS[0]).startswith(T1)
 
 
 def test_the_proof_blade_scores_laminate_and_stays_well_under_a_cut():

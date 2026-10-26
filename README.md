@@ -433,20 +433,26 @@ A scan that finds nothing, or one the check disagrees with, is tried again, then
 TB122, the firmware's two-mark scan: the square and the bottom-left L only. The check still reads
 the top-right L, so a two-mark frame is cut only when that L reads where it puts it. On
 2026-10-26 a double-sided sheet whose back showed through behind its top-right L misread on every
-TB123 and registered first time as TB122. When all three disagree, nothing is cut, and
+TB123 and registered first time as TB122. After the first scan that finds nothing, the sensor
+measures the square's top and left edges (about 45 s) and the next scan starts from where it lies:
+the check before the scan passes a square whose middle reads ink, up to 2.5 mm off, and the scan
+needs its start on white paper left of the square and through its lower half. On 2026-10-26 a
+laminated sheet 1.5 mm further right than `--paper-at` said missed three scans; measured, it
+registered first time. When all three disagree, nothing is cut, and
 `cut-proxies --diagnose` shows why: before any scan it reads across the square and each leg in the
 loaded mat's frame (about 4 minutes), and says where the sheet sits, how it is turned and
 stretched, which marks never read as full ink or sit on unusually bright paper, and what the blank
 paper beside each mark reads, in the words a cut would stop or warn with.
 
 A misread can also be caught by eye. With `--proof` the blade traces the edge of one proof target
-after the scan, in one light pass at force 10, speed 5, depth 2 (`--proof-blade FORCE,SPEED,DEPTH`
+and crosses it with an X corner to corner after the scan, in one light pass at force 10, speed 5, depth 2 (`--proof-blade FORCE,SPEED,DEPTH`
 changes it), then sets the job's own blade again and waits. The targets are 3 mm filled black
 squares printed with the marks, inside the mark frame and clear of the marks and the job: four on
 every sheet the engine prints (see Sheet layouts), or one `--proof-target X,Y` for each on a sheet
 it didn't, such as the paper deck box (their centres in page mm, `--proof-target-size` if they
-aren't 3 mm). Lift the lid and look at the target. Registered right, the cut runs along the edge of
-the black all round. Registered off, white shows between the black and the cut on one side and the
+aren't 3 mm). Lift the lid and look at the target. The groove along the edge is hard to see on its
+own; the X's, across the black, shows as light lines. Registered right, the cut runs along the edge
+of the black all round and the X's arms end in its corners. Registered off, white shows between the black and the cut on one side and the
 cut runs inside the black on the other; the width of the white is the error, its side the
 direction. `y` cuts the job, `r` goes home and scans again and the next round traces the next
 target (up to three rounds), `q` stops with nothing more cut. A target whose outline would touch the

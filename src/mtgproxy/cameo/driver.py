@@ -152,7 +152,8 @@ def cut(
     should be?), blank paper beside each mark (does the sheet lie flat there? ``check_flat``) and
     every mark after it (does the print agree with the frame the scan made?). A
     scan that finds nothing or disagrees with the print is tried again, then once more as TB122,
-    which skips the top-right L (SCANS); when none agrees, the job stops before anything is cut
+    which skips the top-right L (SCANS); after the first that finds nothing, the sensor measures the
+    square (``measure``) and the next scan starts from where it lies; when none agrees, the job stops before anything is cut
     (``sensing``). With ``confirm``, each proof round traces the next of the frame's proof targets
     with ``proof_blade`` between the scan and the cut (``prove``), and nothing else is cut until the
     operator says so; ``on_target`` hears of each target as it is cut. A rescan returns to the
@@ -175,6 +176,8 @@ def cut(
         proofs = min(proof.ROUNDS, len(targets))
         rounds = max(proofs, CHECK_ROUNDS if check else 1)
         done = 0  # proof rounds cut
+        remeasure = measured = False  # after a scan that found nothing, once
+        square_paper: int | None = None  # blank paper above the square, from the check before the scan
         for attempt in range(rounds):
             if attempt:
                 s.finish()
@@ -184,6 +187,25 @@ def cut(
             if check and attempt == 0:
                 slot = check_light_slot(s, log)
             s.prepare()
+            if remeasure:
+                remeasure = False
+                off = measure(s, job.frame, log, square_paper)
+                if off is None:
+                    log.say("the square's edges don't measure: scanning from the same start")
+                elif max(abs(off[0]), abs(off[1])) < MEASURE_MOVE:
+                    log.say("the square measures where the frame puts it")
+                else:
+                    dx, dy = off
+                    right, down = job.frame.paper_at
+                    job = replace(
+                        job, frame=replace(job.frame, paper_at=(round(right + dx, 2), round(down + dy, 2)))
+                    )
+                    starts = [(top + dy, left + dx) for top, left in starts]
+                    log("measured", dx=dx, dy=dy, paper_at=job.frame.paper_at)
+                    log.say(
+                        f"square measured {_off(dx, 'right', 'left')} and {_off(dy, 'down', 'up')} of where "
+                        f"the frame put it: the paper's corner is {job.frame.placed()}; scanning from there"
+                    )
             if check and attempt == 0:
                 try:
                     placed = check_placement(s, job.frame, log)
@@ -193,6 +215,7 @@ def cut(
                         starts = [(top + dy, left + dx) for top, left in starts]
                         job = replace(job, frame=placed)
                     flat = check_flat(s, job.frame, log)
+                    square_paper = flat.paper_at("top-left")
                 except CutError:
                     s.send(protocol.select_light(slot))  # the next job's scan, checked or not, gets its light
                     raise
@@ -207,7 +230,9 @@ def cut(
                 start = s.register(job.frame, starts, marks)
             except CutError as e:
                 if check and attempt + 1 < rounds:
-                    log.say(f"{e.args[0].split('. ')[0]}: scanning again")
+                    remeasure, measured = not measured, True
+                    then = "measuring the square, then scanning again" if remeasure else "scanning again"
+                    log.say(f"{e.args[0].split('. ')[0]}: {then}")
                     continue
                 raise
             if low != (0.0, 0.0) and attempt == 0:
@@ -415,6 +440,52 @@ def locate(s: Session, frame: Frame, log: SessionLog) -> tuple[float, float] | N
     return None if sy is None else (round(hx + sx, 2), round(hy + sy, 2))
 
 
+EDGE_HALVINGS = 5  # the square's 5 mm halved five times: each edge to 0.16 mm
+MEASURE_MOVE = 0.25  # mm: a measured square closer than this to the frame's leaves the frame be
+
+
+def measure(s: Session, frame: Frame, log: SessionLog, paper: int | None) -> tuple[float, float] | None:
+    """Where the square sits from where the frame expects it, (right, down) mm, from its top and left
+    edges. Ink under the frame's square middle (``sensing.placement``) puts each edge within the
+    square's width above or left of it, with blank paper beyond: halving that span EDGE_HALVINGS
+    times pins the edge, a reading counting as ink when it is nearer the middle's level than
+    ``paper``'s. Eleven readings, about 45 s. None when the middle isn't ink against the paper, or
+    an edge's readings never reach paper (no edge in that span).
+
+    The placement check passes a sheet whose square's middle reads ink, up to 2.5 mm off, and the
+    scan's first search row runs only 1.5 mm above the square's bottom edge (``default_start``). On
+    2026-10-26 a laminated plain sheet lay 1.5 mm right of where --paper-at 3 put it, so the scan
+    started on the pouch's dark band past the paper's edge: its middle read 255, and TB123 twice and
+    TB122 replied 1 (no square), 43 s each. Measured after the first miss, it registered first time
+    from the moved start (11 s)."""
+    c = sensing.placement(frame)
+    ink, reply = read_loaded(s, frame, c)
+    log("measure", edge="middle", x=c.x, y=c.y, level=ink, reply=reply)
+    if ink is None or c.reads(ink, paper) is not True:
+        return None
+    base = sensing.PAPER if paper is None else paper
+    cut = (ink + base) / 2
+
+    def edge(axis: str) -> float | None:
+        lo, hi = -proof.SQUARE, 0.0  # offsets from the middle: paper at lo, ink at hi
+        for _ in range(EDGE_HALVINGS):
+            mid = (lo + hi) / 2
+            pt = replace(c, x=c.x + mid) if axis == "x" else replace(c, y=c.y + mid)
+            level, reply = read_loaded(s, frame, pt)
+            log("measure", edge=axis, x=pt.x, y=pt.y, level=level, reply=reply)
+            if level is not None and level >= cut:
+                hi = mid
+            else:
+                lo = mid
+        return None if lo == -proof.SQUARE else (lo + hi) / 2
+
+    ex = edge("x")
+    ey = None if ex is None else edge("y")
+    if ex is None or ey is None:
+        return None
+    return round(c.x + ex - frame.inset, 2), round(c.y + ey - frame.top, 2)
+
+
 def read_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
     """Blank paper beside each mark and in the middle of the top margin, in the loaded mat's frame
     (``read_loaded``, as the placement reading). The square's point first, then the reference on
@@ -520,13 +591,13 @@ def prove(
     blade: protocol.Blade = proof.BLADE,
     on_target: Callable[[proof.Target], None] | None = None,
 ) -> bool:
-    """Trace round ``round_``'s proof target along its edge in one pass with ``blade``, set the job's
+    """Trace round ``round_``'s proof target along its edge and across it (``Target.cuts``) in one pass with ``blade``, set the job's
     own blade again (the same cutting area, back to ``low``), park the head out of the way and ask.
     True: cut the job; False: rescan. Anything but y or r stops the job (CutError). With ``verify``
     (``held``), the marks are read again after the proof cut, before anyone is asked: a machine
     that lost its place cutting it stops the job there."""
     s.setup(blade, job.frame, low)
-    s.cut(replace(job, lines=[target.outline()]))
+    s.cut(replace(job, lines=list(target.cuts())))
     if on_target:
         on_target(target)
     of = max(tg.number for tg in job.frame.targets)
