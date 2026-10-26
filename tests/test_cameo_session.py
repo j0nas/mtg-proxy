@@ -212,7 +212,16 @@ def test_a_frame_the_print_agrees_with_is_cut_after_nine_readings():
 
 
 def test_a_misread_rescans_and_cuts_once_the_marks_agree():
-    misread = [PAPER, *SQUARE_OK[1:], INK, INK, INK, INK]  # the square's middle reads paper
+    misread = [
+        PAPER,
+        PAPER,
+        PAPER,
+        *SQUARE_OK[1:],
+        INK,
+        INK,
+        INK,
+        INK,
+    ]  # the square's middle and a quarter mm either side read paper
     t = checked([INK, *FLAT, *misread, *MARKS_OK])
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
@@ -231,7 +240,7 @@ def test_a_misread_on_every_scan_stops_before_anything_is_cut():
 
 def test_a_sheet_without_ink_under_the_square_is_never_scanned():
     t = checked([PAPER])
-    with pytest.raises(session.CutError, match="the sheet isn't where its marks should be"):
+    with pytest.raises(session.CutError, match="no square within 9 mm"):
         driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     assert "TB123" not in sent(t)
 
@@ -432,19 +441,17 @@ def test_diagnose_reads_every_row_where_the_paper_lies():
 
 
 @pytest.mark.parametrize(
-    "frame, mat, corner",
-    [
-        (FRAME, "7.5 mm down, 7.5 mm in", "on the mat grid's"),
-        (SHIFTED, "9.5 mm down, 10.5 mm in", "3 mm right and 2 mm down of the mat grid's"),
-    ],
+    "frame, corner",
+    [(FRAME, "on the mat grid's"), (SHIFTED, "3 mm right and 2 mm down of the mat grid's")],
 )
-def test_a_sheet_without_ink_under_the_square_is_told_where_its_corner_goes(frame, mat, corner):
+def test_a_sheet_without_ink_under_the_square_is_told_where_its_corner_goes(frame, corner):
     t = checked([PAPER])  # the square and, on this landscape sheet, where it lies on a portrait one
     with pytest.raises(session.CutError) as e:
         driver.cut(replace(job(), frame=frame), t, log(), [driver.default_start(frame)], check=True)
+    my, mx = frame.on_mat(7.5, 7.5)
     assert str(e.value) == (
-        f"no ink at the square's middle before the scan ({mat} from the mat grid's corner; it read 180): "
-        f"the sheet isn't where its marks should be. Put its top-left corner {corner}, reload and rerun"
+        f"no square within 9 mm of {my:g} mm down, {mx:g} mm in on the mat: put the paper's top-left "
+        f"corner {corner}, reload and rerun"
     )
 
 
@@ -482,25 +489,27 @@ def placement_readings(frame, readings, tmp_path):
 
 
 def test_a_landscape_sheet_loaded_as_printed_is_told_to_turn_a_quarter(tmp_path):
+    # The square's middle read 246; then ink everywhere: no paper to judge it by, no square anywhere.
     error, at, placed = placement_readings(DECK_BOX, [b"  246\x03", INK], tmp_path)
     assert error == TURNED
-    assert at == [(210, 210), (210, 4110)]  # mat (10.5, 10.5), then (10.5, 205.5): page (202.5, 7.5) + 3 mm
-    assert placed == [("placement", 7.5, 7.5, 246), ("placement_turned", 202.5, 7.5, 255)]
+    assert at[0] == (210, 210) and at[-1] == (210, 4110)  # mat (10.5, 205.5): page (202.5, 7.5) + 3 mm
+    assert placed[0] == ("placement", 7.5, 7.5, 246) and placed[-1] == ("placement_turned", 202.5, 7.5, 255)
 
 
 def test_a_landscape_sheet_with_paper_where_a_turned_square_lies_gets_the_placement_stop(tmp_path):
     error, at, placed = placement_readings(DECK_BOX, [PAPER], tmp_path)
-    assert error.startswith("no ink at the square's middle before the scan (10.5 mm down, 10.5 mm in from")
-    assert at == [(210, 210), (210, 4110)]
-    assert [p[0] for p in placed] == ["placement", "placement_turned"]
+    assert error == (
+        "no square within 9 mm of 10.5 mm down, 10.5 mm in on the mat: put the paper's top-left corner 3 mm "
+        "right and 3 mm down of the mat grid's, reload and rerun"
+    )
+    assert at[-1] == (210, 4110) and placed[-1][0] == "placement_turned"
 
 
-def test_a_portrait_sheet_without_ink_under_the_square_is_read_once(tmp_path):
+def test_a_portrait_sheet_without_ink_under_the_square_is_never_read_turned(tmp_path):
     portrait = session.Frame(page_w=210, page_h=297, inset=3.5, width=203, height=279, length=6, inset_y=9)
-    error, at, placed = placement_readings(portrait, [PAPER, INK], tmp_path)  # ink after it goes unread
-    assert error.startswith("no ink at the square's middle before the scan (11.5 mm down, 6 mm in from")
-    assert at == [(230, 120)]
-    assert [p[0] for p in placed] == ["placement"]
+    error, at, placed = placement_readings(portrait, [PAPER], tmp_path)
+    assert error.startswith("no square within 9 mm of 11.5 mm down, 6 mm in on the mat")
+    assert at[0] == (230, 120) and "placement_turned" not in [p[0] for p in placed]
 
 
 def test_a_square_that_reads_ink_is_never_read_turned():

@@ -45,6 +45,21 @@ NUDGE = 0.25  # mm either side of a leg's centre line, read when the centre itse
 # read dark on one side only.
 CONTRAST = 40
 SIDE = 1.25
+# Ink on paper that reads dark. On the paper deck box's sheet (Epson Premium Glossy 220 gsm in an
+# 80 µm pouch, 2026-10-26) blank paper read 116-152 and the 5 mm square 238-255 inside it, where
+# proxy paper reads 150-242 and ink 255: INK alone failed the square's middle at 242 and 246 on a
+# sheet placed right. Beside a mark whose blank paper read as paper, ink is also anything DIM_INK
+# above that paper, and paper only what reads below that (``thresholds``).
+DIM_INK = 100
+
+
+def thresholds(paper: int | None) -> tuple[int, int]:
+    """(ink at or above, paper at or below) beside a mark whose blank paper read ``paper``: INK and
+    PAPER, or lower where that paper reads dark enough (DIM_INK). None: no paper to go by."""
+    if paper is None or paper > PAPER:
+        return INK, PAPER
+    ink = min(INK, paper + DIM_INK)
+    return ink, min(PAPER, ink - 1)
 
 
 @dataclass(frozen=True)
@@ -101,17 +116,20 @@ class Check:
     y: float
     ink: bool
     nudge: tuple[float, float] | None = None
+    line: bool = False  # a 1 mm leg: may pass as a faint line against the paper either side of it
 
     def nudged(self, k: float) -> Check:
         """This check moved ``k`` mm along its nudge direction (a leg's crossing)."""
         assert self.nudge is not None
         return replace(self, x=self.x + k * self.nudge[0], y=self.y + k * self.nudge[1])
 
-    def reads(self, level: int | None) -> bool | None:
-        """True ink, False paper, None neither (a reading between the two, or none)."""
+    def reads(self, level: int | None, paper: int | None = None) -> bool | None:
+        """True ink, False paper, None neither (a reading between the two, or none); ``paper`` is
+        what blank paper beside the mark read (``thresholds``)."""
         if level is None:
             return None
-        return True if level >= INK else False if level <= PAPER else None
+        ink, blank_ = thresholds(paper)
+        return True if level >= ink else False if level <= blank_ else None
 
 
 def placement(frame: Frame) -> Check:
@@ -120,7 +138,12 @@ def placement(frame: Frame) -> Check:
     sheet placed where the marks expect it has ink here; within about 2 mm of it, the scan's own
     window."""
     return Check(
-        "top-left", "the square, before the scan", frame.inset + SQUARE / 2, frame.top + SQUARE / 2, True
+        "top-left",
+        "the square, before the scan",
+        frame.inset + SQUARE / 2,
+        frame.top + SQUARE / 2,
+        True,
+        nudge=(1, 0),
     )
 
 
@@ -142,7 +165,7 @@ def checks(frame: Frame) -> list[Check]:
     x0, y0 = frame.inset, frame.top
     mid, far = SQUARE / 2, SQUARE + OUTSIDE_SQUARE
     out = [
-        Check("top-left", "the square", x0 + mid, y0 + mid, True),
+        Check("top-left", "the square", x0 + mid, y0 + mid, True, nudge=(1, 0)),
         Check("top-left", "left of the square", x0 - OUTSIDE_SQUARE, y0 + mid, False),
         Check("top-left", "right of the square", x0 + far, y0 + mid, False),
         Check("top-left", "above the square", x0 + mid, y0 - OUTSIDE_SQUARE, False),
@@ -152,8 +175,8 @@ def checks(frame: Frame) -> list[Check]:
     for name, (i, j), (sx, sy) in L_MARKS:
         cx, cy = frame.inset + i * frame.width, frame.top + j * frame.height
         out += [
-            Check(name, "the vertical leg", cx, cy + sy * half, True, nudge=(1, 0)),
-            Check(name, "the horizontal leg", cx + sx * half, cy, True, nudge=(0, 1)),
+            Check(name, "the vertical leg", cx, cy + sy * half, True, nudge=(1, 0), line=True),
+            Check(name, "the horizontal leg", cx + sx * half, cy, True, nudge=(0, 1), line=True),
         ]
     return out
 
@@ -205,6 +228,11 @@ class Flatness:
         """Blank paper beside ``mark`` read as paper, so an ink reading on that mark means ink. A
         mark without a quiet point has nothing to compare with: False."""
         return any(c.mark == mark and blank(level) for c, level in self.readings)
+
+    def paper_at(self, mark: str) -> int | None:
+        """What blank paper beside ``mark`` read, when it read as paper: the level its ink and paper
+        readings are judged against (``Check.reads``)."""
+        return next((level for c, level in self.readings if c.mark == mark and blank(level)), None)
 
     def _mid(self) -> str:
         return f"mid-top: {'no reading' if self.reference is None else self.reference}"
@@ -281,6 +309,69 @@ def leg_rows(frame: Frame, dx: float = 0.0, dy: float = 0.0) -> list[Row]:
     return rows
 
 
+# --- where is the square? Searched for before the scan when its middle reads no ink ---------------
+#
+# A pouch's margin past the paper varies by a millimetre or more between pouch makes and between
+# loads, and a sheet laid a few millimetres off fails the placement reading although the scan would
+# find it. On 2026-10-26 the deck box's sheet was placed right and its square read 242 (dim ink, see
+# DIM_INK), and the next sheet may sit 2 mm off: rather than stop and have the operator measure and
+# reload, the head looks for the square in a row across it each way and the readings before the
+# scan follow it there.
+
+SEARCH = 9.0  # mm either side of where the square's middle should be: finds it up to about 6 mm off
+REFINE = 6.0  # mm either side of where a search row met the square, for its middle each way
+SEARCH_STEP = 1.0
+SQUARE_RUN = (2.5, 7.5)  # mm from first to last reading of a run that is the square, at SEARCH_STEP
+
+
+def search_row(frame: Frame, axis: str, dx: float = 0.0, dy: float = 0.0, reach: float = SEARCH) -> Row:
+    """Readings through where the square's middle should be, moved by (``dx``, ``dy``): across x,
+    across y, or along the diagonal ("d", right and down together, as a pouch's wider margin moves a
+    sheet), ``reach`` either side at SEARCH_STEP, page mm; offsets from that middle. Points that
+    would fall off the mat (left of or above its origin) are left out."""
+    mx, my = frame.inset + SQUARE / 2 + dx, frame.top + SQUARE / 2 + dy
+    ux, uy = {"x": (1, 0), "y": (0, 1), "d": (1, 1)}[axis]
+    pts = []
+    for d in _steps(-reach, reach, SEARCH_STEP):
+        x, y = mx + ux * d, my + uy * d
+        on_y, on_x = frame.on_mat(y, x)
+        if on_x >= 0.5 and on_y >= 0.5:
+            pts.append(Point(f"square search {axis}", x, y, d))
+    return Row("square", f"search {axis}", axis, tuple(pts), 0.0)
+
+
+def square_in(row: Row, levels: list[int | None]) -> float | None:
+    """How far the square's middle sits from where it should along a search row (mm), or None when
+    the row shows no run of the square's width standing out from the paper.
+
+    A run is readings halfway or more from the row's paper (its lower quartile: the square and a
+    dark pouch edge may take half a row) to its darkest, CONTRAST at least apart. Only a run that lies whole in the row and spans
+    SQUARE_RUN counts; of those, the one nearest where the square should be. On 2026-10-26 a
+    diagonal row across the deck box's sheet read the pouch's edge as dark as ink at its start, and
+    the square 245-255 four millimetres along it."""
+    vals = [(p.offset, v) for p, v in zip(row.points, levels, strict=True) if v is not None]
+    if len(vals) < 5:
+        return None
+    ranked = sorted(v for _, v in vals)
+    paper, peak = ranked[len(ranked) // 4], ranked[-1]
+    if peak - paper < CONTRAST:
+        return None
+    mid = (paper + peak) / 2
+    runs, start = [], None
+    for i, (_, v) in enumerate([*vals, (None, -1)]):
+        if v >= mid and start is None:
+            start = i
+        elif v < mid and start is not None:
+            runs.append((start, i - 1))
+            start = None
+    whole = [
+        (vals[a][0] + vals[b][0]) / 2
+        for a, b in runs
+        if a > 0 and b < len(vals) - 1 and SQUARE_RUN[0] <= vals[b][0] - vals[a][0] <= SQUARE_RUN[1]
+    ]
+    return round(min(whole, key=abs), 2) if whole else None
+
+
 @dataclass(frozen=True)
 class Seen:
     """What one row shows: the mark's peak and the paper's median and range beside it, and how far
@@ -294,6 +385,7 @@ class Seen:
     paper_range: tuple[int, int] | None
     shift: float | None
     faint: bool = False  # nothing stood out: the paper read nearly as dark as the darkest reading
+    span: float | None = None  # mm from the mark's first reading to its last, when it lies whole in the row
 
 
 def see(row: Row, levels: list[int | None]) -> Seen:
@@ -319,7 +411,8 @@ def see(row: Row, levels: list[int | None]) -> Seen:
     away = sorted(v for i, (_, v) in enumerate(vals) if i < lo - 1 or i > hi + 1) or [min(left, right)]
     whole = lo > 0 and hi < len(vals) - 1
     shift = round((vals[lo][0] + vals[hi][0]) / 2 - row.middle, 2) if whole else None
-    return Seen(row, tuple(levels), peak, away[len(away) // 2], (away[0], away[-1]), shift)
+    span = round(vals[hi][0] - vals[lo][0], 2) if whole else None
+    return Seen(row, tuple(levels), peak, away[len(away) // 2], (away[0], away[-1]), shift, span=span)
 
 
 def verdict(seen: list[Seen], frame: Frame, flat: Flatness | None = None) -> list[str]:
