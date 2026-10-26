@@ -211,7 +211,16 @@ def test_a_frame_the_print_agrees_with_is_cut_after_nine_readings():
 
 
 def test_a_misread_rescans_and_cuts_once_the_marks_agree():
-    misread = [PAPER, *SQUARE_OK[1:], INK, INK, INK, INK]  # the square's middle reads paper
+    misread = [
+        PAPER,
+        PAPER,
+        PAPER,
+        *SQUARE_OK[1:],
+        INK,
+        INK,
+        INK,
+        INK,
+    ]  # the square's middle and a quarter mm either side read paper
     t = checked([INK, *FLAT, *misread, *MARKS_OK])
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
@@ -230,7 +239,7 @@ def test_a_misread_on_every_scan_stops_before_anything_is_cut():
 
 def test_a_sheet_without_ink_under_the_square_is_never_scanned():
     t = checked([PAPER])
-    with pytest.raises(session.CutError, match="the sheet isn't where its marks should be"):
+    with pytest.raises(session.CutError, match="no square within 9 mm"):
         driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     assert "TB123" not in sent(t)
 
@@ -437,9 +446,10 @@ def test_a_sheet_without_ink_under_the_square_is_told_where_its_corner_goes(fram
     t = checked([PAPER])
     with pytest.raises(session.CutError) as e:
         driver.cut(replace(job(), frame=frame), t, log(), [driver.default_start(frame)], check=True)
+    my, mx = frame.on_mat(7.5, 7.5)
     assert str(e.value) == (
-        "no ink at the square's middle before the scan (7.5 mm down, 7.5 mm in; it read 180): the sheet "
-        f"isn't where its marks should be. Put its top-left corner {corner}, reload and rerun"
+        f"no square within 9 mm of {my:g} mm down, {mx:g} mm in on the mat: put the paper's top-left "
+        f"corner {corner}, reload and rerun"
     )
 
 

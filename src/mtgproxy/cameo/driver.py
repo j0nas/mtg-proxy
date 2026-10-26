@@ -136,7 +136,12 @@ def cut(
             s.prepare()
             if check and attempt == 0:
                 try:
-                    check_placement(s, job.frame, log)
+                    placed = check_placement(s, job.frame, log)
+                    if placed is not job.frame:  # the square sits off: so does the whole sheet
+                        dx = placed.paper_at[0] - job.frame.paper_at[0]
+                        dy = placed.paper_at[1] - job.frame.paper_at[1]
+                        starts = [(top + dy, left + dx) for top, left in starts]
+                        job = replace(job, frame=placed)
                     flat = check_flat(s, job.frame, log)
                 except CutError:
                     s.send(protocol.select_light(slot))  # the next job's scan, checked or not, gets its light
@@ -213,17 +218,77 @@ def read_loaded(s: Session, frame: Frame, pt: sensing.Point | sensing.Check) -> 
     return s.sense(*frame.on_mat(pt.y, pt.x), SENSE_SLOT)
 
 
-def check_placement(s: Session, frame: Frame, log: SessionLog) -> None:
-    """Before the scan: ink under the square's middle, or the sheet isn't where its marks should be."""
+def check_placement(s: Session, frame: Frame, log: SessionLog) -> Frame:
+    """Before the scan: is the square where the frame says? Ink under its middle passes, and so does
+    dim ink, DIM_INK above the blank paper over it (``sensing.thresholds``), there or NUDGE either side. Otherwise the head looks
+    for the square (``locate``): found up to SEARCH mm off, every later reading and the scan's start
+    follow it there, in the frame this returns. Found nowhere: nothing is scanned."""
     c = sensing.placement(frame)
     level, reply = read_loaded(s, frame, c)
     log("placement", x=c.x, y=c.y, level=level, reply=reply)
-    if c.reads(level) is not True:
+    if c.reads(level) is True:
+        return frame
+    above = sensing.quiet(frame)[0]
+    paper, reply = read_loaded(s, frame, above)
+    log("placement paper", x=above.x, y=above.y, level=paper, reply=reply)
+    if sensing.blank(paper):
+        if c.reads(level, paper) is True:
+            return frame
+        for k in (-1, 1):  # single readings inside the square swing: 238-255 on the deck box's sheet
+            nl, reply = read_loaded(s, frame, c.nudged(k * sensing.NUDGE))
+            log("placement", x=c.x + k * sensing.NUDGE, y=c.y, level=nl, reply=reply)
+            if c.reads(nl, paper) is True:
+                return frame
+    found = locate(s, frame, log)
+    if found is None:
+        my, mx = frame.on_mat(c.y, c.x)
         raise CutError(
-            f"no ink at the square's middle before the scan ({c.y:g} mm down, {c.x:g} mm in; it read "
-            f"{level!r}): the sheet isn't where its marks should be. Put its top-left corner "
-            f"{frame.placed()}, reload and rerun"
+            f"no square within {sensing.SEARCH:g} mm of {my:g} mm down, {mx:g} mm in on the mat: put the "
+            f"paper's top-left corner {frame.placed()}, reload and rerun"
         )
+    dx, dy = found
+    right, down = frame.paper_at
+    moved = replace(frame, paper_at=(round(right + dx, 2), round(down + dy, 2)))
+    log("located", dx=dx, dy=dy, paper_at=moved.paper_at)
+    log.say(
+        f"square found {_off(dx, 'right', 'left')} and {_off(dy, 'down', 'up')} of where it should be: "
+        f"the paper's corner is {moved.placed()}"
+    )
+    return moved
+
+
+def _off(d: float, plus: str, minus: str) -> str:
+    return f"{abs(d):g} mm {plus if d >= 0 else minus}"
+
+
+def locate(s: Session, frame: Frame, log: SessionLog) -> tuple[float, float] | None:
+    """Where the square's middle sits from where the frame expects it, (right, down) mm. A row of
+    readings through the expected middle looks for it: along the diagonal first (a pouch's wider
+    margin moves the sheet right and down alike), then across x, then across y
+    (``sensing.search_row``). Where one meets it, a shorter row across x and then across y measure
+    its middle. None: no row meets it, or the measuring rows lose it."""
+
+    def find(axis: str, dx: float = 0.0, dy: float = 0.0, reach: float = sensing.SEARCH) -> float | None:
+        row = sensing.search_row(frame, axis, dx, dy, reach)
+        levels = []
+        for pt in row.points:
+            level, reply = read_loaded(s, frame, pt)
+            log("search", axis=axis, x=pt.x, y=pt.y, offset=pt.offset, level=level, reply=reply)
+            levels.append(level)
+        return sensing.square_in(row, levels)
+
+    for axis, (ux, uy) in (("d", (1, 1)), ("x", (1, 0)), ("y", (0, 1))):
+        t = find(axis)
+        if t is not None:
+            hx, hy = ux * t, uy * t
+            break
+    else:
+        return None
+    sx = find("x", hx, hy, sensing.REFINE)
+    if sx is None:
+        return None
+    sy = find("y", hx + sx, hy, sensing.REFINE)
+    return None if sy is None else (round(hx + sx, 2), round(hy + sy, 2))
 
 
 def read_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
@@ -266,22 +331,23 @@ def check_marks(s: Session, frame: Frame, log: SessionLog, flat: sensing.Flatnes
         return s.sense(*sensing.registered(frame, c), SENSE_SLOT)[0]
 
     for c in sensing.checks(frame):
+        paper = flat.paper_at(c.mark)  # dim ink is judged against its own paper (sensing.thresholds)
         level = read(c)
-        seen, nudged, sides = c.reads(level), [], []
+        seen, nudged, sides = c.reads(level, paper), [], []
         if c.ink and seen is not True and c.nudge:
             for k in (-1, 1):
                 nl = read(c.nudged(k * sensing.NUDGE))
                 nudged.append(nl)
-                if c.reads(nl) is True:
+                if c.reads(nl, paper) is True:
                     seen = True
                     break
-            if seen is not True:
+            if seen is not True and c.line:
                 sides = [read(c.nudged(k * sensing.SIDE)) for k in (-1, 1)]
                 peak = max((v for v in (level, *nudged) if v is not None), default=None)
                 if (
                     peak is not None
                     and None not in sides
-                    and all(c.reads(v) is False and peak - v >= sensing.CONTRAST for v in sides)
+                    and all(c.reads(v, paper) is False and peak - v >= sensing.CONTRAST for v in sides)
                 ):
                     seen = True
                     log.say(
