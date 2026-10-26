@@ -18,10 +18,11 @@ mtg-proxy backlog   show the queue, `backlog build` prints it as one sheet, `bac
 mtg-proxy offset    store the printer's duplex offset once
 mtg-proxy notes     show the newest CUT-NOTES.md below the cwd
 mtg-proxy cache     Scryfall image cache stats / --clear (~/.cache/mtg-proxy)
+mtg-proxy print     print a PDF on the PC's Epson queues (--paper plain|glossy|premium, --dry-run)
 mtg-proxy doctor    check engine and data files
 ```
 
-`make-proxies.sh`, `cut-proxies.sh` and `save-offset.sh` are shims onto those commands, and
+`make-proxies.sh`, `cut-proxies.sh`, `print-sheet.sh` and `save-offset.sh` are shims onto those commands, and
 `mtg-proxy.sh` onto the whole CLI. Output lands in the current directory, one folder per deck. Under WSL it is also mirrored flat into
 `%USERPROFILE%\Desktop\projects\mtg-proxy` (`MTG_PROXY_WIN_OUT` overrides).
 
@@ -49,7 +50,7 @@ after pulling; it's idempotent.
 
 ```sh
 make-proxies --test                # ./test-sheet/test-sheet.pdf
-make-proxies --test --print        # and send it to the default CUPS printer at 100 %
+make-proxies --test --print        # and print it on the PC's plain-paper queue
 make-proxies --test --layout 4x2   # eight of them on landscape A4 (see Sheet layouts)
 ```
 
@@ -62,9 +63,21 @@ alignment against a light. A TOP marker catches flips.
 Print at actual size, borderless off. Scaling moves the registration marks and the scan fails.
 Duplex is manual, long-edge flip. If the gauges read clean, print real cards.
 
-`--print` goes through CUPS with scaling forced off, using the `4x2-glossy` printer instance
-(rear feeder, glossy photo, High). `docs/printer-presets/README.md` has the Windows presets and
-the CUPS mapping.
+Nothing is printed from the Mac. `--print` (and `print-sheet.sh`) copies the PDF to the Windows PC
+over SSH and prints it there with SumatraPDF at 100 %, through one of the PC's Epson queues: real
+sheets go to `Glossy photo paper proxies`, `--test` sheets to `ET-8550 Series(Network)` (plain
+paper). Landscape pages are turned upright first, because the driver ignores a landscape setting
+and clips the page.
+
+```sh
+print-sheet.sh deck/deck.pdf                       # glossy queue
+print-sheet.sh deck/deck.pdf --paper premium       # Premium glossy paper (220 gsm)
+print-sheet.sh deck/deck.pdf --paper plain --dry-run   # copy to the PC, show the command, stop
+```
+
+The queues carry the paper presets as their defaults; `docs/printer-presets/README.md` lists them.
+The command needs the key `~/.ssh/pomelomadness_ed25519` and the PC on the same LAN. It sends the
+job once and never retries, since a resend prints a second sheet.
 
 ## Real decks
 
@@ -390,7 +403,7 @@ A3 works on the ET-8550 (18 cards a sheet) but needs the 12x24" mat.
 
 ```sh
 uv sync
-uv run pytest           # ~180 tests, no network, no printer, no Cameo, ~4 s
+uv run pytest           # ~220 tests, no network, no printer, no Cameo, ~4 s
 uv run ruff check src tests && uv run ruff format src tests
 ```
 

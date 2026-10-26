@@ -143,14 +143,9 @@ def make(
     test: Annotated[
         bool, typer.Option("--test", help="ink-light placeholder gauge sheet, no Scryfall")
     ] = False,
-    print_: Annotated[bool, typer.Option("--print", help="send the PDF straight to CUPS at 100%")] = False,
-    printer: Annotated[
-        str | None,
-        typer.Option(
-            "--printer",
-            help="CUPS destination for --print (default: 4x2-glossy instance, else default printer)",
-        ),
-    ] = None,
+    print_: Annotated[
+        bool, typer.Option("--print", help="print the PDF on the PC (glossy queue; plain for --test)")
+    ] = False,
     back: Annotated[
         Path, typer.Option(help="card back image for --backs runs", dir_okay=False)
     ] = DEFAULT_BACK,
@@ -183,7 +178,7 @@ def make(
         _notes(deck, out)
         return
     if test and deck is not None:
-        fail(f"--test takes no decklist (got {deck!r}; a printer name goes in --printer)")
+        fail(f"--test takes no decklist (got {deck!r})")
     if tokens is not None and tokens_only is not None:
         fail("--tokens and --tokens-only are mutually exclusive")
     try:
@@ -206,7 +201,6 @@ def make(
         skip_fetch=skip_fetch,
         test_mode=test,
         print_mode=print_,
-        printer=printer,
         fetch_args=list(ctx.args),
         use_cache=not no_cache,
         dry_run=dry_run,
@@ -747,8 +741,9 @@ def backlog_build(
     name: Annotated[
         str | None, typer.Option("--name", help="run folder name (default backlog-<date>)")
     ] = None,
-    print_: Annotated[bool, typer.Option("--print", help="send the PDF straight to CUPS at 100%")] = False,
-    printer: Annotated[str | None, typer.Option("--printer", help="CUPS destination for --print")] = None,
+    print_: Annotated[
+        bool, typer.Option("--print", help="print the PDF on the PC (glossy queue; plain for --test)")
+    ] = False,
     dry_run: Annotated[bool, typer.Option("-n", "--dry-run", help="show what would be built")] = False,
 ) -> None:
     out = out.resolve()
@@ -802,7 +797,6 @@ def backlog_build(
         front_only=[c.name for c in cards if c.front],
         include_basics=True,  # every line here is explicit
         print_mode=print_,
-        printer=printer,
         trims=[trim.TrimSpec(n, mm) for n, mm in trims.items()],
         images=images,
     )
@@ -827,6 +821,20 @@ def _fresh_name(parent: Path, base: str) -> str:
     while (parent / name).exists():
         name, n = f"{base}-{n}", n + 1
     return name
+
+
+@app.command(name="print", help="Print a PDF on the Windows PC's Epson queues (never from the Mac).")
+def print_cmd(
+    pdf: Annotated[Path, typer.Argument(help="the sheet PDF", dir_okay=False)],
+    paper: Annotated[str, typer.Option("--paper", help="plain | glossy | premium")] = "glossy",
+    dry_run: Annotated[
+        bool, typer.Option("-n", "--dry-run", help="copy to the PC, show the print command, stop")
+    ] = False,
+) -> None:
+    try:
+        printing.print_pdf(pdf, paper, dry_run=dry_run, say=typer.echo)
+    except printing.PrintError as e:
+        fail(str(e))
 
 
 @app.command(name="make-back", help="Regenerate the generic proxy card back at assets/back.png.")
@@ -861,7 +869,7 @@ def doctor() -> None:
             "mtg-proxy offset -x .. -y .. (README §3)",
         ),
         ("card back (assets/back.png)", DEFAULT_BACK.is_file(), "mtg-proxy make-back"),
-        ("CUPS lp", printing.lp_available(), "needed only for --print"),
+        ("PC ssh key", printing.KEY.is_file(), "needed only for --print (~/.ssh/pomelomadness_ed25519)"),
     ]
     bad = 0
     for label, ok, hint in checks:

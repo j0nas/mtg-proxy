@@ -106,9 +106,9 @@ def test_cli_validation():
     r = runner.invoke(app, ["make", "x.txt", "--bogus"])
     assert r.exit_code == 2 and "No such option" in r.output
     r = runner.invoke(app, ["make", "--test", "--print", "EPSON_ET_8550_Series"])
-    assert (
-        r.exit_code == 1 and "--printer" in r.output
-    )  # old `--print PRINTER` form is rejected, not swallowed
+    assert r.exit_code == 1 and "takes no decklist" in r.output  # --print is a flag, no printer argument
+    r = runner.invoke(app, ["make", "--test", "--printer", "X"])
+    assert r.exit_code == 2 and "No such option" in r.output
     r = runner.invoke(app, ["cut", "--bogus"])
     assert r.exit_code == 2 and "No such option" in r.output
     r = runner.invoke(app, ["make", "missing.txt", "--dry-run"])

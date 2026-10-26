@@ -1,71 +1,121 @@
 from __future__ import annotations
 
+import base64
+import subprocess
 from pathlib import Path
 
-from mtgproxy.printing import DEFAULT_INSTANCE, build_job, find_instance, instance_defined
+import pytest
+from pypdf import PdfReader, PdfWriter
+
+from mtgproxy import printing
+from mtgproxy.printing import PrintError, print_pdf
 
 
-def test_instance_defined(tmp_path):
-    lp = tmp_path / "lpoptions"
-    assert not instance_defined(DEFAULT_INSTANCE, lp)
-    lp.write_text(f"Default EPSON\nDest {DEFAULT_INSTANCE} media=A4\n")
-    assert instance_defined(DEFAULT_INSTANCE, lp)
-    assert not instance_defined("EPSON/other", lp)
+def _pdf(path: Path, sizes_mm: list[tuple[float, float]]) -> Path:
+    w = PdfWriter()
+    for mw, mh in sizes_mm:
+        w.add_blank_page(mw / printing.PT_MM, mh / printing.PT_MM)
+    w.write(path)
+    return path
 
 
-def test_real_sheet_uses_instance_when_defined(tmp_path, monkeypatch):
-    monkeypatch.delenv("MTG_PROXY_LP_OPTS", raising=False)
-    monkeypatch.delenv("MTG_PROXY_LP_INSTANCE", raising=False)
-    lp = tmp_path / "lpoptions"
-    lp.write_text(f"Dest {DEFAULT_INSTANCE} x=y\n")
-    job = build_job(Path("/x/deck.pdf"), "a4", test_sheet=False, lpoptions=lp, exists=lambda q: True)
-    assert job.argv == [
-        "lp", "-d", DEFAULT_INSTANCE,
-        "-o", "media=A4", "-o", "print-scaling=none", "-o", "fit-to-page=false", "/x/deck.pdf",
-    ]  # fmt: skip
-    assert "4x2-glossy" in job.description
+class FakePc:
+    """Stands in for ssh/scp: records argv, answers the queue and size checks."""
+
+    def __init__(self, queues=("ET-8550 Series(Network)", "Glossy photo paper proxies")):
+        self.queues, self.calls, self.scripts, self.copied = set(queues), [], [], []
+
+    def __call__(self, argv, stdin=None):
+        self.calls.append(argv)
+        out = ""
+        if argv[0] == "scp":
+            src = Path(argv[-2])
+            self.copied.append((src.name, argv[-1], src.stat().st_size, PdfReader(src)))
+            self.size = src.stat().st_size
+        else:
+            script = base64.b64decode(argv[-1].split()[-1]).decode("utf-16-le")
+            self.scripts.append(script)
+            if "Get-Printer" in script:
+                out = "present" if any(f"'{q}'" in script for q in self.queues) else "missing"
+            elif ".Length" in script:
+                out = str(self.size)
+        return subprocess.CompletedProcess(argv, 0, out + "\n", "")
 
 
-def test_real_sheet_falls_back_to_explicit_glossy_options(tmp_path, monkeypatch):
-    monkeypatch.setenv("MTG_PROXY_LP_OPTS", "-o foo=bar")
-    job = build_job(
-        Path("d.pdf"), "letter", test_sheet=False, lpoptions=tmp_path / "none", exists=lambda q: True
-    )
-    assert "-d" not in job.argv
-    assert "MediaType=photographic-glossy" in job.argv and "media=Letter" in job.argv
-    assert job.argv[-3:] == ["-o", "foo=bar", "d.pdf"]
-    named = build_job(
-        Path("d.pdf"),
-        "a4",
-        test_sheet=False,
-        printer="Other",
-        lpoptions=tmp_path / "none",
-        exists=lambda q: True,
-    )
-    assert named.argv[1:3] == ["-d", "Other"] and "InputSlot=rear" in named.argv
+def test_landscape_rotated_portrait_untouched(tmp_path):
+    pdf = _pdf(tmp_path / "d.pdf", [(297, 210), (210, 297)])
+    pc, lines = FakePc(), []
+    print_pdf(pdf, "plain", dry_run=True, runner=pc, say=lines.append)
+    pages = pc.copied[0][3].pages
+    assert [p.get("/Rotate") or 0 for p in pages] == [90, 0]
+    assert any("1 turned upright" in line and "2 page(s)" in line for line in lines)
 
 
-def test_test_sheet_uses_plain_defaults(tmp_path, monkeypatch):
-    monkeypatch.delenv("MTG_PROXY_LP_OPTS", raising=False)
-    job = build_job(Path("t.pdf"), "a4", test_sheet=True, lpoptions=tmp_path / "none")
-    assert "MediaType=photographic-glossy" not in job.argv and "-d" not in job.argv
-    assert "plain paper" in job.description
+def test_dry_run_copies_but_never_prints(tmp_path):
+    pc, lines = FakePc(), []
+    r = print_pdf(_pdf(tmp_path / "d.pdf", [(210, 297)]), "glossy", dry_run=True, runner=pc, say=lines.append)
+    assert not r.sent
+    assert not any("SumatraPDF" in s for s in pc.scripts)
+    assert pc.copied[0][0] == "d-portrait.pdf"
+    assert pc.copied[0][1].endswith(f"{printing.REMOTE_DIR}/d-portrait.pdf")
+    assert "dry run" in lines[-1] and "SumatraPDF" in lines[-1]
 
 
-def test_instance_follows_a_renamed_queue_and_ignores_dangling_ones(tmp_path):
-    lp = tmp_path / "lpoptions"
-    lp.write_text(
-        f"Default X\nDest {DEFAULT_INSTANCE} media=A4\nDest EPSON_ET_8550_Series_2/4x2-glossy EPIJ_Medi=145\n"
-    )
-    live = {"EPSON_ET_8550_Series_2"}
-    assert (
-        find_instance(DEFAULT_INSTANCE, lp, exists=lambda q: q in live) == "EPSON_ET_8550_Series_2/4x2-glossy"
-    )
-    assert (
-        find_instance(DEFAULT_INSTANCE, lp, exists=lambda q: True) == DEFAULT_INSTANCE
-    )  # preferred wins when alive
-    assert find_instance(DEFAULT_INSTANCE, lp, exists=lambda q: False) is None
-    job = build_job(Path("d.pdf"), "a4", test_sheet=False, lpoptions=lp, exists=lambda q: False)
-    assert (
-        "-d" not in job.argv and "explicit glossy options" in job.description
-    )  # dangling instance never used
+@pytest.mark.parametrize(
+    ("kind", "queue"),
+    [
+        ("plain", "ET-8550 Series(Network)"),
+        ("glossy", "Glossy photo paper proxies"),
+        ("premium", "Premium glossy paper"),
+    ],
+)
+def test_queue_mapping_and_print_command(tmp_path, kind, queue):
+    pc = FakePc(queues=[queue])
+    pdf = _pdf(tmp_path / "d.pdf", [(210, 297)])
+    r = print_pdf(pdf, kind, runner=pc, say=lambda s: None)
+    assert r.sent and r.queue == queue
+    last = pc.scripts[-1]
+    assert f"-print-to '{queue}'" in last
+    assert "-print-settings 'noscale,portrait,paper=A4'" in last
+    assert "-silent -exit-when-done" in last and "| Out-Null" in last
+    assert f"Get-PrintJob -PrinterName '{queue}'" in last
+    assert sum("SumatraPDF" in s for s in pc.scripts) == 1  # sent exactly once
+
+
+def test_scp_argv(tmp_path):
+    pc = FakePc()
+    print_pdf(_pdf(tmp_path / "d.pdf", [(210, 297)]), "plain", dry_run=True, runner=pc, say=lambda s: None)
+    scp = next(c for c in pc.calls if c[0] == "scp")
+    assert scp[:4] == ["scp", "-q", "-i", str(printing.KEY)]
+    assert scp[-1] == f"jonas@pomelomadness.local:{printing.REMOTE_DIR}/d-portrait.pdf"
+
+
+@pytest.mark.parametrize(
+    ("size", "paper"), [((297, 420), "A3"), ((215.9, 279.4), "letter"), ((420, 297), "A3")]
+)
+def test_paper_from_page_size(tmp_path, size, paper):
+    _, _, _ = printing.make_upright(_pdf(tmp_path / "a.pdf", [size]), tmp_path / "b.pdf")
+    assert printing.make_upright(tmp_path / "a.pdf", tmp_path / "b.pdf")[0] == paper
+
+
+def test_odd_size_and_mixed_sizes_rejected(tmp_path):
+    with pytest.raises(PrintError, match="not A4"):
+        printing.make_upright(_pdf(tmp_path / "a.pdf", [(100, 150)]), tmp_path / "b.pdf")
+    with pytest.raises(PrintError, match="mix"):
+        printing.make_upright(_pdf(tmp_path / "a.pdf", [(210, 297), (297, 420)]), tmp_path / "b.pdf")
+
+
+def test_missing_queue_fails_before_copy(tmp_path):
+    pc = FakePc(queues=[])
+    with pytest.raises(PrintError, match="Premium glossy paper"):
+        print_pdf(_pdf(tmp_path / "d.pdf", [(210, 297)]), "premium", runner=pc, say=lambda s: None)
+    assert not pc.copied and len(pc.calls) == 1
+
+
+def test_unknown_paper_and_unreachable_pc(tmp_path):
+    pdf = _pdf(tmp_path / "d.pdf", [(210, 297)])
+    with pytest.raises(PrintError, match="unknown paper"):
+        print_pdf(pdf, "matte", runner=FakePc(), say=lambda s: None)
+    down = lambda argv, stdin=None: subprocess.CompletedProcess(argv, 255, "", "")  # noqa: E731
+    with pytest.raises(PrintError, match="cannot reach"):
+        print_pdf(pdf, "plain", runner=down, say=lambda s: None)

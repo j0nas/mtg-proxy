@@ -1,117 +1,179 @@
-"""Print a sheet through CUPS at exact size.
+"""Print a sheet through the Windows PC's Epson driver.
 
-Scaling is what breaks registration, so print-scaling=none is forced and the
-media is set to match the PDF. Real sheets go to the "4x2 Glossy" preset from
-the Windows driver, kept on the Mac as the CUPS printer instance
-<queue>/4x2-glossy — EPSON_ET_8550_Series_2 on the Mac (~/.cups/lpoptions, chezmoi-managed; see
-docs/printer-presets/README.md); explicit options are used when that instance
-isn't there. Test sheets use printer defaults on plain paper.
+Nothing is printed from the Mac. A PDF is turned upright (the driver ignores a
+landscape setting and clips the page), copied to the PC with scp, and handed to
+SumatraPDF over SSH with scaling off, aimed at one of the PC's print queues.
+Each queue carries its own paper preset as its defaults (docs/printer-presets/).
 """
 
 from __future__ import annotations
 
-import os
-import shlex
-import shutil
+import base64
 import subprocess
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_INSTANCE = "EPSON_ET_8550_Series_2/4x2-glossy"  # the Epson-driver queue on the Mac (2026-09)
-INSTANCE_SUFFIX = "4x2-glossy"  # any queue carrying a /4x2-glossy instance qualifies
-MEDIA = {"a4": "A4", "letter": "Letter", "a3": "A3"}
-GLOSSY_OPTS = [
-    "-o",
-    "MediaType=photographic-glossy",
-    "-o",
-    "InputSlot=rear",
-    "-o",
-    "cupsPrintQuality=High",
-    "-o",
-    "ColorModel=RGB",
-]
+from pypdf import PdfReader, PdfWriter
+
+HOST = "pomelomadness.local"
+USER = "jonas"
+KEY = Path("~/.ssh/pomelomadness_ed25519").expanduser()
+REMOTE_DIR = "C:/Users/jonas/Desktop/projects/mtg-proxy/print"
+SUMATRA = r"C:\Users\jonas\AppData\Local\SumatraPDF\SumatraPDF.exe"
+
+QUEUES = {
+    "plain": "ET-8550 Series(Network)",
+    "glossy": "Glossy photo paper proxies",
+    "premium": "Premium glossy paper",
+}
+# paper name -> (short side, long side) in mm
+PAPERS = {"A4": (210.0, 297.0), "A3": (297.0, 420.0), "letter": (215.9, 279.4)}
+TOLERANCE_MM = 2.0
+PT_MM = 25.4 / 72
+
+Runner = Callable[[list[str], str | None], "subprocess.CompletedProcess[str]"]
+
+
+class PrintError(Exception):
+    """A step failed; the message is the one line shown to the user."""
 
 
 @dataclass
-class PrintJob:
-    argv: list[str]
-    description: str
+class Result:
+    queue: str
+    remote_pdf: str
+    command: str
+    sent: bool
 
 
-def queue_exists(queue: str) -> bool:
-    """True when CUPS knows the queue (the instance's base name, before the slash)."""
-    if not lp_available():
-        return False
-    return subprocess.run(["lpstat", "-p", queue], capture_output=True, check=False).returncode == 0
+def run(argv: list[str], stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(argv, input=stdin, capture_output=True, text=True, check=False)
 
 
-def defined_instances(lpoptions: Path | None = None) -> list[str]:
-    lpoptions = lpoptions or Path.home() / ".cups" / "lpoptions"
-    try:
-        lines = lpoptions.read_text().splitlines()
-    except OSError:
-        return []
-    return [line.split()[1] for line in lines if line.startswith("Dest ") and len(line.split()) > 1]
+def _page_size_mm(page) -> tuple[float, float]:
+    w, h = float(page.mediabox.width) * PT_MM, float(page.mediabox.height) * PT_MM
+    return (h, w) if (page.get("/Rotate") or 0) % 180 else (w, h)
 
 
-def find_instance(preferred: str, lpoptions: Path | None = None, exists=queue_exists) -> str | None:
-    """The preferred instance if usable, else any ``<queue>/4x2-glossy`` whose queue exists.
-
-    The queue name changes when the printer is re-added on the Mac (AirPrint → Epson
-    driver became EPSON_ET_8550_Series_2), so the instance is looked up by its suffix
-    and verified against CUPS rather than trusted from ~/.cups/lpoptions alone.
-    """
-    candidates = [
-        i for i in defined_instances(lpoptions) if i == preferred or i.endswith("/" + INSTANCE_SUFFIX)
-    ]
-    candidates.sort(key=lambda i: i != preferred)
-    for inst in candidates:
-        if exists(inst.split("/", 1)[0]):
-            return inst
-    return None
+def paper_name(width: float, height: float) -> str:
+    short, long_ = sorted((width, height))
+    for name, (s, lg) in PAPERS.items():
+        if abs(short - s) <= TOLERANCE_MM and abs(long_ - lg) <= TOLERANCE_MM:
+            return name
+    raise PrintError(f"page size {short:.0f}x{long_:.0f} mm is not A4, A3 or letter")
 
 
-def instance_defined(instance: str, lpoptions: Path | None = None) -> bool:
-    return instance in defined_instances(lpoptions)
+def make_upright(pdf: Path, out: Path) -> tuple[str, int, int]:
+    """Write ``out`` with landscape pages turned 90 degrees; return (paper, pages, rotated)."""
+    reader = PdfReader(pdf)
+    if not reader.pages:
+        raise PrintError(f"{pdf.name} has no pages")
+    writer = PdfWriter()
+    sizes, rotated = [], 0
+    for page in reader.pages:
+        w, h = _page_size_mm(page)
+        sizes.append(paper_name(w, h))
+        if w > h:
+            page.rotate(90)
+            rotated += 1
+        writer.add_page(page)
+    if len(set(sizes)) > 1:
+        raise PrintError(f"pages mix sizes ({', '.join(sorted(set(sizes)))})")
+    writer.write(out)
+    return sizes[0], len(sizes), rotated
 
 
-def build_job(
+def _quote(s: str) -> str:
+    return "'" + s.replace("'", "''") + "'"
+
+
+def print_command(queue: str, remote_pdf: str, paper: str) -> str:
+    win = remote_pdf.replace("/", "\\")
+    return (
+        f"& {_quote(SUMATRA)} -print-to {_quote(queue)} "
+        f"-print-settings {_quote(f'noscale,portrait,paper={paper}')} "
+        f"-silent -exit-when-done {_quote(win)} | Out-Null"
+    )
+
+
+def _ssh_base() -> list[str]:
+    return ["ssh", "-i", str(KEY), "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", f"{USER}@{HOST}"]
+
+
+def powershell(script: str, runner: Runner = run) -> subprocess.CompletedProcess[str]:
+    """Run a PowerShell script on the PC (stderr is CLIXML noise and is ignored)."""
+    b64 = base64.b64encode(script.encode("utf-16-le")).decode()
+    return runner([*_ssh_base(), f"powershell -NoProfile -EncodedCommand {b64}"], None)
+
+
+def check_queue(queue: str, runner: Runner = run) -> None:
+    script = f"if (Get-Printer -Name {_quote(queue)} -ErrorAction SilentlyContinue) {{ 'present' }} else {{ 'missing' }}"
+    r = powershell(script, runner)
+    out = r.stdout.strip()
+    if out == "present":
+        return
+    if out == "missing":
+        raise PrintError(f"print queue '{queue}' does not exist on {HOST}")
+    raise PrintError(f"cannot reach {HOST} over ssh (is the PC on, on this LAN?)")
+
+
+def copy_to_pc(local: Path, name: str, runner: Runner = run) -> str:
+    remote = f"{REMOTE_DIR}/{name}"
+    r = powershell(f"New-Item -ItemType Directory -Force -Path {_quote(REMOTE_DIR)} | Out-Null", runner)
+    if r.returncode != 0:
+        raise PrintError(f"could not create {REMOTE_DIR} on the PC")
+    r = runner(["scp", "-q", "-i", str(KEY), str(local), f"{USER}@{HOST}:{remote}"], None)
+    if r.returncode != 0:
+        raise PrintError("scp to the PC failed")
+    size = powershell(f"(Get-Item -LiteralPath {_quote(remote)}).Length", runner).stdout.strip()
+    if size != str(local.stat().st_size):
+        raise PrintError(
+            f"copy check failed: {size or 'no file'} bytes on the PC, {local.stat().st_size} here"
+        )
+    return remote
+
+
+def print_pdf(
     pdf: Path,
-    paper: str,
+    kind: str = "glossy",
     *,
-    test_sheet: bool,
-    printer: str | None = None,
-    instance: str | None = None,
-    extra_opts: str | None = None,
-    lpoptions: Path | None = None,
-    exists=queue_exists,
-) -> PrintJob:
-    media = MEDIA.get(paper, paper)
-    args = ["-o", f"media={media}", "-o", "print-scaling=none", "-o", "fit-to-page=false"]
-    dest: list[str] = []
-    if test_sheet:
-        if printer:
-            dest = ["-d", printer]
-        desc = f"{printer or 'default printer'}, plain paper / driver defaults"
-    else:
-        preferred = instance or os.environ.get("MTG_PROXY_LP_INSTANCE") or DEFAULT_INSTANCE
-        found = None if printer else find_instance(preferred, lpoptions, exists=exists)
-        if found:
-            dest = ["-d", found]
-            desc = f"{found} (rear feeder, glossy photo, High)"
-        else:
-            if printer:
-                dest = ["-d", printer]
-            args += GLOSSY_OPTS
-            desc = f"{printer or 'default printer'}, explicit glossy options"
-    extra = shlex.split(extra_opts if extra_opts is not None else os.environ.get("MTG_PROXY_LP_OPTS", ""))
-    return PrintJob(["lp", *dest, *args, *extra, str(pdf)], f"{desc} (media={media}, 100%, no scaling)")
-
-
-def lp_available() -> bool:
-    return shutil.which("lp") is not None
-
-
-def send(job: PrintJob) -> bool:
-    """Run lp; False (not an exception) when it fails, so the caller can carry on."""
-    return subprocess.run(job.argv, check=False).returncode == 0
+    dry_run: bool = False,
+    runner: Runner = run,
+    say: Callable[[str], None] = print,
+) -> Result:
+    """Copy ``pdf`` to the PC and print it on the ``kind`` queue; raises PrintError."""
+    if kind not in QUEUES:
+        raise PrintError(f"unknown paper '{kind}' (plain, glossy, premium)")
+    if not pdf.is_file():
+        raise PrintError(f"{pdf} not found")
+    queue = QUEUES[kind]
+    with tempfile.TemporaryDirectory() as tmp:
+        name = f"{pdf.stem}-portrait.pdf"
+        upright = Path(tmp) / name
+        paper, pages, rotated = make_upright(pdf, upright)
+        check_queue(queue, runner)  # before anything is copied
+        say(f"queue '{queue}' ok")
+        say(f"{name}: {paper}, {pages} page(s), {rotated} turned upright")
+        remote = copy_to_pc(upright, name, runner)
+        say(f"copied to {remote} ({upright.stat().st_size} bytes)")
+    command = print_command(queue, remote, paper)
+    if dry_run:
+        say(f"dry run, would run on the PC: {command}")
+        return Result(queue, remote, command, False)
+    # Sent once and never retried: glossy jobs spool slowly and a resend prints twice.
+    script = (
+        command
+        + f"\nGet-PrintJob -PrinterName {_quote(queue)} | ForEach-Object "
+        + "{ '{0} {1} {2}' -f $_.Id, $_.DocumentName, $_.JobStatus }"
+    )
+    r = powershell(script, runner)
+    say(f"sent to '{queue}'")
+    jobs = r.stdout.strip()
+    say(
+        f"queue jobs: {jobs.replace(chr(10), ' | ')}"
+        if jobs
+        else "queue shows no job yet (it may already have spooled)"
+    )
+    return Result(queue, remote, command, True)
