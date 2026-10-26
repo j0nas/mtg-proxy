@@ -309,7 +309,7 @@ def test_a_3x3_deck_gets_pages_of_nine_and_a_duplex_sheet(tmp_path, monkeypatch,
     assert split.cards == 11 and len(game) == 1  # --split-faces: both faces on the 3x3 sheet
 
 
-def _duplex_pages(tmp_path, sheet_layout: str, n: int, extra: tuple[str, ...] = ()):
+def _duplex_pages(tmp_path, sheet_layout: str, n: int, extra: tuple[str, ...] = (), ppi: int = 50):
     """The engine's real duplex PDF for ``n`` flat-coloured cards in ``sheet_layout`` at 50 ppi: a
     front's own top-right carries a white square, a back's own top-left a black one. Returns the
     two pages (landscape, as the engine saves every sheet) and the colours."""
@@ -332,7 +332,7 @@ def _duplex_pages(tmp_path, sheet_layout: str, n: int, extra: tuple[str, ...] = 
     base = build.pdf_base_args(build.resolve_layout(BuildOptions(layout=sheet_layout)))
     engine.create_pdf([
         *base, "--front_dir_path", str(dirs["front"]), "--double_sided_dir_path", str(dirs["ds"]),
-        "--back_dir_path", str(dirs["back"]), "--output_path", str(out), "--ppi", "50", *extra,
+        "--back_dir_path", str(dirs["back"]), "--output_path", str(out), "--ppi", str(ppi), *extra,
     ])  # fmt: skip
     pages = [np.asarray(p.images[0].image.convert("RGB")).astype(int) for p in PdfReader(out).pages]
     return pages, colours

@@ -14,7 +14,7 @@ from typing import Annotated
 import typer
 from click.core import ParameterSource
 
-from . import __version__, build, cutmenu, cutting, engine, local, manifest, notes, printing, trim
+from . import __version__, build, cutmenu, cutting, engine, layout, local, manifest, notes, printing, trim
 from . import backlog as backlog_mod
 from .backlog import Backlog, BacklogError, Entry
 from .cache import ImageCache
@@ -487,6 +487,73 @@ def _enter_within(seconds: float) -> bool:
     if ready:
         sys.stdin.readline()
     return bool(ready)
+
+
+@app.command(
+    help=(
+        "Walk the Cameo's TB123 mark scan over a sheet's PDF and report, per pass, the dark runs it "
+        "crosses and the nearest print that is not a mark; exits 1 when print sits where a pass "
+        "walks. Needs no machine. Reads run.json from the current directory (or --run) for the "
+        "sheet's PDF, paper, card and layout; flags override (README, Sheet layouts)."
+    ),
+)
+def simulate(
+    pdf: Annotated[Path | None, typer.Argument(help="the sheet's PDF (default: run.json's)")] = None,
+    run: Annotated[Path | None, typer.Option("--run", help="run.json (or its folder) of the sheet")] = None,
+    paper: Annotated[str | None, typer.Option("-p", "--paper")] = None,
+    card: Annotated[str | None, typer.Option("-c", "--card")] = None,
+    sheet_layout: Annotated[
+        str | None,
+        typer.Option("--layout", help="3x3 | 4x2 (default: run.json's, else 3x3 on A4)"),
+    ] = None,
+    reg_inset: Annotated[
+        float | None,
+        typer.Option("--reg-inset", min=3, max=30, help="as cut-proxies: marks MM from every paper edge"),
+    ] = None,
+    reg_length: Annotated[
+        float | None, typer.Option("--reg-length", help="printed leg length in mm (default: the layout's)")
+    ] = None,
+    reg_thickness: Annotated[float, typer.Option("--reg-thickness")] = 1.0,
+    scan_start: Annotated[
+        str | None,
+        typer.Option(
+            "--scan-start",
+            metavar="TOP,LEFT",
+            help="where the mark search starts, as cut-proxies (default: 2 mm into the square)",
+        ),
+    ] = None,
+    page: Annotated[int, typer.Option("--page", min=1, help="which page of the PDF")] = 1,
+) -> None:
+    from . import simulate as sim
+
+    sidecar = find_sidecar(run)
+    if run is not None and sidecar is None:
+        fail(f"no run.json at {run}")
+    info = RunInfo.read(sidecar) if sidecar else None
+    if pdf is None:
+        if info is None or not info.pdf:
+            fail("no PDF given and no run.json to name one")
+        pdf = sidecar.parent / info.pdf
+    if not pdf.is_file():
+        fail(f"no PDF at {pdf}")
+    paper = paper or (info.paper if info else "a4")
+    card = card or (info.card_size if info else "standard")
+    name = sheet_layout or (info.layout if info else default_layout(paper, card))
+    try:
+        check_layout(name, paper, card)
+        geom = layout.build_cut_svg(paper, card, None, name)
+        if reg_inset is not None:
+            geom = cutting.with_inset(geom, reg_inset)
+        frame = cutting.frame_of(geom, reg_length, reg_thickness)
+        report = sim.run(pdf, frame, page, parse_start(scan_start) if scan_start else None)
+    except (LayoutError, engine.EngineMissing, sim.SimulationError, RuntimeError) as e:
+        fail(str(e))
+    top, left = report.start
+    typer.echo(f"simulate: {pdf.name} page {page}, {name}, scan starts at ({top:g}, {left:g}) mm")
+    for line in report.lines():
+        typer.echo(line)
+    if not report.ok:
+        raise typer.Exit(1)
 
 
 # The connection is never asked in the menu, only set by flag, so these keep it.

@@ -157,6 +157,16 @@ a laminated sheet, three scans out of three; at 7 mm its search began on the bot
 corner and once read that (2026-10-24). Now every pass stays 1.2–2.6 mm clear of the card print
 (simulated on a real sheet), and four laminated sheets registered and cut in a row (2026-10-25).
 
+Check a new mark layout offline before printing it. `mtg-proxy simulate sheet.pdf` (inside a run
+folder, just `mtg-proxy simulate`) walks the scan's passes over the page's print: the area search,
+the two passes that measure the square, and two across each L. It takes `--layout`, `--reg-inset`,
+`--reg-length` and `--scan-start` like `cut-proxies`, and `--page` for a later page. Each line gives
+the dark runs the pass crosses and the nearest print that is not a mark. The firmware's detector is
+relative, so a pass fails when its first dark run is not a mark or print comes within 1 mm of it,
+the width of the sensor's spot; the command then exits 1. It needs no machine. Vector PDFs work as
+well as the engine's raster ones. It does not model the firmware's retry after a failed search, nor
+the paper's edge.
+
 A 3x3 sheet's marks have their outer edges 3.0 mm from the paper's sides, and the ET-8550 prints
 to 2.96 mm from every edge, so the sheet must print at 100 %. The PDF page is landscape like every
 sheet's: print it upright (rotated a quarter turn, then portrait at 100 %) and put it on the mat
