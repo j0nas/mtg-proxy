@@ -12,6 +12,7 @@ import contextlib
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 
 from . import geometry, proof, protocol, sensing
@@ -194,12 +195,36 @@ def cut(
                 log.say(
                     f"check: every mark reads where the scan put it ({len(sensing.checks(job.frame))} readings)"
                 )
-            if confirm is None or prove(s, job, log, confirm, attempt, rescan=attempt + 1 < rounds):
+            verify = partial(held, s, job.frame, log, flat, slot) if check else None
+            if confirm is None or prove(s, job, log, confirm, attempt, attempt + 1 < rounds, verify):
                 break
         s.cut(job)
+        if check:
+            lost = held(s, job.frame, log, flat, slot)
+            if lost:
+                raise CutError(
+                    f"the cut is done, but the marks no longer read where the scan put them ({'; '.join(lost)}): "
+                    "the machine may have lost its place while cutting. Compare the cut with the print "
+                    "before unloading"
+                )
+            log.say("check: the marks still read where the scan put them after the cut")
         return Result(firmware, start, extent)
     finally:
         wrap_up(s, t, log)
+
+
+def held(s: Session, frame: Frame, log: SessionLog, flat: sensing.Flatness, slot: int) -> list[str]:
+    """After the blade has cut: is the ink of every mark still where the frame puts it? What failed,
+    one line each. Only the ink readings: a cut groove beside a mark reads dark, so it can fake ink
+    but never paper, and a frame that slipped reads paper on a leg's centre line.
+
+    On 2026-10-26 a second pass on the Aminatou box (force 30, speed 10, depth 8, the depth changed
+    from 6) cut 2.5 mm left of the first everywhere, after every reading before it had agreed with the
+    marks: the machine lost its place once the blade was cutting. Read after the proof cuts, this stops
+    the job before it is cut; read after the job, it says so before the sheet is unloaded."""
+    failed = check_marks(s, frame, log, flat, ink_only=True)
+    s.send(protocol.select_light(slot))
+    return failed
 
 
 # The scans a checked job tries, in order, until one agrees with the print. TB122 reads only the square
@@ -342,7 +367,9 @@ def check_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
     return flat
 
 
-def check_marks(s: Session, frame: Frame, log: SessionLog, flat: sensing.Flatness) -> list[str]:
+def check_marks(
+    s: Session, frame: Frame, log: SessionLog, flat: sensing.Flatness, ink_only: bool = False
+) -> list[str]:
     """After the scan, every ``sensing.checks`` reading through the registered frame: what failed,
     one line each, or nothing when the print agrees with the frame. A leg's centre line that isn't
     ink is read NUDGE either side, then, still not ink, SIDE either side: it passes as a faint leg
@@ -354,7 +381,7 @@ def check_marks(s: Session, frame: Frame, log: SessionLog, flat: sensing.Flatnes
     def read(c: sensing.Check) -> int | None:
         return s.sense(*sensing.registered(frame, c), SENSE_SLOT)[0]
 
-    for c in sensing.checks(frame):
+    for c in (c for c in sensing.checks(frame) if c.ink or not ink_only):
         paper = flat.paper_at(c.mark)  # dim ink is judged against its own paper (sensing.thresholds)
         level = read(c)
         seen, nudged, sides = c.reads(level, paper), [], []
@@ -412,9 +439,12 @@ def prove(
     confirm: Confirm,
     attempt: int,
     rescan: bool,
+    verify: Callable[[], list[str]] | None = None,
 ) -> bool:
     """Score the proof cuts over the marks, park the head out of the way and ask. True: cut the
-    job; False: rescan. Anything but y or r stops the job (CutError)."""
+    job; False: rescan. Anything but y or r stops the job (CutError). With ``verify`` (``held``),
+    the marks are read again after the proof cuts, before anyone is asked: a machine that lost its
+    place cutting them stops the job there."""
     kept, skipped = [], []
     for corner, piece in proof.cuts(job.frame):
         if proof.on_job(piece, job.shapes or job.lines):
@@ -426,6 +456,13 @@ def prove(
             f"proof: {skipped.count(corner)} {corner} proof cut(s) would touch the job, so they are left out"
         )
     s.cut(replace(job, lines=kept))
+    if verify:
+        lost = verify()
+        if lost:
+            raise CutError(
+                f"after the proof cuts the marks no longer read where the scan put them ({'; '.join(lost)}): "
+                "the machine lost its place cutting them, so the job isn't cut. Rerun"
+            )
     s.send(protocol.move(0, job.frame.width / 2))  # the head to the top edge's middle, off every corner
     s.wait_ready(60)
     log("proof", round=attempt + 1, cuts=len(kept), skipped=skipped)

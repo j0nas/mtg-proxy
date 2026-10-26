@@ -7,7 +7,7 @@ from dataclasses import replace
 
 import pytest
 
-from mtgproxy.cameo import driver, geometry, protocol, sensing, session
+from mtgproxy.cameo import driver, geometry, proof, protocol, sensing, session
 from mtgproxy.cameo.transport import RecordingTransport
 
 FRAME = session.Frame(page_w=297, page_h=210, inset=5, width=287, height=200)
@@ -205,10 +205,12 @@ def test_a_frame_the_print_agrees_with_is_cut_after_nine_readings():
     t = checked([INK, *FLAT, *MARKS_OK])  # the placement reading first, then the blank paper
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
-    assert out.count("TB63,4") == 1 + 4 + 9 and out.count("TB123") == 1
+    assert out.count("TB63,4") == 1 + 4 + 9 + 5 and out.count("TB123") == 1  # + the ink again after the cut
     assert out.index("TB60") < out.index("TB63,4") < out.index("TB123")  # slot, placement, scan
     assert "\\-35,-35\x03" in out  # the area reaches the paper points 1.25 mm left of and above the square
-    assert out.rindex("TB63,4") < out.index("D")  # every reading before the first cut
+    first_cut = out.index("D")
+    assert out[:first_cut].count("TB63,4") == 1 + 4 + 9  # every reading of the check before the first cut
+    assert out[first_cut:].count("TB63,4") == 5  # then the marks' ink, to see the machine kept its place
 
 
 def test_a_misread_rescans_and_cuts_once_the_marks_agree():
@@ -267,8 +269,9 @@ def test_the_scan_and_the_next_sheet_get_the_scans_own_light_back_after_every_re
     out = sent(t).replace("\x1b\x05", "")
     before = out.rindex("TB63,4", 0, out.index("TB123"))  # the last reading before the scan
     assert before < out.index("TB61,0", before) < out.index("TB123")  # TB63 leaves its light on
-    last = out.rindex("TB63,4")
+    last = out.rindex("TB63,4", 0, out.index("D"))  # the check's last reading
     assert last < out.index("TB61,0", last) < out.index("D")
+    assert out.rindex("TB63,4") < out.rindex("TB61,0")  # and after the readings that follow the cut
 
 
 def test_two_failed_three_mark_scans_fall_back_to_two_marks_and_cut_when_the_check_agrees():
@@ -278,9 +281,8 @@ def test_two_failed_three_mark_scans_fall_back_to_two_marks_and_cut_when_the_che
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
     assert out.count("TB123") == 2 and out.count("TB122,4000,5740") == 1
-    assert out.rindex("TB63,4") < out.index(
-        "D"
-    )  # the top-right L read before the cut, though TB122 skipped it
+    before = out[: out.index("D")]
+    assert before.count("TB63,4") == 1 + 4 + 9  # the top-right L read before the cut, though TB122 skipped it
 
 
 def test_without_the_check_a_missed_scan_never_falls_back_to_two_marks():
@@ -518,3 +520,23 @@ def test_a_square_that_reads_ink_is_never_read_turned():
     out = sent(t).replace("\x1b\x05", "")
     before = out[: out.index("TB123")]
     assert moves(before)[0] == (210, 210) and (210, 4110) not in moves(before)
+
+
+def test_a_machine_that_loses_its_place_cutting_says_so_before_the_sheet_is_unloaded():
+    # Every reading agrees until the cut; after it, a leg's centre line reads paper.
+    t = checked([INK, *FLAT, *MARKS_OK, INK, INK, PAPER])
+    with pytest.raises(session.CutError, match="the cut is done, but the marks no longer read where"):
+        driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    assert "D" in sent(t).replace("TB", "")
+
+
+def test_a_machine_that_loses_its_place_on_the_proof_cuts_never_cuts_the_job():
+    t = checked([INK, *FLAT, *MARKS_OK, PAPER])  # after the proof cuts the square reads paper
+    asked = []
+    with pytest.raises(session.CutError, match="after the proof cuts the marks no longer read"):
+        driver.cut(
+            job(), t, log(), [driver.default_start(FRAME)], lambda *a: asked.append(a) or "y", check=True
+        )
+    assert not asked  # stopped before anyone was asked
+    cuts = sent(t).replace("TB", "").count("D")
+    assert 0 < cuts <= len(list(proof.cuts(FRAME)))  # the proof cuts and nothing more
