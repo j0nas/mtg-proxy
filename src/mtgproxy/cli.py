@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import select
 import shutil
 import sys
@@ -39,6 +40,20 @@ def parse_start(value: str) -> tuple[float, float]:
     except ValueError:
         fail(f"--scan-start wants TOP,LEFT in mm, got {value!r}")
     return top, left
+
+
+def parse_paper_at(value: str) -> tuple[float, float]:
+    """--paper-at RIGHT,DOWN (x first, unlike --scan-start), or one number for both."""
+    try:
+        parts = [float(v) for v in value.split(",")]
+    except ValueError:
+        parts = []
+    if len(parts) == 1:
+        parts *= 2
+    if len(parts) != 2 or not all(math.isfinite(v) and v >= 0 for v in parts):
+        fail(f"--paper-at wants RIGHT,DOWN in mm, 0 or more (one number for both), got {value!r}")
+    right, down = parts
+    return right, down
 
 
 LAYOUT_HELP = (
@@ -346,11 +361,22 @@ def cut(
         typer.Option(
             "--scan-start",
             metavar="TOP,LEFT",
-            help="where the mark search starts, mm from the loaded origin; repeat to retry in order "
-            "(default: 2 mm into the square, 6 mm left of it or 1 mm from the edge: 11,1 on a 3x3 "
-            "sheet, 12,4 on a 4x2)",
+            help="where the mark search starts, mm from the loaded origin, used as given (--paper-at "
+            "moves only the default); repeat to retry in order (default: 2 mm into the square, 6 mm "
+            "left of it or 1 mm from the paper's edge: 11,1 on a 3x3 sheet, 12,4 on a 4x2)",
         ),
     ] = None,
+    paper_at: Annotated[
+        str,
+        typer.Option(
+            "--paper-at",
+            metavar="RIGHT,DOWN",
+            help="where the paper's top-left corner sits: RIGHT mm right of the mat grid's corner, "
+            "then DOWN mm below it (x first, the other way round from --scan-start's TOP,LEFT); one "
+            "number sets both. Moves the default scan start and every reading before the scan. About "
+            "3 for a laminated sheet laid with its pouch's corner on the grid's",
+        ),
+    ] = "0,0",
 ) -> None:
     if scan:
         raise typer.Exit(cutting.ble_scan())
@@ -396,6 +422,7 @@ def cut(
         reg_length=reg_length, reg_thickness=reg_thickness, reg_inset=reg_inset,
         label=info.name if info else None,
         probe=probe, sense=sense, diagnose=diagnose, check=not no_check, proof=proof, scan_starts=[parse_start(v) for v in scan_start or []] or None,
+        paper_at=parse_paper_at(paper_at),
     )  # fmt: skip
     try:
         cutting.check(o)  # before the loop: a retry can't fix the options

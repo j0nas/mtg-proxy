@@ -249,6 +249,7 @@ cut-proxies --no-check     # skips the sensor check of the marks before and afte
 cut-proxies --diagnose     # before any scan: where each mark sits and how it reads; cuts nothing
 cut-proxies --proof        # scores the square and each L after the scan; y cuts, r rescans, q stops
 cut-proxies --layout 4x2   # a 4x2 sheet without its run.json (a plain sheet is 3x3)
+cut-proxies --paper-at 3   # the paper's corner 3 mm right of and below the grid's (see Placement)
 cut-proxies --svg job.svg --layout 4x2 --reg-inset 5   # any SVG the size of that layout's page
 ```
 
@@ -306,9 +307,9 @@ Registration:
   first time (2026-10-25). On plain A4, starts on or past the square never found it (`1`). A 4x2
   sheet registered once from (8, 4), 2 mm above its square (2026-10-24); (12, 4) follows the 3x3
   sheets and hasn't been tried. `--scan-start TOP,LEFT` (repeatable) replaces the start with
-  exactly those. Coordinates are from the job's own origin, which the job's first command (`TG1`)
-  moves 16.5 mm in once per mat load: anything that measures positions on the machine must send
-  it first.
+  exactly those; `--paper-at` moves only the default start (see Placement). Coordinates are from
+  the job's own origin, which the job's first command (`TG1`) moves 16.5 mm in once per mat load:
+  anything that measures positions on the machine must send it first.
 - `--reg-inset MM` puts the expected marks MM from every paper edge instead of the layout's
   (3.5 mm from the sides and 9 mm from the top and bottom on a 3x3 sheet, 10 mm on a 4x2). The
   deck box prints its marks 5 mm in. It must match the printed marks.
@@ -369,6 +370,16 @@ Standard 12x12" mat against the left notch, pinch rollers on the mat, lid closed
 very bright nor very dark. A sheet that creeps on a worn mat skews long jobs: use a sticky mat
 or tape the edges. If the scan fails nothing is cut. Glare from glossy laminate is a known cause
 of failed scans; glossy sheets cut fine here, but matte is the safer choice if scans fail.
+
+A laminated sheet can also lie with its whole pouch on the mat's tacky area, the pouch's corner on
+the grid's: a pouch margin left on the untacky border lifts, and the scan misreads the marks beside
+it. The paper then sits a few millimetres right of and below the grid's corner, and
+`--paper-at RIGHT,DOWN` says how far, in mm, right first and then down (`--paper-at 3` for 3 mm
+both ways). Every reading before the scan moves by that much, `--diagnose`'s included, and so does
+the default scan start; a `--scan-start` is used as given. Left at 0 for such a sheet, the
+placement reading lands beside the square and the run stops before the scan. After the scan
+everything is measured from the top-left mark, so the cut itself is the same. The deck box lays
+its sheets this way, with the paper about 3 mm in.
 
 Finish: cut cards can delaminate at the edges. Run them through the laminator again. Cloudy
 lamination is too cold (run 80 µm pouches on the 5 mil setting); wavy cards are too hot.

@@ -70,12 +70,14 @@ class CutOptions:
     diagnose: bool = False  # read across every mark before any scan and say what they show; cut nothing
     proof: bool = False  # proof cuts over the marks after the scan; the job waits for y / r / q
     scan_starts: list[tuple[float, float]] | None = None  # (top, left) mm; None = the driver's defaults
+    paper_at: tuple[float, float] = (0.0, 0.0)  # (right, down) mm: the paper's corner from the grid's
 
 
 def scan_starts(o: CutOptions, frame) -> tuple[list[tuple[float, float]], str]:
-    """The starts to try in order, and where the first came from: ``--scan-start`` as given, else
-    the one start 2 mm into the square (``driver.default_start``). TB123's area search covers the
-    millimetre or two the marks move from one load to the next."""
+    """The starts to try in order, and where the first came from: ``--scan-start`` as given (it is
+    in the loaded mat's frame already), else the one start 2 mm into the square, moved with the
+    paper (``driver.default_start``). TB123's area search covers the millimetre or two the marks
+    move from one load to the next."""
     from .cameo import driver
 
     if o.scan_starts:
@@ -155,6 +157,7 @@ def run_cut(o: CutOptions) -> int:
         length=geom.reg_length_mm if o.reg_length is None else o.reg_length,
         thickness=o.reg_thickness,
         inset_y=geom.reg_inset_y_mm,
+        paper_at=o.paper_at,
     )
     try:
         blade = protocol.Blade(o.force, o.speed, o.depth)
@@ -175,6 +178,8 @@ def run_cut(o: CutOptions) -> int:
         f"cut-proxies: force {o.force} · speed {o.speed} · depth {o.depth} · passes {o.passes} · "
         f"offset x={bias[0]:g}mm y={bias[1]:g}mm · via {via}"
     )
+    if frame.paper_at != (0, 0):
+        print(f"cut-proxies: the paper's top-left corner {frame.placed()}")
     top, left = starts[0]
     more = f"; a miss tries {len(starts) - 1} more around it" if len(starts) > 1 else ""
     print(f"cut-proxies: scan starts at ({top:g}, {left:g}) mm, {origin}{more}")
@@ -295,7 +300,8 @@ def diagnose_report(seen, frame, flat=None) -> str:
     where the mark is (+ right or down), its peak, the paper beside it, and the readings as bars."""
     from .cameo import sensing
 
-    rows = ["cut-proxies: before any scan, in the loaded mat's frame (page mm):"]
+    at = "" if frame.paper_at == (0, 0) else f", the paper's corner {frame.placed()}"
+    rows = [f"cut-proxies: before any scan, in the loaded mat's frame (page mm{at}):"]
     rows += [f"  {line}" for line in sensing.verdict(seen, frame, flat)]
     for s in seen:
         where = "no clear mark" if s.shift is None else f"{s.shift:+.2f} mm"

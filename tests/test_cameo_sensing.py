@@ -1,5 +1,7 @@
 """Where the sensor reads the marks back: rows across the square and across each L leg."""
 
+from dataclasses import replace
+
 import pytest
 
 from mtgproxy.cameo import protocol, sensing, session
@@ -129,6 +131,15 @@ def test_the_verdict_names_placement_turn_and_size():
     assert lines[3:5] == ["square to top-right L: 203.00 mm across (printed 203)",
                           "square to bottom-left L: 279.00 mm down (printed 279)"]  # fmt: skip
     assert len(lines) == 5  # sharp, full-ink marks on ordinary paper: nothing to warn about
+
+
+def test_a_sheet_well_off_its_marks_is_told_where_the_papers_corner_goes():
+    rows = sensing.square_rows(FRAME)
+    seen = [sensing.Seen(r, (), 255, 170, (170, 170), d) for r, d in zip(rows, (2.0, 0.0), strict=True)]
+    advice = "  that is more than the scan likes: put the paper's corner "
+    assert sensing.verdict(seen, FRAME)[1] == advice + "(not the laminate's) on the grid's"
+    laid = replace(FRAME, paper_at=(3.0, 3.0))  # a laminated sheet with its pouch's corner on the grid's
+    assert sensing.verdict(seen, laid)[1] == advice + "3 mm right and 3 mm down of the mat grid's"
 
 
 def test_a_leg_that_barely_stands_out_is_called_faint_not_missing():

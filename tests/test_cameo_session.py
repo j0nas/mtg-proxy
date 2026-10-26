@@ -1,6 +1,9 @@
 """Our driver's session against a scripted machine: registration retries, the guaranteed return to
 the origin, preflight refusals, bounds and cut pacing."""
 
+import re
+from dataclasses import replace
+
 import pytest
 
 from mtgproxy.cameo import driver, geometry, protocol, sensing, session
@@ -294,7 +297,9 @@ def test_a_shadow_edge_dark_on_one_side_only_is_no_leg():
     assert sent(t).count("TB63,4") == 1 + 4 + 3 * 13  # each scan: 5 for the square, 5 for the edge, 3 legs
 
 
-def test_diagnose_reads_the_square_then_legs_where_the_square_says_and_never_scans():
+def one_mm_right():
+    """What a sheet lying 1 mm right of where its marks should be reads across each diagnose row:
+    sharp ink on paper at 170, then the blank paper (170 too, the last reading repeating)."""
     sq = sensing.square_rows(FRAME)
 
     def mark(row, shift, width):
@@ -303,15 +308,19 @@ def test_diagnose_reads_the_square_then_legs_where_the_square_says_and_never_sca
         ]
 
     legs = sensing.leg_rows(FRAME, dx=1.0, dy=0.0)
-    readings = (
+    return (
         mark(sq[0], 1.0, 2.75)
         + mark(sq[1], 0.0, 2.75)
         + [r for row in legs for r in mark(row, 1.0 if row.axis == "x" else 0.0, 0.3)]
     )
-    t = machine({b"TB60": b"    0\x03", b"TB63": readings})
+
+
+def test_diagnose_reads_the_square_then_legs_where_the_square_says_and_never_scans():
+    t = machine({b"TB60": b"    0\x03", b"TB63": one_mm_right()})
     seen, flat = driver.diagnose(FRAME, t, log())
     out = sent(t).replace("\x1b\x05", "")
     assert [s.shift for s in seen] == [1.0, 0.0, 1.0, 0.0, 1.0, 0.0]
+    legs = sensing.leg_rows(FRAME, dx=1.0, dy=0.0)
     first = legs[0].points[0]  # the top-right vertical leg's row starts 2 mm left of where the square says
     assert (
         f"M{protocol.su(first.y)},{protocol.su(first.x)}\x03TB63,4" in out
@@ -365,3 +374,78 @@ def test_ink_on_a_mark_whose_paper_read_like_ink_proves_nothing():
         "top-right, the vertical leg: reads ink, but the paper beside it didn't read as paper",
         "top-right, the horizontal leg: reads ink, but the paper beside it didn't read as paper",
     ]
+
+
+# --- the paper laid off the grid's corner (--paper-at) -------------------------------------------
+# The paper deck box lays its whole pouch on the tack, the pouch's corner on the grid's, so the paper
+# sits about 3 mm right and 3 mm down: unmoved, the placement reading landed at page (4.5, 4.5), 0.5 mm
+# outside its square, and every box stopped. 3 mm right and 2 mm down here, so a swap shows.
+SHIFTED = replace(FRAME, paper_at=(3.0, 2.0))
+
+
+def moves(out):
+    """Each reading's move, (y, x) SU, in order."""
+    return [(int(y), int(x)) for y, x in re.findall(r"M(-?\d+),(-?\d+)\x03TB63,4", out)]
+
+
+def test_a_page_point_moves_onto_the_mat_by_where_the_paper_lies():
+    assert FRAME.on_mat(7.5, 7.5) == (7.5, 7.5) and FRAME.placed() == "on the mat grid's"
+    assert SHIFTED.on_mat(7.5, 7.5) == (9.5, 10.5)  # (y, x): 2 mm down, 3 mm right
+    assert SHIFTED.placed() == "3 mm right and 2 mm down of the mat grid's"
+
+
+def test_the_default_start_moves_with_the_paper():
+    assert driver.default_start(FRAME) == (7, 1)
+    assert driver.default_start(SHIFTED) == (9, 4)
+    assert driver.default_start(replace(FRAME, paper_at=(3.0, 3.0))) == (10, 4)  # the deck box on the tack
+
+
+def test_every_reading_before_the_scan_moves_with_the_paper_and_none_after_it():
+    def run(frame):
+        t = checked([INK, *FLAT, *MARKS_OK])
+        driver.cut(replace(job(), frame=frame), t, log(), [driver.default_start(frame)], check=True)
+        out = sent(t).replace("\x1b\x05", "")
+        scanned = out.index("TB99", out.index("TB123"))  # past the scan command, which holds the start
+        return out[:scanned], out[scanned:]
+
+    before, after = run(FRAME)
+    moved_before, moved_after = run(SHIFTED)
+    assert len(moves(before)) == 5  # the square's middle, then the blank paper
+    assert moves(moved_before) == [(y + 40, x + 60) for y, x in moves(before)]  # 2 mm down, 3 mm right
+    assert moves(moved_before)[0] == (190, 210)  # the square's middle, page (7.5, 7.5)
+    assert "TB123,4000,5740,180,80\x03" in moved_before  # from (9, 4)
+    assert moved_after == after  # the check after the scan, the cutting area and the cut: from the mark
+
+
+def test_diagnose_reads_every_row_where_the_paper_lies():
+    def run(frame):
+        t = machine({b"TB60": b"    0\x03", b"TB63": one_mm_right()})
+        seen, flat = driver.diagnose(frame, t, log())
+        return seen, flat, moves(sent(t).replace("\x1b\x05", ""))
+
+    seen, flat, at = run(FRAME)
+    moved_seen, moved_flat, moved_at = run(SHIFTED)
+    assert len(at) == 2 * 21 + 4 * 9 + 4
+    assert moved_at == [(y + 40, x + 60) for y, x in at]  # the square's rows, the legs', the blank paper
+    assert (moved_seen, moved_flat) == (seen, flat)  # 1 mm right of where its marks should be, either way
+
+
+@pytest.mark.parametrize(
+    "frame, corner", [(FRAME, "on the mat grid's"), (SHIFTED, "3 mm right and 2 mm down of the mat grid's")]
+)
+def test_a_sheet_without_ink_under_the_square_is_told_where_its_corner_goes(frame, corner):
+    t = checked([PAPER])
+    with pytest.raises(session.CutError) as e:
+        driver.cut(replace(job(), frame=frame), t, log(), [driver.default_start(frame)], check=True)
+    assert str(e.value) == (
+        "no ink at the square's middle before the scan (7.5 mm down, 7.5 mm in; it read 180): the sheet "
+        f"isn't where its marks should be. Put its top-left corner {corner}, reload and rerun"
+    )
+
+
+def test_the_stops_after_a_scan_say_where_the_papers_corner_goes():
+    corner = "corner 3 mm right and 2 mm down of the mat grid's"
+    with pytest.raises(session.CutError, match=f"the paper's top-left {corner}, nothing printed"):
+        driver.cut(replace(job(), frame=SHIFTED), machine({b"TB123": NOT_FOUND}), log(), [(9, 4)])
+    with pytest.raises(session.CutError, match=f"lies flat with its paper's {corner} and its marks"):
+        driver.cut(replace(job(), frame=SHIFTED), checked([INK, PAPER]), log(), [(9, 4)], check=True)

@@ -39,9 +39,10 @@ LOWEST = 1.0  # mm: no start above or left of this
 
 def default_start(frame: Frame) -> tuple[float, float]:
     """Where the mark search starts, (top, left) mm from the origin: 2 mm below the square's top
-    edge and 6 mm left of it, or as far left as LOWEST allows. (11, 1) on a 3x3 sheet (the square
-    at 3.5-8.5 mm across, 9-14 mm down), (12, 4) on a 4x2 sheet (10-15 mm both ways), (7, 1) on
-    the 5 mm deck box.
+    edge and 6 mm left of it, or as far left as LOWEST allows from the paper's edge, then moved
+    with the paper (``Frame.on_mat``). (11, 1) on a 3x3 sheet (the square at 3.5-8.5 mm across,
+    9-14 mm down), (12, 4) on a 4x2 sheet (10-15 mm both ways), (7, 1) on the 5 mm deck box,
+    (10, 4) with its pouch on the tack and the paper 3 mm in both ways.
 
     The machine finds the square by an area search: rows 3 mm apart from the start to 30 mm below
     it, each sweeping 30 mm to its right, for a dark run 3.5-9 mm long (firmware V1.04, cameo-re
@@ -56,9 +57,9 @@ def default_start(frame: Frame) -> tuple[float, float]:
     took the firmware's second try (28 s) and registered off the top of the sheet, while a start
     2 mm into it found the marks first time twice (13-14 s) and then registered four sheets cut in
     a row. A 4x2 sheet's start follows that: (8, 4), 2 mm above its square, registered once, on
-    plain A4 (2026-10-24); (12, 4) has not been tried on the machine, nor has (7, 1) on the deck
-    box."""
-    return frame.top + 2, max(LOWEST, frame.inset - 6)
+    plain A4 (2026-10-24); (12, 4) has not been tried on the machine, nor have (7, 1) and (10, 4)
+    on the deck box."""
+    return frame.on_mat(frame.top + 2, max(LOWEST, frame.inset - 6))
 
 
 def plan(svg: Path, frame: Frame, blade: protocol.Blade, passes: int, bias: tuple[float, float]) -> Job:
@@ -171,8 +172,9 @@ def cut(
                         continue
                     raise CutError(
                         f"the marks don't read where the scan put them, after {rounds} scans: nothing was cut. "
-                        "Check that the sheet lies flat with its paper's corner on the mat grid's and its marks "
-                        "are clean, then rerun; cut-proxies --diagnose shows what the sensor sees at each mark"
+                        f"Check that the sheet lies flat with its paper's corner {job.frame.placed()} and "
+                        "its marks are clean, then rerun; cut-proxies --diagnose shows what the sensor sees "
+                        "at each mark"
                     )
                 log.say(
                     f"check: every mark reads where the scan put it ({len(sensing.checks(job.frame))} readings)"
@@ -205,27 +207,33 @@ def check_light_slot(s: Session, log: SessionLog) -> int:
     return slot
 
 
+def read_loaded(s: Session, frame: Frame, pt: sensing.Point | sensing.Check) -> tuple[int | None, str | None]:
+    """A reading before the scan, at page point ``pt`` moved onto the loaded mat (``Frame.on_mat``).
+    Every reading before the scan goes through here; after it, ``sensing.registered``."""
+    return s.sense(*frame.on_mat(pt.y, pt.x), SENSE_SLOT)
+
+
 def check_placement(s: Session, frame: Frame, log: SessionLog) -> None:
     """Before the scan: ink under the square's middle, or the sheet isn't where its marks should be."""
     c = sensing.placement(frame)
-    level, reply = s.sense(c.y, c.x, SENSE_SLOT)  # the loaded mat's frame, in page mm like the scan start
+    level, reply = read_loaded(s, frame, c)
     log("placement", x=c.x, y=c.y, level=level, reply=reply)
     if c.reads(level) is not True:
         raise CutError(
             f"no ink at the square's middle before the scan ({c.y:g} mm down, {c.x:g} mm in; it read "
-            f"{level!r}): the sheet isn't where its marks should be. Put its top-left corner on the mat "
-            "grid's, reload and rerun"
+            f"{level!r}): the sheet isn't where its marks should be. Put its top-left corner "
+            f"{frame.placed()}, reload and rerun"
         )
 
 
 def read_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
     """Blank paper beside each mark and in the middle of the top margin, in the loaded mat's frame
-    (page mm, as the placement reading). The square's point first, then the reference on the way
-    to the top-right L, then the bottom-left: one pass along the top."""
+    (``read_loaded``, as the placement reading). The square's point first, then the reference on
+    the way to the top-right L, then the bottom-left: one pass along the top."""
     first, *ls = sensing.quiet(frame)
     readings = []
     for c in (first, sensing.reference(frame), *ls):
-        level, reply = s.sense(c.y, c.x, SENSE_SLOT)
+        level, reply = read_loaded(s, frame, c)
         log("quiet", mark=c.mark, what=c.what, x=c.x, y=c.y, level=level, reply=reply)
         readings.append((c, level))
     (_, mid), rest = readings[1], [readings[0], *readings[2:]]
@@ -417,11 +425,11 @@ def sense(
 
 
 def diagnose(frame: Frame, t: Transport, log: SessionLog) -> tuple[list[sensing.Seen], sensing.Flatness]:
-    """Before any scan, rows of readings across every mark in the loaded mat's frame: the square
-    first (``sensing.square_rows``), then each leg (``sensing.leg_rows``) centred on where the
-    square says the sheet sits, then the blank paper a cut reads beside each mark (``read_flat``).
-    Where each mark really is and how it reads. Cuts nothing and scans nothing, so it works on a
-    sheet the scan can't register."""
+    """Before any scan, rows of readings across every mark in the loaded mat's frame
+    (``read_loaded``): the square first (``sensing.square_rows``), then each leg
+    (``sensing.leg_rows``) centred on where the square says the sheet sits, then the blank paper a
+    cut reads beside each mark (``read_flat``). Where each mark really is and how it reads. Cuts
+    nothing and scans nothing, so it works on a sheet the scan can't register."""
     s = Session(t, log)
     seen: list[sensing.Seen] = []
     try:
@@ -434,7 +442,7 @@ def diagnose(frame: Frame, t: Transport, log: SessionLog) -> tuple[list[sensing.
             for row in rows:
                 levels = []
                 for pt in row.points:
-                    level, reply = s.sense(pt.y, pt.x, SENSE_SLOT)
+                    level, reply = read_loaded(s, frame, pt)
                     log("diagnose", mark=row.mark, what=row.what, offset=pt.offset, level=level, reply=reply)
                     levels.append(level)
                 seen.append(sensing.see(row, levels))

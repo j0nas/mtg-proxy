@@ -115,9 +115,10 @@ class Check:
 
 
 def placement(frame: Frame) -> Check:
-    """The square's middle, read before the scan in the loaded mat's own frame. The scan start is
-    given in that frame as page millimetres too (``driver.default_start``), so a sheet placed where
-    the marks expect it has ink here; within about 2 mm of it, the scan's own window."""
+    """The square's middle, page mm, read before the scan in the loaded mat's own frame
+    (``driver.read_loaded``), where the default scan start is too (``driver.default_start``): a
+    sheet placed where the marks expect it has ink here; within about 2 mm of it, the scan's own
+    window."""
     return Check(
         "top-left", "the square, before the scan", frame.inset + SQUARE / 2, frame.top + SQUARE / 2, True
     )
@@ -229,7 +230,7 @@ DIAG_LEG = 2.0  # mm read either side of where a leg should be, after the square
 
 @dataclass(frozen=True)
 class Row:
-    """Readings across one mark in the loaded mat's frame (page mm, as the scan start is given).
+    """Readings across one mark, page mm, read in the loaded mat's frame (``driver.read_loaded``).
     Each point's offset is from where a correctly placed sheet has the mark's near edge (square) or
     centre line (leg); ``middle`` is the offset of a correctly placed mark's middle."""
 
@@ -331,9 +332,8 @@ def verdict(seen: list[Seen], frame: Frame, flat: Flatness | None = None) -> lis
             f"the sheet sits {abs(sx):.2f} mm {side} and {abs(sy):.2f} mm {down} of where its marks should be"
         )
         if max(abs(sx), abs(sy)) > 1.5:
-            out.append(
-                "  that is more than the scan likes: put the paper's corner (not the laminate's) on the grid's"
-            )
+            where = "(not the laminate's) on the grid's" if frame.paper_at == (0, 0) else frame.placed()
+            out.append(f"  that is more than the scan likes: put the paper's corner {where}")
     blx, try_ = shift("bottom-left L", "vertical leg"), shift("top-right L", "horizontal leg")
 
     def turned(rad: float, by: str) -> str:  # page y runs down: turned clockwise moves the right side down

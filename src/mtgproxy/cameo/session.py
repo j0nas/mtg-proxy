@@ -1,10 +1,11 @@
 """One cutting job end to end, over any transport: preflight, blade setup, registration scan,
 cut, and — whatever happens after the machine was touched — a return to the origin.
 
-Coordinates: the job is in page millimetres (y down). After the scan the machine's origin is the
-top-left mark's corner, so a page point maps to (x − inset + bias_x, y − top + bias_y). Nothing
-may land above or left of that corner (negative registered coordinates are untested), and
-nothing may leave the paper.
+Coordinates: the job is in page millimetres (y down). Before the scan the origin is the mat
+grid's corner, and a page point is where the paper lies on the mat (``Frame.on_mat``). After the
+scan the machine's origin is the top-left mark's corner, so a page point maps to
+(x − inset + bias_x, y − top + bias_y). Nothing may land above or left of that corner (negative
+registered coordinates are untested), and nothing may leave the paper.
 """
 
 from __future__ import annotations
@@ -32,7 +33,8 @@ CHUNK_TIMEOUT_S = 180.0
 @dataclass(frozen=True)
 class Frame:
     """The printed registration marks, in page millimetres: 3-mark registration, a 5 mm square
-    top-left and L marks top-right and bottom-left."""
+    top-left and L marks top-right and bottom-left. And where the paper lies on the loaded mat
+    (``paper_at``), which everything before the scan moves by (``on_mat``)."""
 
     page_w: float
     page_h: float
@@ -42,11 +44,28 @@ class Frame:
     length: float = 9.4  # leg length
     thickness: float = 1.0
     inset_y: float | None = None  # from the top and bottom edges, when it differs from inset (3x3)
+    # (right, down) mm from the mat grid's corner to the paper's top-left corner (--paper-at). About
+    # 3 mm both ways for a laminated sheet laid with its whole pouch on the tack (the deck box).
+    paper_at: tuple[float, float] = (0.0, 0.0)
 
     @property
     def top(self) -> float:
         """The mark corners' distance from the top (and bottom) paper edge."""
         return self.inset if self.inset_y is None else self.inset_y
+
+    def on_mat(self, y: float, x: float) -> tuple[float, float]:
+        """A page point (y, x mm) in the loaded mat's frame, (y, x) as a move takes it: where the
+        head goes before the scan, for every reading and the default scan start. After the scan
+        the registered frame (from the top-left mark) needs none of this."""
+        right, down = self.paper_at
+        return y + down, x + right
+
+    def placed(self) -> str:
+        """Where the paper's top-left corner goes, for the messages."""
+        if self.paper_at == (0, 0):
+            return "on the mat grid's"
+        right, down = self.paper_at
+        return f"{right:g} mm right and {down:g} mm down of the mat grid's"
 
 
 @dataclass
@@ -236,9 +255,9 @@ class Session:
         top, left = starts[0]
         raise CutError(
             f"the Cameo couldn't find the marks from {len(starts)} scan start(s), the first at "
-            f"({top:g}, {left:g}) mm. Check: printed at 100 %, the paper's top-left corner on the mat "
-            "grid's, nothing printed within 6 mm of a mark, no glare. Or pass --scan-start TOP,LEFT "
-            "(mm from the origin: about 2 mm below the square's top edge, a few mm left of it)."
+            f"({top:g}, {left:g}) mm. Check: printed at 100 %, the paper's top-left corner "
+            f"{frame.placed()}, nothing printed within 6 mm of a mark, no glare. Or pass --scan-start "
+            "TOP,LEFT (mm from the origin: about 2 mm below the square's top edge, a few mm left of it)."
         )
 
     def cut(self, job: Job) -> None:

@@ -53,6 +53,23 @@ def test_given_starts_are_tried_as_given(tmp_path):
     assert cutting.scan_starts(o, frame()) == ([(6.0, 17.0), (8.0, 17.0)], "--scan-start")
 
 
+def test_the_default_start_follows_the_paper_and_a_given_one_stays_as_given(tmp_path):
+    laid = replace(frame(inset=5), paper_at=(3.0, 3.0))  # the paper deck box, its pouch on the tack
+    o = cutting.CutOptions(out_dir=tmp_path)
+    assert cutting.scan_starts(o, laid) == ([(10, 4)], "2 mm into the square")
+    o = cutting.CutOptions(out_dir=tmp_path, scan_starts=[(5.5, 14.5)])
+    assert cutting.scan_starts(o, laid) == ([(5.5, 14.5)], "--scan-start")
+
+
+def test_the_diagnose_report_says_where_the_paper_lies_when_its_off_the_grids_corner():
+    head = "cut-proxies: before any scan, in the loaded mat's frame (page mm"
+    assert cutting.diagnose_report([], frame()).splitlines()[0] == head + "):"
+    laid = replace(frame(), paper_at=(3.0, 2.0))
+    assert cutting.diagnose_report([], laid).splitlines()[0] == (
+        head + ", the paper's corner 3 mm right and 2 mm down of the mat grid's):"
+    )
+
+
 def cut_options(monkeypatch, *args: str) -> cutting.CutOptions:
     seen: list[cutting.CutOptions] = []
     monkeypatch.setattr(cutting, "run_cut", lambda o: seen.append(o) or 0)
@@ -76,6 +93,23 @@ def test_the_paper_preset_and_explicit_flags_override_it(monkeypatch, tmp_path):
     assert (o.force, o.speed, o.depth, o.passes) == (10, 5, 1, 1)
     o = cut_options(monkeypatch, "--preset", "paper", "--passes", "2")
     assert (o.force, o.speed, o.depth, o.passes) == (10, 5, 1, 2)
+
+
+def test_paper_at_is_right_then_down_or_one_number_for_both(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    assert cut_options(monkeypatch).paper_at == (0.0, 0.0)
+    assert cut_options(monkeypatch, "--paper-at", "3,2").paper_at == (3.0, 2.0)
+    assert cut_options(monkeypatch, "--paper-at", "3").paper_at == (3.0, 3.0)
+    assert cut_options(monkeypatch, "--paper-at", "2.5, 0").paper_at == (2.5, 0.0)
+
+
+@pytest.mark.parametrize("value", ["3,2,1", "3,", "", "x", "3,y", "-1", "3,-2", "nan", "inf,3"])
+def test_paper_at_refuses_anything_but_one_or_two_lengths_of_0_or_more(monkeypatch, tmp_path, value):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cutting, "run_cut", lambda o: pytest.fail(f"cut with --paper-at {value!r}"))
+    result = CliRunner().invoke(cli.app, ["cut", f"--paper-at={value}"])
+    want = f"--paper-at wants RIGHT,DOWN in mm, 0 or more (one number for both), got {value!r}"
+    assert result.exit_code == 1 and want in result.output
 
 
 def test_an_unknown_preset_is_refused(monkeypatch, tmp_path):
@@ -159,6 +193,21 @@ def test_a_3x3_dry_run_scans_its_own_frame(tmp_path, capsys):
     sent = (tmp_path / "f.cmds").read_bytes().decode().split("\x03")
     assert "TB51,188" in sent and "TB123,3800,5540,240,80" in sent  # the 4x2's frame, from (12, 4)
     assert not (tmp_path / "scan-start.json").exists()
+
+
+@needs_engine
+def test_a_dry_run_says_where_the_paper_lies_only_when_its_off_the_grids_corner(tmp_path, capsys):
+    o = cutting.CutOptions(
+        layout="4x2", reg_inset=5, dry_run=True, out_dir=tmp_path, label="box", paper_at=(3.0, 3.0)
+    )
+    assert cutting.run_cut(o) == 0
+    out = capsys.readouterr().out
+    assert "cut-proxies: the paper's top-left corner 3 mm right and 3 mm down of the mat grid's\n" in out
+    assert "scan starts at (10, 4) mm, 2 mm into the square" in out
+    assert "TB123,4000,5740,200,80" in (tmp_path / "box.cmds").read_bytes().decode().split("\x03")
+    assert cutting.run_cut(replace(o, paper_at=(0.0, 0.0))) == 0
+    out = capsys.readouterr().out
+    assert "scan starts at (7, 1) mm" in out and "paper's top-left corner" not in out
 
 
 def menu(monkeypatch, *answers):
