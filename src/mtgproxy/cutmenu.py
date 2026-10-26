@@ -28,7 +28,7 @@ from .sidecar import RunInfo
 PLAIN = "plain A4 sheet: standard cards, 3x3"
 MODES = {
     "cut": "cut",
-    "proof": "proof cuts on the marks first, then y cuts / r rescans / q stops (first sheet only)",
+    "proof": "a proof cut on a printed target first, then y cuts / r rescans / q stops (first sheet only)",
     "dry-run": "dry run: no machine, checks the job",
     "probe": "probe: scan the marks, log what the machine reports, cut nothing",
 }

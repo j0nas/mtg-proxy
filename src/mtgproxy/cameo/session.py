@@ -18,6 +18,7 @@ from pathlib import Path
 
 from . import protocol as p
 from .geometry import Polyline, bbox
+from .proof import Target
 from .transport import Transport
 
 
@@ -33,7 +34,8 @@ CHUNK_TIMEOUT_S = 180.0
 @dataclass(frozen=True)
 class Frame:
     """The printed registration marks, in page millimetres: 3-mark registration, a 5 mm square
-    top-left and L marks top-right and bottom-left. And where the paper lies on the loaded mat
+    top-left and L marks top-right and bottom-left. The proof targets printed with them (``proof``),
+    in the order the proof rounds take them. And where the paper lies on the loaded mat
     (``paper_at``), which everything before the scan moves by (``on_mat``)."""
 
     page_w: float
@@ -47,6 +49,7 @@ class Frame:
     # (right, down) mm from the mat grid's corner to the paper's top-left corner (--paper-at). About
     # 3 mm both ways for a laminated sheet laid with its whole pouch on the tack (the deck box).
     paper_at: tuple[float, float] = (0.0, 0.0)
+    targets: tuple[Target, ...] = ()
 
     @property
     def top(self) -> float:

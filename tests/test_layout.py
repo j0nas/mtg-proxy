@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import re
 
 import pytest
@@ -137,8 +138,7 @@ def test_the_marks_the_engine_prints_are_the_frame_cut_proxies_scans():
     assert f.inset + f.width == (TOP_RIGHT_L[1][0] + TOP_RIGHT_L[1][2]) / 2  # top-right corner, x
     assert f.top + f.height == (BOTTOM_LEFT_L[0][1] + BOTTOM_LEFT_L[0][3]) / 2  # bottom-left, y
     assert f.top + f.height - f.length == BOTTOM_LEFT_L[1][1]  # TB51's leg: corner line to inked end
-    xs, ys = zip(*proof.square(f).points, strict=True)
-    assert (min(xs), min(ys), max(xs), max(ys)) == SQUARE_3X3  # the proof cut traces the ink's edge
+    assert (f.inset, f.top, f.inset + proof.SQUARE, f.top + proof.SQUARE) == SQUARE_3X3
 
 
 def test_layout_names_papers_and_marks():
@@ -205,3 +205,95 @@ def test_the_blank_paper_a_cut_reads_beside_each_mark_is_white_and_clear_of_the_
                     int((c.y - 1) * px) : int((c.y + 1) * px), int((c.x - 1) * px) : int((c.x + 1) * px)
                 ]
                 assert spot.size and not spot.any(), c.what
+
+
+def _marks(f) -> list[tuple[float, float, float, float]]:
+    """The frame's mark ink, page mm: the square, then each L's two legs (square-capped, 1 mm)."""
+    from mtgproxy.cameo import proof
+
+    t, n = f.thickness / 2, f.length
+    tr, bl = (f.inset + f.width, f.top), (f.inset, f.top + f.height)
+    return [
+        (f.inset, f.top, f.inset + proof.SQUARE, f.top + proof.SQUARE),
+        (tr[0] - n, tr[1] - t, tr[0] + t, tr[1] + t),
+        (tr[0] - t, tr[1] - t, tr[0] + t, tr[1] + n),
+        (bl[0] - t, bl[1] - t, bl[0] + n, bl[1] + t),
+        (bl[0] - t, bl[1] - n, bl[0] + t, bl[1] + t),
+    ]
+
+
+@needs_engine
+def test_each_layout_names_four_3_mm_proof_targets_in_the_strip_above_its_cards():
+    from mtgproxy.layout import proof_targets_mm
+
+    assert proof_targets_mm("a4", "standard", "3x3") == (
+        ((120, 11.75), (142, 11.75), (164, 11.75), (186, 11.75)),
+        3,
+    )
+    assert proof_targets_mm("a4", "standard", "4x2") == (
+        ((165, 12.9), (190, 12.9), (215, 12.9), (240, 12.9)),
+        3,
+    )
+    g = build_cut_svg("a4", "standard", None, "3x3")
+    assert (g.proof_targets[0], g.proof_target_mm) == ((120, 11.75), 3)
+    assert proof_targets_mm("letter", "standard", "4x2") == ((), 0)  # a layout without them
+
+
+@needs_engine
+@pytest.mark.parametrize(("name", "cards"), [("3x3", 9), ("4x2", 8)])
+def test_the_engine_prints_each_proof_target_where_the_proof_cut_traces_it(name, cards, tmp_path):
+    """The engine's own sheet, rendered: each target's ink is the square cut-proxies traces, within
+    a 300 ppi pixel or two of JPEG."""
+    import numpy as np
+
+    from mtgproxy import cutting, simulate
+    from test_build_cli import _duplex_pages
+
+    _duplex_pages(tmp_path, name, cards, ppi=300)
+    g = build_cut_svg("a4", "standard", None, name)
+    targets = cutting.sheet_targets(cutting.CutOptions(layout=name, proof=True), g)
+    f = cutting.frame_of(g, targets=targets)
+    grey = simulate.render(tmp_path / f"{name}.pdf", 1, f)
+    px = simulate.PPI / 25.4
+    assert [t.number for t in f.targets] == [1, 2, 3, 4]
+    for t in f.targets:
+        x0, y0 = t.x - 2.5, t.y - 2.5
+        ys, xs = np.nonzero(
+            grey[int(y0 * px) : int((t.y + 2.5) * px), int(x0 * px) : int((t.x + 2.5) * px)] < 64
+        )
+        ink = (x0 + xs.min() / px, y0 + ys.min() / px, x0 + (xs.max() + 1) / px, y0 + (ys.max() + 1) / px)
+        assert ink == pytest.approx(t.outline().bbox(), abs=0.15), t.number
+    report = simulate.simulate(grey, f)  # and the scan still reads its marks first, clear of them
+    assert report.ok, report.lines()
+
+
+@needs_engine
+@pytest.mark.parametrize("name", ["3x3", "4x2"])
+def test_the_proof_targets_keep_clear_of_the_marks_the_cards_and_the_scan(name, tmp_path):
+    """Inside the mark frame; 6 mm of blank paper round every mark (MARK_QUIET in the deck box's
+    job.ts, Graphtec's quiet zone); clear of the cards' cuts and of their print, which bleeds about
+    0.7 mm past them; clear of the area search's rows, of where the firmware's retry reads its light
+    and searches again (a third of the frame along, a leg's length higher, cameo-re NOTES.md), and
+    of every reading the sensor check takes."""
+    from mtgproxy import cutting
+    from mtgproxy.cameo import driver, geometry, proof, sensing
+
+    svg = tmp_path / "cut.svg"
+    g = build_cut_svg("a4", "standard", svg, name)
+    f = cutting.frame_of(g, targets=proof.targets(g.proof_targets, g.proof_target_mm))
+    cards = geometry.load_svg(svg)
+    top, left = driver.default_start(f)
+    area = (left, top, left + 30, top + 30)
+    retry = (left + f.width / 3, top - f.length, left + f.width / 3 + 30, top - f.length + 30)
+    readings = [*sensing.quiet(f), sensing.reference(f), *sensing.checks(f), sensing.placement(f)]
+    for t in f.targets:
+        box = t.outline().bbox()
+        assert (
+            f.inset < box[0] and box[2] < f.inset + f.width and f.top < box[1] and box[3] < f.top + f.height
+        )
+        assert min(_gap(box, m) for m in _marks(f)) >= 6.0, t.number
+        assert min(_gap(box, c.bbox()) for c in cards) >= 1.9 and not proof.on_job(t.outline(), cards)
+        assert _gap(box, area) > 2 and _gap(box, retry) > 2, t.number
+        assert min(_gap(box, (c.x, c.y, c.x, c.y)) for c in readings) >= 3, t.number
+    xs = sorted(t.x for t in f.targets)
+    assert min(b - a for a, b in itertools.pairwise(xs)) >= 20  # a round's cut lands on one alone

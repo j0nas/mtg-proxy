@@ -10,7 +10,8 @@ Registration marks are NOT drawn: the cutter finds the printed ones itself. The
 mark geometry it needs (inset from the page edge, mark-to-mark distances, leg
 length) is derived from the same assets/layouts.json entries create_pdf.py uses.
 
-A sheet has one of two layouts, both printed with 3-mark registration. ``3x3``, the default
+A sheet has one of two layouts, both printed with 3-mark registration and with proof targets,
+small black squares a proof cut traces (``cameo.proof``), also from layouts.json. ``3x3``, the default
 on A4 with standard cards, is nine cards on portrait A4 with the marks 3.5 mm from the sides and
 9 mm from the top and bottom: the engine's ``borderless`` variant, its name for the tighter inset,
 which has nothing to do with borderless printing (that stays off). ``4x2`` is the engine's own
@@ -47,6 +48,9 @@ class Geometry:
     reg_length_mm: float = 9.4  # the printed L marks' legs, from the corner line to the leg's end
     layout: str = DEFAULT
     reg_inset_y_mm: float | None = None  # marks' distance from the top and bottom, when not reg_inset_mm
+    # The proof targets the engine prints with the marks: centres, page mm (y down), and their side.
+    proof_targets: tuple[tuple[float, float], ...] = ()
+    proof_target_mm: float = 0.0
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -167,6 +171,15 @@ def registration_inset_y_mm(paper: str, card_size: str, name: str) -> float | No
     return engine.size_to_mm(own["inset_y"]) if own.get("inset_y") else None
 
 
+def proof_targets_mm(paper: str, card_size: str, name: str) -> tuple[tuple[tuple[float, float], ...], float]:
+    """The proof targets the engine prints with this layout's marks (layouts.json ``proof_targets``):
+    each one's centre in page mm from the top-left corner, y down, in the order the proof rounds take
+    them, and their side. None and 0 for a layout without them."""
+    own = layout_def(paper, card_size, name).get("proof_targets") or {}
+    at = tuple((engine.size_to_mm(x), engine.size_to_mm(y)) for x, y in own.get("at", ()))
+    return at, engine.size_to_mm(own["size"]) if at else 0.0
+
+
 def build_cut_svg(paper: str, card_size: str, out: Path | None, name: str) -> Geometry:
     """Write the cut-path SVG (unless ``out`` is None) and return the geometry."""
     import ezdxf
@@ -202,6 +215,14 @@ def build_cut_svg(paper: str, card_size: str, out: Path | None, name: str) -> Ge
         raise LayoutError("DXF contained no card outlines")
     if min(xs) < inset or min(ys) < top or max(xs) > page_w - inset or max(ys) > page_h - top:
         raise LayoutError("card outlines fall outside the registration-mark frame")
+    targets, side = proof_targets_mm(paper, card_size, name)
+    for x, y in targets:
+        if not (
+            inset + side / 2 < x < page_w - inset - side / 2 and top + side / 2 < y < page_h - top - side / 2
+        ):
+            raise LayoutError(
+                f"the proof target at {x:g}, {y:g} mm falls outside the registration-mark frame"
+            )
 
     if out is not None:
         body = "\n".join(
@@ -231,4 +252,6 @@ def build_cut_svg(paper: str, card_size: str, out: Path | None, name: str) -> Ge
         reg_length_mm=round(leg, 3),
         layout=name,
         reg_inset_y_mm=None if inset_y is None else round(inset_y, 3),
+        proof_targets=tuple((round(x, 3), round(y, 3)) for x, y in targets),
+        proof_target_mm=round(side, 3),
     )

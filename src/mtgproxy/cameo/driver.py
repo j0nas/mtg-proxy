@@ -1,7 +1,7 @@
 """Entry points: plan a job from an SVG, open a transport, cut, or probe the registration.
 
-``cut`` can stop between the scan and the cut for proof cuts over the marks (``proof``), which the
-operator checks by eye before anything else is cut. ``probe`` is an experiment, not a cut: it scans the marks and asks the machine every query that
+``cut`` can stop between the scan and the cut for a proof cut around a printed target (``proof``),
+which the operator checks by eye before anything else is cut. ``probe`` is an experiment, not a cut: it scans the marks and asks the machine every query that
 might report where it found them, before and after the scan. Run it twice with the sheet moved a
 known distance; a reply that moves with the sheet is a readback we can check against tolerances.
 """
@@ -110,6 +110,8 @@ def cut(
     starts: list[tuple[float, float]],
     confirm: Confirm | None = None,
     check: bool = False,
+    proof_blade: protocol.Blade = proof.BLADE,
+    on_target: Callable[[proof.Target], None] | None = None,
 ) -> Result:
     """The whole job. Once anything moved the machine, it always ends back at the origin.
 
@@ -118,15 +120,17 @@ def cut(
     every mark after it (does the print agree with the frame the scan made?). A
     scan that finds nothing or disagrees with the print is tried again, then once more as TB122,
     which skips the top-right L (SCANS); when none agrees, the job stops before anything is cut
-    (``sensing``). With
-    ``confirm``, proof cuts go down over the marks between the scan and the cut, and nothing else
-    is cut until the operator says so. A rescan returns to the origin and repeats a fresh run's start."""
+    (``sensing``). With ``confirm``, each proof round traces the next of the frame's proof targets
+    with ``proof_blade`` between the scan and the cut (``prove``), and nothing else is cut until the
+    operator says so; ``on_target`` hears of each target as it is cut. A rescan returns to the
+    origin and repeats a fresh run's start."""
     s = Session(t, log)
     try:
         extent = reach = check_bounds(job)
-        if confirm:  # the area must hold the proof cuts too, which may reach past the job's own
-            marks = [cut for _, cut in proof.cuts(job.frame)]
-            reach = check_bounds(replace(job, lines=[*job.lines, *marks]))
+        targets: list[proof.Target] = []
+        if confirm:  # the area must hold the targets' cuts too, which may reach past the job's own
+            targets = proof_targets(job, log)
+            reach = check_bounds(replace(job, lines=[*job.lines, *(tg.outline() for tg in targets)]))
         if check:  # and the paper points beside the marks
             points = [sensing.registered(job.frame, c) for c in sensing.checks(job.frame)]
             reach = (
@@ -135,7 +139,9 @@ def cut(
                 *reach[2:],
             )
         low = low_corner(reach)
-        rounds = max(proof.ROUNDS if confirm else 1, CHECK_ROUNDS if check else 1)
+        proofs = min(proof.ROUNDS, len(targets))
+        rounds = max(proofs, CHECK_ROUNDS if check else 1)
+        done = 0  # proof rounds cut
         for attempt in range(rounds):
             if attempt:
                 s.finish()
@@ -196,7 +202,12 @@ def cut(
                     f"check: every mark reads where the scan put it ({len(sensing.checks(job.frame))} readings)"
                 )
             verify = partial(held, s, job.frame, log, flat, slot) if check else None
-            if confirm is None or prove(s, job, log, confirm, attempt, attempt + 1 < rounds, verify):
+            if confirm is None:
+                break
+            done += 1
+            rescan = attempt + 1 < rounds and done < proofs
+            target = targets[done - 1]
+            if prove(s, job, log, confirm, target, done, rescan, verify, low, proof_blade, on_target):
                 break
         s.cut(job)
         if check:
@@ -211,6 +222,20 @@ def cut(
         return Result(firmware, start, extent)
     finally:
         wrap_up(s, t, log)
+
+
+def proof_targets(job: Job, log: SessionLog) -> list[proof.Target]:
+    """The frame's proof targets the rounds can take, in order: one whose cut would touch the job is
+    left out, and said so. With none left the job stops before the machine moves."""
+    sheet = job.frame.targets
+    kept, touching = proof.clear_of(sheet, job.shapes or job.lines)
+    of = max((tg.number for tg in sheet), default=0)
+    for tg in touching:
+        log.say(f"proof: {tg.name(of)} would touch the job, so it is left out")
+    if not kept:
+        why = "every one would touch the job" if sheet else "the sheet has none"
+        raise CutError(f"no proof target to cut ({why}): nothing was cut. Rerun without --proof")
+    return kept
 
 
 def held(s: Session, frame: Frame, log: SessionLog, flat: sensing.Flatness, slot: int) -> list[str]:
@@ -441,43 +466,46 @@ def prove(
     job: Job,
     log: SessionLog,
     confirm: Confirm,
-    attempt: int,
+    target: proof.Target,
+    round_: int,
     rescan: bool,
     verify: Callable[[], list[str]] | None = None,
+    low: tuple[float, float] = (0.0, 0.0),
+    blade: protocol.Blade = proof.BLADE,
+    on_target: Callable[[proof.Target], None] | None = None,
 ) -> bool:
-    """Score the proof cuts over the marks, park the head out of the way and ask. True: cut the
-    job; False: rescan. Anything but y or r stops the job (CutError). With ``verify`` (``held``),
-    the marks are read again after the proof cuts, before anyone is asked: a machine that lost its
-    place cutting them stops the job there."""
-    kept, skipped = [], []
-    for corner, piece in proof.cuts(job.frame):
-        if proof.on_job(piece, job.shapes or job.lines):
-            skipped.append(corner)
-        else:
-            kept.append(piece)
-    for corner in sorted(set(skipped)):
-        log.say(
-            f"proof: {skipped.count(corner)} {corner} proof cut(s) would touch the job, so they are left out"
-        )
-    s.cut(replace(job, lines=kept))
+    """Trace round ``round_``'s proof target along its edge in one pass with ``blade``, set the job's
+    own blade again (the same cutting area, back to ``low``), park the head out of the way and ask.
+    True: cut the job; False: rescan. Anything but y or r stops the job (CutError). With ``verify``
+    (``held``), the marks are read again after the proof cut, before anyone is asked: a machine
+    that lost its place cutting it stops the job there."""
+    s.setup(blade, job.frame, low)
+    s.cut(replace(job, lines=[target.outline()]))
+    if on_target:
+        on_target(target)
+    of = max(tg.number for tg in job.frame.targets)
+    log.say(
+        f"proof: {target.name(of)} cut, one pass at force {blade.force}, speed {blade.speed}, depth {blade.depth}"
+    )
+    s.setup(job.blade, job.frame, low)  # the job's own blade, before anything else is cut
     if verify:
         lost = verify()
         if lost:
             raise CutError(
-                f"after the proof cuts the marks no longer read where the scan put them ({'; '.join(lost)}): "
-                "the machine lost its place cutting them, so the job isn't cut. Rerun"
+                f"after the proof cut the marks no longer read where the scan put them ({'; '.join(lost)}): "
+                "the machine lost its place cutting it, so the job isn't cut. Rerun"
             )
     s.send(protocol.move(0, job.frame.width / 2))  # the head to the top edge's middle, off every corner
     s.wait_ready(60)
-    log("proof", round=attempt + 1, cuts=len(kept), skipped=skipped)
-    answer = ask(s, confirm, attempt, rescan)
-    log("proof_answer", round=attempt + 1, answer=answer)
+    log("proof", round=round_, target=target.number, x=target.x, y=target.y, size=target.size)
+    answer = ask(s, confirm, round_ - 1, rescan)
+    log("proof_answer", round=round_, answer=answer)
     if answer == "y":
         return True
     if answer == "r" and rescan:
-        log.say(f"rescanning (proof round {attempt + 2} of {proof.ROUNDS})")
+        log.say(f"rescanning (proof round {round_ + 1}): its cut goes on the next target")
         return False
-    raise CutError("stopped at the proof cuts: nothing else was cut")
+    raise CutError("stopped at the proof cut: nothing else was cut")
 
 
 def ask(s: Session, confirm: Confirm, attempt: int, rescan: bool, poll_s: float = 10.0) -> str:

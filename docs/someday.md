@@ -17,12 +17,6 @@ None of these block cutting. Background: `studio-capture.md`.
 
 These came out of a day of cutting one box. Jonas wants them built.
 
-- **Proof targets, not proof cuts on the marks.** Proof cuts score the square's outline and the L
-  legs, so every round leaves grooves on the marks themselves. After three rounds the scan could no
-  longer read the square: grooves beside it merged with it, or split it, in the firmware's search
-  for a 3.5-9 mm dark run. Print a few small black shapes in the header and footer for the proof
-  cuts instead, and use a fresh one for each retry. Cut them with a light setting of their own, just
-  enough to see; the box's force 33 came down hard on the marks.
 - **Score folds in a light pass instead of perforating them.** The deck box's folds are dashed cuts
   (blue in its SVG, 203 paths against 11 red ones). They take most of the cutting time and noise,
   and a scored line may fold better. This needs a blade setting per kind of line in the driver.

@@ -530,16 +530,16 @@ def test_a_machine_that_loses_its_place_cutting_says_so_before_the_sheet_is_unlo
     assert "D" in sent(t).replace("TB", "")
 
 
-def test_a_machine_that_loses_its_place_on_the_proof_cuts_never_cuts_the_job():
-    t = checked([INK, *FLAT, *MARKS_OK, PAPER])  # after the proof cuts the square reads paper
+def test_a_machine_that_loses_its_place_on_the_proof_cut_never_cuts_the_job():
+    t = checked([INK, *FLAT, *MARKS_OK, PAPER])  # after the proof cut the square reads paper
     asked = []
-    with pytest.raises(session.CutError, match="after the proof cuts the marks no longer read"):
+    targeted = replace(job(), frame=replace(FRAME, targets=proof.targets([(100, 80), (120, 80)])))
+    with pytest.raises(session.CutError, match="after the proof cut the marks no longer read"):
         driver.cut(
-            job(), t, log(), [driver.default_start(FRAME)], lambda *a: asked.append(a) or "y", check=True
+            targeted, t, log(), [driver.default_start(FRAME)], lambda *a: asked.append(a) or "y", check=True
         )
     assert not asked  # stopped before anyone was asked
-    cuts = sent(t).replace("TB", "").count("D")
-    assert 0 < cuts <= len(list(proof.cuts(FRAME)))  # the proof cuts and nothing more
+    assert sent(t).replace("TB", "").count("D") == 1  # the target's outline and nothing more
 
 
 def test_a_pause_on_the_machine_waits_for_the_operator_and_the_cut_carries_on():

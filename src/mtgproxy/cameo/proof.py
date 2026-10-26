@@ -1,48 +1,61 @@
-"""Proof cuts: a registration check read by eye between the scan and the real cut.
+"""Proof targets: a registration check read by eye between the scan and the real cut.
 
 The machine never reports where it found the marks: its firmware keeps them to itself (FQ5 reads
--64 after every scan). So after the scan we score every mark: the top-left square along its
-outline, and the L marks top-right and bottom-left along their centre lines, from the corner to
-each leg's inked end. Registered right, the outline traces the edge of the black and every L cut
-runs down the middle of it; a misread mark's cuts sit beside it, by the size of the misread, and
-a cut that stops short of or overruns a leg's end shows the error along that leg. The operator
-answers y (cut the job), r (scan again; the new cuts go on the same marks) or q (stop).
+-64 after every scan). So after the scan, before anything else is cut, the blade traces the edge
+of a proof target: a small filled black square printed with the marks, inside the mark frame and
+clear of the marks and the job. Registered right, the cut runs along the edge of the black all
+round. Registered off, it leaves a strip of white between the black and the cut on one side and
+runs inside the black on the other: an error in x shows on the left and right edges, one in y on
+the top and bottom, each with its direction, and the strip's width is the size of the error. The
+operator answers y (cut the job), r (scan again; the next round cuts the next target) or q (stop).
 
-A rescan reads the same marks, and a scored line inside the black would sit exactly where the
-sensor looks for the darkest point. The machine locates the square by the centre of its dark
-run, and a cut across the black could split that run below the 3.5 mm the search accepts, while
-one along its edge leaves the run whole. It crosses each L half its leg length from the corner
-(it keeps whole millimetres; firmware V1.04, docs in cameo-re), so each leg is left uncut for
-EXCLUDE either side of that: what stays is an L at each corner and a piece at each leg's end. A
-piece that would touch the job is left out.
+A square traced along its edge is the easiest shape to judge by eye: the question at each edge is
+whether white shows between the black and the cut, and one look at a square answers it for both
+axes. A plus scored along its arms' centre lines asks whether a groove runs down the middle of a
+1 mm bar, which is harder to judge, and a groove inside black barely shows on gloss. At 3 mm a
+target leaves more than a millimetre of blank paper either side of it in the 5.5 mm strip a proxy
+sheet has between its marks' row and its cards, and its four 3 mm edges are long enough to see a
+quarter millimetre of white along.
+
+Until 2026-10-26 the proof cuts went on the marks themselves: the square's outline and each L
+along its centre lines, at the job's own blade. Every round left grooves on and around the marks
+the next scan read, and after three rounds on one deck box sheet the firmware's area search, which
+looks for one 3.5-9 mm dark run, no longer found the square: the sheet could not be registered
+again. A target is cut once: each round takes the next one, so the marks stay as printed and no
+round cuts on an earlier round's groove. A sheet carries four, for three rounds in a run
+(``ROUNDS``) and a later run on the same sheet (``cut-proxies --proof-from``).
+
+The targets' places come from what printed them: layouts.json for the proxy sheets
+(``layout.build_cut_svg``), ``--proof-target`` for any other sheet (the paper deck box's job.ts).
+A target whose cut would touch the job is left out. The cut is one light pass (``BLADE``): enough
+to see on laminate, nowhere near through. The job's own blade is set again before the job
+(``driver.prove``).
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from .geometry import Point, Polyline, inside
-from .session import Frame
+from .protocol import Blade
 
-EXCLUDE = 1.5  # mm left uncut either side of a sensor crossing
-MIN_PIECE = 1.0  # mm; shorter pieces are left out
-ROUNDS = 3  # proof rounds; the last one offers no rescan
+if TYPE_CHECKING:
+    from .session import Frame
+
+SIZE = 3.0  # mm: a proof target's side, unless its sheet says otherwise
+BLADE = Blade(force=10, speed=5, depth=2)  # one pass that scores laminate without cutting through
+ROUNDS = 3  # proof rounds in one run; the last one offers no rescan
 CLEARANCE = 0.5  # mm a cut keeps from every job path
 
+# The marks' shape, which the sensor check (sensing) and the scan simulation (simulate) read.
 L_MARKS = (  # name, which frame corner, the legs' directions (x, y) from it
     ("top-right", (1, 0), (-1, 1)),
     ("bottom-left", (0, 1), (1, -1)),
 )
 SQUARE = 5.0  # mm: the card-maker's 3-mark square, filled, no outline (engine fork cd4166a)
-
-
-def square(frame: Frame) -> Polyline:
-    """The 3-mark square's printed outline, page mm: SQUARE from the inset, so 10-15 mm at a
-    10 mm inset. TB123 measures a 5 mm square; the 6 mm one the card-maker drew with a 1 mm
-    stroke until cd4166a was found and never measured (2026-10-24)."""
-    x0, y0 = frame.inset, frame.top
-    x1, y1 = x0 + SQUARE, y0 + SQUARE
-    return Polyline(((x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)))
 
 
 def crossing(frame: Frame) -> float:
@@ -51,33 +64,29 @@ def crossing(frame: Frame) -> float:
     return min(20, max(5, math.floor(frame.length))) / 2
 
 
-def pieces(length: float, cross: float) -> list[tuple[float, float]]:
-    """[0, length] less EXCLUDE either side of the crossing, as (from, to) mm from the corner."""
-    parts = ((0.0, min(length, cross - EXCLUDE)), (max(0.0, cross + EXCLUDE), length))
-    return [(a, b) for a, b in parts if b - a >= MIN_PIECE]
+@dataclass(frozen=True)
+class Target:
+    """One printed proof target: its centre (page mm, y down), its side, and its number on the
+    sheet, 1 for the first round's."""
+
+    x: float
+    y: float
+    size: float = SIZE
+    number: int = 1
+
+    def outline(self) -> Polyline:
+        """The square's edge, closed, clockwise from its top-left corner."""
+        h = self.size / 2
+        x0, y0, x1, y1 = self.x - h, self.y - h, self.x + h, self.y + h
+        return Polyline(((x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)))
+
+    def name(self, of: int) -> str:
+        return f"target {self.number} of {of} ({self.x:g}, {self.y:g} mm)"
 
 
-def cuts(frame: Frame) -> list[tuple[str, Polyline]]:
-    """(corner, cut) in page mm: the square's outline first, then each L mark's legs along their
-    centre lines in the pieces ``pieces`` leaves, the two pieces at the corner joined into one L."""
-    out = [("top-left", square(frame))]
-    for name, (i, j), (sx, sy) in L_MARKS:
-        cx = frame.inset + i * frame.width
-        cy = frame.top + j * frame.height
-
-        def at_h(d: float, cx=cx, cy=cy, sx=sx) -> Point:
-            return (cx + sx * d, cy)
-
-        def at_v(d: float, cx=cx, cy=cy, sy=sy) -> Point:
-            return (cx, cy + sy * d)
-
-        legs = pieces(frame.length, crossing(frame))  # the same along both legs
-        if legs and legs[0][0] == 0:
-            out.append((name, Polyline((at_h(legs[0][1]), (cx, cy), at_v(legs[0][1])))))
-            legs = legs[1:]
-        out += [(name, Polyline((at_h(a), at_h(b)))) for a, b in legs]
-        out += [(name, Polyline((at_v(a), at_v(b)))) for a, b in legs]
-    return out
+def targets(centres: Iterable[tuple[float, float]], size: float = SIZE) -> tuple[Target, ...]:
+    """A sheet's targets from their centres, numbered in the order given."""
+    return tuple(Target(x, y, size, n) for n, (x, y) in enumerate(centres, 1))
 
 
 def _cross(o: Point, a: Point, b: Point) -> float:
@@ -118,3 +127,12 @@ def on_job(cut: Polyline, shapes: list[Polyline]) -> bool:
             if any(distance(a, b, c, d) < CLEARANCE for a, b in segs):
                 return True
     return False
+
+
+def clear_of(sheet: Iterable[Target], shapes: list[Polyline]) -> tuple[list[Target], list[Target]]:
+    """The targets whose outline keeps clear of the job, in order, and those that would touch it."""
+    kept: list[Target] = []
+    touching: list[Target] = []
+    for t in sheet:
+        (touching if on_job(t.outline(), shapes) else kept).append(t)
+    return kept, touching
