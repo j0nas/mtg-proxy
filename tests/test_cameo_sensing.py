@@ -182,7 +182,7 @@ def test_blank_paper_that_reads_like_ink_says_the_sheet_doesnt_lie_flat_and_wher
         "blank paper inside the top-right L reads 255, like black ink (blank paper in the middle of the top "
         "margin reads 171): the sheet doesn't lie flat there."
     )
-    assert "a slight wave or a lifted corner" in stop and "flatten it and reload" in stop
+    assert "a slight wave or a lifted corner" in stop and "on a table" in stop
     both = _flat(tl=248, tr=255).stop()
     assert (
         "3 mm above the square reads 248, nearly as dark as black ink; blank paper inside the top-right L"

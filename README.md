@@ -334,8 +334,9 @@ sensor reads the light the film mirrors back, so it sees the film's angle: where
 lie flat, blank paper reads 255 like black ink, the scan misreads or finds nothing, and an ink
 reading there proves nothing. When paper beside a mark reads like ink, the run stops before
 scanning and names the mark ("blank paper inside the top-right L reads 255, like black ink (blank
-paper in the middle of the top margin reads 171): the sheet doesn't lie flat there"): press the
-sheet flat there, or unload it, flatten it and reload. Paper above 220 there is only a warning: the
+paper in the middle of the top margin reads 171): the sheet doesn't lie flat there"): unload it
+and press the sheet down onto the mat on a table. That sheet had been stuck down on a mat lying on
+a chair cushion: the waves were too slight to see, and re-laying it on a table fixed it. Paper above 220 there is only a warning: the
 scan may misread, and the check after it catches a misread. Sheets that registered read 150-210
 beside their marks; a sheet that didn't lie flat along its top edge (2026-10-26) read 255 inside
 the top-right L with 171 in the middle of the top margin. The check adds about 50 s a sheet,
@@ -363,6 +364,8 @@ rounds), `q` stops with nothing more cut. Every run writes its own
 plus the Bluetooth movement events.
 
 Placement: sheet top-left on the mat grid, aligned to the paper edge, not the laminate edge.
+Stick it down with the mat on a table or another hard, flat surface: on a soft one the mat bends
+under your hand and the sheet bonds in waves the sensor reads as ink.
 Standard 12x12" mat against the left notch, pinch rollers on the mat, lid closed, room neither
 very bright nor very dark. A sheet that creeps on a worn mat skews long jobs: use a sticky mat
 or tape the edges. If the scan fails nothing is cut. Glare from glossy laminate is a known cause
