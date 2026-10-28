@@ -324,6 +324,12 @@ class LiftingSheet(Sheet):
 
 def test_a_sheet_lifting_by_the_square_stops_after_one_scan_and_says_so():
     sheet = LiftingSheet()
-    with pytest.raises(session.CutError, match="the sheet lifts off the mat near the square"):
+    with pytest.raises(session.CutError) as e:
         run(sheet)
+    assert str(e.value) == (
+        "the sheet lifts off the mat at its top-left corner (blank paper beside the square reads 235 to its "
+        "left, 235 to its right, 235 above it and 235 below it, against 130 in the middle of the top "
+        "margin). Press it down onto the mat, the mat on a table; if it won't stay down, retack the mat or "
+        "use its other side. Reload and rerun: nothing was cut"
+    )
     assert sheet.sent.count(b"TB123") == 1 and b"D" not in sheet.sent.replace(b"TB", b"")

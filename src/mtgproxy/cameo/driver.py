@@ -238,17 +238,25 @@ def cut(
                 )
             s.setup(job.blade, job.frame, low)
             if check:
-                failed = check_marks(s, job.frame, log, flat)
+                seen: dict[tuple[str, str], int | None] = {}
+                failed = check_marks(s, job.frame, log, flat, seen=seen)
                 s.send(protocol.select_light(slot))  # for the rescan, or the next sheet's scan
                 if failed:
                     for line in failed:
                         log.say(f"check: {line}")
-                    if lifting(failed):
+                    beside = {what: level for (mark, what), level in seen.items() if mark == "top-left"}
+                    if sensing.lifts_by_square(beside, flat.reference):
+                        where = ("to its left", "to its right", "above it", "below it")
+                        *each, last = (
+                            f"{beside.get(w)} {at}"
+                            for w, at in zip(sensing.BESIDE_SQUARE, where, strict=True)
+                        )
                         raise CutError(
-                            "the paper around the square reads dark on every side while the square and "
-                            "every leg read where the scan put them: the sheet lifts off the mat near the "
-                            "square. Press that corner down onto the mat (re-tack it if it won't stay), "
-                            "reload and rerun: nothing was cut"
+                            sensing.press_down(
+                                ["top-left"],
+                                f"blank paper beside the square reads {', '.join(each)} and {last}, against "
+                                f"{flat.reference} in the middle of the top margin",
+                            )
                         )
                     if attempt + 1 < rounds:
                         log.say("the marks don't read where the scan put them: scanning again")
@@ -648,41 +656,33 @@ def read_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
 
 def check_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
     """Before the scan, where the placement found the sheet: blank paper beside every mark reads as
-    paper, or the sheet doesn't lie flat there (``sensing.Flatness``) and nothing is scanned. Paper that only just reads as paper is a warning: the scan may misread there, and the
+    paper, or the sheet lifts off the mat at that corner (``sensing.Flatness``) and nothing is
+    scanned. Paper that only just reads as paper is a warning: the scan may misread there, and the
     check after it catches that."""
     flat = read_flat(s, frame, log)
     stop = flat.stop()
     if stop:
-        raise CutError(f"{stop}: nothing scanned or cut")
+        raise CutError(stop)
     for line in flat.notes():
         log.say(f"check: {line}")
     return flat
 
 
-BESIDE_SQUARE = ("left of the square", "right of the square", "above the square", "below the square")
-
-
-def lifting(failed: list[str]) -> bool:
-    """A check that failed only on the paper beside the square, all four sides read as ink: the
-    sheet lifts there, nearer the sensor, and its reading blurs the square over its surroundings.
-    On 2026-10-26 Meren's sheet failed so three scans running, darker each time as the mat went in
-    and out (213-223, 226-249, 227-250 against paper at 110), and cut cleanly once its corner was
-    pressed down. A rescan can't help, so the cut stops and says so."""
-    return len(failed) == len(BESIDE_SQUARE) and all(
-        any(line.startswith(f"top-left, {what}: ") and "(ink)" in line for line in failed)
-        for what in BESIDE_SQUARE
-    )
-
-
 def check_marks(
-    s: Session, frame: Frame, log: SessionLog, flat: sensing.Flatness, ink_only: bool = False
+    s: Session,
+    frame: Frame,
+    log: SessionLog,
+    flat: sensing.Flatness,
+    ink_only: bool = False,
+    seen: dict[tuple[str, str], int | None] | None = None,
 ) -> list[str]:
-    """After the scan, every ``sensing.checks`` reading through the registered frame: what failed,
-    one line each, or nothing when the print agrees with the frame. A leg's centre line that isn't
-    ink is read NUDGE either side, then, still not ink, SIDE either side: it passes as a faint leg
-    when its darkest reading beats the paper on both sides by CONTRAST. Ink counts only on a mark
-    whose blank paper read as paper before the scan (``flat``): where paper reads like ink, so does
-    every spot, and an ink reading proves nothing."""
+    """After the scan, every ``sensing.checks`` reading through the registered frame (its ink only,
+    with ``ink_only``): what failed, one line each, or nothing when the print agrees with the frame;
+    each reading goes into ``seen`` by (mark, what). A leg's centre line that isn't ink is read NUDGE either side, then,
+    still not ink, SIDE either side: it passes as a faint leg when its darkest reading beats the
+    paper on both sides by CONTRAST. Ink counts only on a mark whose blank paper read as paper before
+    the scan (``flat``): where paper reads like ink, so does every spot, and an ink reading proves
+    nothing."""
     failed = []
 
     def read(c: sensing.Check) -> int | None:
@@ -691,15 +691,17 @@ def check_marks(
     for c in (c for c in sensing.checks(frame) if c.ink or not ink_only):
         paper = flat.paper_at(c.mark)  # dim ink is judged against its own paper (sensing.thresholds)
         level = read(c)
-        seen, nudged, sides = c.reads(level, paper), [], []
-        if c.ink and seen is not True and c.nudge:
+        if seen is not None:
+            seen[(c.mark, c.what)] = level
+        seen_as, nudged, sides = c.reads(level, paper), [], []
+        if c.ink and seen_as is not True and c.nudge:
             for k in (-1, 1):
                 nl = read(c.nudged(k * sensing.NUDGE))
                 nudged.append(nl)
                 if c.reads(nl, paper) is True:
-                    seen = True
+                    seen_as = True
                     break
-            if seen is not True and c.line:
+            if seen_as is not True and c.line:
                 sides = [read(c.nudged(k * sensing.SIDE)) for k in (-1, 1)]
                 peak = max((v for v in (level, *nudged) if v is not None), default=None)
                 if (
@@ -707,12 +709,12 @@ def check_marks(
                     and None not in sides
                     and all(c.reads(v, paper) is False and peak - v >= sensing.CONTRAST for v in sides)
                 ):
-                    seen = True
+                    seen_as = True
                     log.say(
                         f"check: {c.mark}, {c.what} reads faint ({peak}) against paper at {sides[0]}/{sides[1]}"
                     )
-        unproven = c.ink and seen is True and not flat.paper_beside(c.mark)
-        ok = seen is c.ink and not unproven
+        unproven = c.ink and seen_as is True and not flat.paper_beside(c.mark)
+        ok = seen_as is c.ink and not unproven
         log(
             "check",
             mark=c.mark,
@@ -733,7 +735,7 @@ def check_marks(
             got = (
                 "nothing"
                 if level is None
-                else f"{level} ({'ink' if seen else 'paper' if seen is False else 'between'})"
+                else f"{level} ({'ink' if seen_as else 'paper' if seen_as is False else 'between'})"
             )
             failed.append(f"{c.mark}, {c.what}: read {got} where {want} should be")
     return failed

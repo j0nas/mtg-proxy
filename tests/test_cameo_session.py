@@ -366,7 +366,9 @@ def test_a_sheet_that_doesnt_lie_flat_by_a_mark_is_never_scanned():
     with pytest.raises(session.CutError) as e:
         driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     assert str(e.value) == (
-        "sheet not detected as flat (blank paper inside the top-right L: 255, mid-top: 171): nothing scanned or cut"
+        "the sheet lifts off the mat at its top-right corner (blank paper inside the top-right L reads 255, "
+        "like ink; mid-top: 171). Press it down onto the mat, the mat on a table; if it won't stay down, "
+        "retack the mat or use its other side. Reload and rerun: nothing was cut"
     )
     out = sent(t).replace("\x1b\x05", "")
     assert "TB123" not in out and "TB122" not in out and out.count("TB63,4") == len(PLACED) + 4

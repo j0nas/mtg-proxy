@@ -19,8 +19,9 @@ is 1 mm wide, so its centre reads paper once the frame is off by about 0.4 mm ac
 nothing else printed comes within 3 mm of it. The 5 mm square needs its four.
 
 ``quiet`` is blank paper beside each mark, read before the scan where the placement found the
-sheet: it must read as paper, or the sheet doesn't lie flat there and an ink reading at that mark
-would prove nothing (``Flatness``).
+sheet: it must read as paper, or the sheet lifts off the mat at that corner and an ink reading
+at that mark would prove nothing (``Flatness``). ``lifts_by_square`` reads the same out of the
+check's paper readings beside the square, after the scan (``LIFT``).
 """
 
 from __future__ import annotations
@@ -200,13 +201,14 @@ def checks(frame: Frame) -> list[Check]:
 # 2026-10-26 a laminated sheet that didn't lie flat read 255, like black ink, on blank paper along
 # its top strip, inside the top-right L and around both its legs, while flat paper mid-top read 171.
 # The scan then misread or found nothing, and the check's top-right leg readings passed only because
-# everything there read 255. Paper read 150-210 beside the marks of sheets that registered, 91-132 on
-# double-sided paper; 205-243 beside the legs of one that misread on every scan.
+# everything there read 255. Paper read 95-223 beside the marks of sheets that registered and cut
+# (output/cut to 2026-10-28, tests/test_cameo_lifting.py), 91-132 on double-sided paper; 205-243
+# beside the legs of one that misread on every scan.
 #
 # These points are read where the placement found the sheet (driver.check_placement), never where
 # the frame first expected it: on 2026-10-28 two Betor runs stopped here with 255 inside the
 # bottom-left L because the sheet lay 3 mm right of the frame, which put that point on the L's own
-# leg.
+# leg. A point that reads like ink there is the sheet lifting off the mat at that corner.
 
 QUIET = 3.0  # mm from a mark to the blank paper read beside it: 2.5 mm clear of a 1 mm leg's edge
 LOW_CONTRAST = 220  # above: paper that barely stands out from ink (210 the most a sheet that registered read)
@@ -226,7 +228,7 @@ def quiet(frame: Frame) -> list[Check]:
 
 def reference(frame: Frame) -> Check:
     """Blank paper in the middle of the top margin, level with the square's quiet point: what the
-    paper reads where nothing printed is near, for the messages."""
+    paper reads where nothing printed is near, for the messages and ``lifts_by_square``."""
     return Check("top", "in the middle of the top margin", frame.page_w / 2, frame.top - QUIET, False)
 
 
@@ -238,7 +240,33 @@ def blank(level: int | None) -> bool:
 # --- a sheet lifting off the mat ------------------------------------------------------------------
 #
 # Paper that lifts off the mat comes nearer the sensor, reads darker and blurs the ink beside it
-# over it: the paper beside the square then reads like its ink (driver.locate).
+# over it. On 2026-10-26 Meren's sheet read 213-223 on all four sides of the square, 1.25 mm out
+# (the check after the scan), against 110 mid-top, darker on each rescan; pressed down, it cut. On
+# 2026-10-28 a Betor box on a worn mat read 255, 185, 213 and 202 there against 101 mid-top, and
+# rescanned three times; its --diagnose read 201-255 round the square and 96-130 elsewhere.
+#
+# The four points straddle the square by 7.5 mm across each axis, so a misread frame puts at most
+# two of them (one of each pair) on its 5 mm of ink: three or more reading LIFT above the top
+# margin's paper is the sheet, never the scan. Validated on every check in output/cut that has a
+# top-margin reading (tests/test_cameo_lifting.py): the two lifted sheets read 84-154 above it on
+# all four sides, every scan; on the sheets that registered and cut, one side at most ever read LIFT
+# above it (Orah's 74, a box outline's 78) and the third-darkest never more than 46, and
+# box.123310's misreads put one and then two sides there.
+LIFT = 70
+LIFTED_SIDES = 3
+BESIDE_SQUARE = ("left of the square", "right of the square", "above the square", "below the square")
+
+
+def lifts_by_square(beside: dict[str, int | None], reference: int | None) -> bool:
+    """The check's paper readings beside the square (``BESIDE_SQUARE``, by what each reads) say the
+    sheet lifts there: LIFTED_SIDES or more read LIFT or more above ``reference``, the top margin's
+    blank paper. No reference that reads as paper: nothing to say it by."""
+    if not blank(reference):
+        return False
+    assert reference is not None
+    return sum(
+        level is not None and level >= reference + LIFT for level in map(beside.get, BESIDE_SQUARE)
+    ) >= (LIFTED_SIDES)
 
 
 def corners(names: list[str]) -> str:
@@ -278,13 +306,14 @@ class Flatness:
         return f"mid-top: {'no reading' if self.reference is None else self.reference}"
 
     def stop(self) -> str | None:
-        """Why the scan can't be trusted, when blank paper beside a mark doesn't read as paper."""
-        dark = [
-            f"{c.what}: {'no reading' if level is None else level}"
-            for c, level in self.readings
-            if not blank(level)
-        ]
-        return f"sheet not detected as flat (blank paper {', '.join(dark)}, {self._mid()})" if dark else None
+        """Why the scan can't be trusted, when blank paper beside a mark doesn't read as paper: the
+        sheet lifts off the mat at that mark's corner (``press_down``)."""
+        dark = [(c, level) for c, level in self.readings if not blank(level)]
+        if not dark:
+            return None
+        (c0, l0), *rest = [(c.what, "nothing" if level is None else str(level)) for c, level in dark]
+        why = " and ".join([f"blank paper {c0} reads {l0}", *(f"{c} {lv}" for c, lv in rest)])
+        return press_down([c.mark for c, _ in dark], f"{why}, like ink; {self._mid()}")
 
     def notes(self) -> list[str]:
         """Blank paper beside a mark that reads paper, but only just: the scan may misread there."""
