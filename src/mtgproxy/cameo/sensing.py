@@ -195,6 +195,22 @@ def checks(frame: Frame) -> list[Check]:
     return out
 
 
+def legs(frame: Frame, near: tuple[float, float] | None = None) -> list[Check]:
+    """The two leg readings of ``checks`` on the L whose corner lies nearest ``near`` (page mm;
+    None: the top-right L): one across x and one across y, which together see the whole frame move."""
+
+    def far(m: tuple) -> float:
+        (i, j) = m[1]
+        return (
+            0.0
+            if near is None
+            else math.dist((frame.inset + i * frame.width, frame.top + j * frame.height), near)
+        )
+
+    name = min(L_MARKS, key=far)[0]  # ties (no ``near``) keep L_MARKS' order: the top-right first
+    return [c for c in checks(frame) if c.line and c.mark == name]
+
+
 # --- does the sheet lie flat? Blank paper beside each mark, read before the scan ------------------
 #
 # On glossy film the sensor reads the light the film mirrors back, so it sees the film's angle: on

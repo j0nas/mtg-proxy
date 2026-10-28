@@ -210,16 +210,16 @@ def checked(readings):
     return machine({b"TB60": b"    0\x03", b"TB63": readings})
 
 
-def test_a_frame_the_print_agrees_with_is_cut_after_nine_readings():
+def test_a_frame_the_print_agrees_with_is_cut_after_nine_readings_and_nothing_is_read_once_it_is_cut():
     t = checked([*PLACED, *FLAT, *MARKS_OK])  # the placement first, then the blank paper
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
-    assert out.count("TB63,4") == len(PLACED) + 4 + 9 + 5 and out.count("TB123") == 1  # + ink after the cut
+    assert out.count("TB63,4") == len(PLACED) + 4 + 9 and out.count("TB123") == 1
     assert out.index("TB60") < out.index("TB63,4") < out.index("TB123")  # slot, placement, scan
     assert "\\-35,-35\x03" in out  # the area reaches the paper points 1.25 mm left of and above the square
     first_cut = out.index("D")
     assert out[:first_cut].count("TB63,4") == len(PLACED) + 4 + 9  # every reading before the first cut
-    assert out[first_cut:].count("TB63,4") == 5  # then the marks' ink, to see the machine kept its place
+    assert "TB63,4" not in out[first_cut:]  # the cut done, nothing is left to guard
 
 
 def test_a_misread_rescans_and_cuts_once_the_marks_agree():
@@ -280,7 +280,7 @@ def test_the_scan_and_the_next_sheet_get_the_scans_own_light_back_after_every_re
     assert before < out.index("TB61,0", before) < out.index("TB123")  # TB63 leaves its light on
     last = out.rindex("TB63,4", 0, out.index("D"))  # the check's last reading
     assert last < out.index("TB61,0", last) < out.index("D")
-    assert out.rindex("TB63,4") < out.rindex("TB61,0")  # and after the readings that follow the cut
+    assert out.rindex("TB63,4") < out.rindex("TB61,0")  # and for the next sheet's scan
 
 
 def test_two_failed_three_mark_scans_fall_back_to_two_marks_and_cut_when_the_check_agrees():
@@ -543,16 +543,17 @@ def test_a_square_that_reads_ink_is_never_read_turned():
     assert moves(before)[0] == (210, 210) and (210, 4110) not in moves(before)
 
 
-def test_a_machine_that_loses_its_place_cutting_says_so_before_the_sheet_is_unloaded():
-    # Every reading agrees until the cut; after it, a leg's centre line reads paper.
-    t = checked([*PLACED, *FLAT, *MARKS_OK, INK, INK, PAPER])
-    with pytest.raises(session.CutError, match="the cut is done, but the marks no longer read where"):
-        driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
-    assert "D" in sent(t).replace("TB", "")
+def test_once_the_job_is_cut_nothing_more_is_read():
+    # Until 2026-10-28 the marks' ink was read again after the cut (about 27 s): it never failed in
+    # output/cut, and with the cut done it guarded nothing. A paper reading there no longer matters.
+    t = checked([*PLACED, *FLAT, *MARKS_OK, PAPER])
+    driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
+    out = sent(t)
+    assert "D" in out.replace("TB", "") and "TB63,4" not in out[out.rindex("D") :]
 
 
 def test_a_machine_that_loses_its_place_on_the_proof_cut_never_cuts_the_job():
-    t = checked([*PLACED, *FLAT, *MARKS_OK, PAPER])  # after the proof cut the square reads paper
+    t = checked([*PLACED, *FLAT, *MARKS_OK, PAPER])  # after the proof cut a leg reads paper
     asked = []
     targeted = replace(job(), frame=replace(FRAME, targets=proof.targets([(100, 80), (120, 80)])))
     with pytest.raises(session.CutError, match="after the proof cut the marks no longer read"):
@@ -690,12 +691,12 @@ def test_a_scored_job_reads_the_marks_after_the_blade_change_before_it_cuts():
     )
     scores_at, outline_at = out.index(fold), out.index(square)  # the fold's first move, then the square's
     between = out[scores_at:outline_at]
-    assert between.count("TB63,4") == 5 and "TF5,1" in between  # the cut blade back, then the marks
+    assert between.count("TB63,4") == 2 and "TF5,1" in between  # the cut blade back, then one L's legs
     assert "check: the marks still read where the scan put them after the scores" in said
 
 
 def test_a_machine_that_loses_its_place_changing_blades_never_cuts_the_outline():
-    t = checked([*PLACED, *FLAT, *MARKS_OK, PAPER])  # after the scores the square reads paper
+    t = checked([*PLACED, *FLAT, *MARKS_OK, PAPER])  # after the scores a leg reads paper
     with pytest.raises(session.CutError, match="after the scores the marks no longer read"):
         driver.cut(scored_job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
@@ -747,12 +748,11 @@ def test_a_proofed_scored_job_proves_then_scores_then_cuts_reading_the_marks_aft
         "blade at depth 2",  # proof.BLADE
         "proof cut",
         "blade at depth 5",  # the job's own blade again
-        "5 readings",  # held: the marks' ink after the proof cut
+        "2 readings",  # held: the legs of the L nearest the proof cut
         "park",  # then the operator is asked
         "blade at depth 3",  # the score blade
         "scores",
         "blade at depth 5",
-        "5 readings",  # kept_place
+        "2 readings",  # kept_place: the legs of the L nearest where the scores ended
         "cuts",
-        "5 readings",  # held after the job
     ]

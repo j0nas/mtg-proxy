@@ -270,24 +270,23 @@ def cut(
                 log.say(
                     f"check: every mark reads where the scan put it ({len(sensing.checks(job.frame))} readings)"
                 )
-            verify = partial(held, s, job.frame, log, flat, slot) if check else None
             if confirm is None:
                 break
             done += 1
             rescan = attempt + 1 < rounds and done < proofs
             target = targets[done - 1]
+            end = target.cuts()[-1].points[-1]  # where the proof cut leaves the blade
+            verify = partial(held, s, job.frame, log, flat, slot, end) if check else None
             if prove(s, job, log, confirm, target, done, rescan, verify, low, proof_blade, on_target):
                 break
-        s.cut_job(job, low, partial(kept_place, s, job.frame, log, flat, slot) if check else None)
-        if check:
-            lost = held(s, job.frame, log, flat, slot)
-            if lost:
-                raise CutError(
-                    f"the cut is done, but the marks no longer read where the scan put them ({'; '.join(lost)}): "
-                    "the machine may have lost its place while cutting. Compare the cut with the print "
-                    "before unloading"
-                )
-            log.say("check: the marks still read where the scan put them after the cut")
+        # No reading after the job's own cut: by then there is nothing left to guard. Until
+        # 2026-10-28 every checked job read five marks' ink once it was cut (about 27 s); in the 13
+        # cuts in output/cut it never failed, and a further pass rescans the marks before it cuts
+        # (cli's "one more pass").
+        between = None
+        if check and job.scores:
+            between = partial(kept_place, s, job.frame, log, flat, slot, job.scores[-1].points[-1])
+        s.cut_job(job, low, between)
         return Result(firmware, start, extent)
     finally:
         wrap_up(s, t, log)
@@ -307,25 +306,44 @@ def proof_targets(job: Job, log: SessionLog) -> list[proof.Target]:
     return kept
 
 
-def held(s: Session, frame: Frame, log: SessionLog, flat: sensing.Flatness, slot: int) -> list[str]:
-    """After the blade has cut: is the ink of every mark still where the frame puts it? What failed,
-    one line each. Only the ink readings: a cut groove beside a mark reads dark, so it can fake ink
-    but never paper, and a frame that slipped reads paper on a leg's centre line.
+def held(
+    s: Session,
+    frame: Frame,
+    log: SessionLog,
+    flat: sensing.Flatness,
+    slot: int,
+    near: tuple[float, float] | None = None,
+) -> list[str]:
+    """After the blade has cut: are the legs of the L nearest ``near`` (page mm, where the blade
+    stopped) still ink where the frame puts them? What failed, one line each. Only ink: a cut groove
+    beside a mark reads dark, so it can fake ink but never paper, and a frame that slipped reads
+    paper on a leg's centre line.
 
     On 2026-10-26 a second pass on the Aminatou box (force 30, speed 10, depth 8, the depth changed
-    from 6) cut 2.5 mm left of the first everywhere, after every reading before it had agreed with the
-    marks: the machine lost its place once the blade was cutting. Read after the proof cuts, this stops
-    the job before it is cut; read after the job, it says so before the sheet is unloaded."""
-    failed = check_marks(s, frame, log, flat, ink_only=True)
+    from 6) cut 2.5 mm left of the first everywhere, after every reading before it had agreed with
+    the marks: the carriage slipped once, before or at its first cut, and the whole outline moved
+    with it. A slip moves the whole frame, so one vertical leg sees it in x and one horizontal leg in
+    y, to half a millimetre; until 2026-10-28 this read the square and both Ls (five ink readings,
+    about 28 s), and after the 5 proof cuts and 7 scorings in output/cut it never failed. The
+    square's middle sees only a slip of 2.5 mm or more, and the far L the same slip again."""
+    failed = check_marks(s, frame, log, flat, checks=sensing.legs(frame, near))
     s.send(protocol.select_light(slot))
     return failed
 
 
-def kept_place(s: Session, frame: Frame, log: SessionLog, flat: sensing.Flatness, slot: int) -> None:
-    """Between a job's scores and its cuts: the marks' ink still where the frame puts it (``held``),
-    or nothing more is cut. The blade changes depth there (the score's to the cut's), and on
-    2026-10-26 the one run that changed depth mid-session cut 2.5 mm off."""
-    lost = held(s, frame, log, flat, slot)
+def kept_place(
+    s: Session,
+    frame: Frame,
+    log: SessionLog,
+    flat: sensing.Flatness,
+    slot: int,
+    near: tuple[float, float] | None = None,
+) -> None:
+    """Between a job's scores and its cuts: the marks' ink still where the frame puts it (``held``,
+    the L nearest ``near``, where the scores ended), or nothing more is cut. The blade changes
+    depth there (the score's to the cut's), and on 2026-10-26 the one run that changed depth
+    mid-session cut 2.5 mm off."""
+    lost = held(s, frame, log, flat, slot, near)
     if lost:
         raise CutError(
             f"after the scores the marks no longer read where the scan put them ({'; '.join(lost)}): the "
@@ -673,12 +691,12 @@ def check_marks(
     frame: Frame,
     log: SessionLog,
     flat: sensing.Flatness,
-    ink_only: bool = False,
+    checks: list[sensing.Check] | None = None,
     seen: dict[tuple[str, str], int | None] | None = None,
 ) -> list[str]:
-    """After the scan, every ``sensing.checks`` reading through the registered frame (its ink only,
-    with ``ink_only``): what failed, one line each, or nothing when the print agrees with the frame;
-    each reading goes into ``seen`` by (mark, what). A leg's centre line that isn't ink is read NUDGE either side, then,
+    """After the scan, every ``sensing.checks`` reading (or ``checks``) through the registered frame:
+    what failed, one line each, or nothing when the print agrees with the frame; each reading goes
+    into ``seen`` by (mark, what). A leg's centre line that isn't ink is read NUDGE either side, then,
     still not ink, SIDE either side: it passes as a faint leg when its darkest reading beats the
     paper on both sides by CONTRAST. Ink counts only on a mark whose blank paper read as paper before
     the scan (``flat``): where paper reads like ink, so does every spot, and an ink reading proves
@@ -688,7 +706,7 @@ def check_marks(
     def read(c: sensing.Check) -> int | None:
         return s.sense(*sensing.registered(frame, c), SENSE_SLOT)[0]
 
-    for c in (c for c in sensing.checks(frame) if c.ink or not ink_only):
+    for c in sensing.checks(frame) if checks is None else checks:
         paper = flat.paper_at(c.mark)  # dim ink is judged against its own paper (sensing.thresholds)
         level = read(c)
         if seen is not None:
