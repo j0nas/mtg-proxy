@@ -99,10 +99,10 @@ def after_cut(sheet: int, proof: bool = False) -> str:
     if proof:
         choices.append(Choice("next sheet, proof cuts first", "next-proof"))
     return _select(
-        f"Sheet {sheet} done. Lift a corner:",
+        f"Sheet {sheet} done:",
         [
             *choices,
-            Choice("one more pass: not quite through (rescans, cuts once, no proof)", "pass"),
+            Choice("one more pass on this sheet (rescans, cuts once, no proof)", "pass"),
             Choice("done", "done"),
         ],
     )

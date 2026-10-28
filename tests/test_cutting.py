@@ -468,7 +468,7 @@ def test_next_sheet_repeats_the_job_and_one_more_pass_cuts_once(monkeypatch, tmp
     monkeypatch.chdir(tmp_path)
     asked = menu(monkeypatch, "next", "pass", "next", "done")
     jobs, _ = cut_jobs(monkeypatch, "--preset", "laminate")  # any flag skips the first menu
-    assert [m for m, _ in asked] == [f"Sheet {n} done. Lift a corner:" for n in (1, 2, 2, 3)]
+    assert [m for m, _ in asked] == [f"Sheet {n} done:" for n in (1, 2, 2, 3)]
     assert jobs[0] == jobs[1] == jobs[3] and (jobs[0].passes, jobs[0].proof) == (3, False)
     assert (jobs[2].passes, jobs[2].proof, jobs[2].force) == (1, False, 20)
     assert jobs[0].scores and not jobs[2].scores  # the extra pass leaves the scored folds alone
@@ -490,7 +490,7 @@ def test_the_menu_flows_into_whats_next(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     asked = menu(monkeypatch, "default", "done")
     jobs, _ = cut_jobs(monkeypatch)
-    assert len(jobs) == 1 and asked[1][0] == "Sheet 1 done. Lift a corner:"
+    assert len(jobs) == 1 and asked[1][0] == "Sheet 1 done:"
 
 
 def test_dry_runs_and_probes_dont_ask_whats_next(monkeypatch, tmp_path):
@@ -523,7 +523,7 @@ def test_reloading_the_mat_starts_the_next_sheet_without_a_proof(monkeypatch, tm
     watch(monkeypatch, True, False)  # sheet 1: reloaded; sheet 2: Enter
     jobs, output = cut_jobs(monkeypatch, "--proof")
     assert [j.proof for j in jobs] == [True, False] and jobs[1].passes == 3
-    assert [m for m, _ in asked] == ["Sheet 2 done. Lift a corner:"]  # no menu after sheet 1
+    assert [m for m, _ in asked] == ["Sheet 2 done:"]  # no menu after sheet 1
     assert "sheet 2 starts in 1 s" in output
 
 
@@ -532,7 +532,7 @@ def test_enter_during_the_countdown_holds_the_next_sheet(monkeypatch, tmp_path):
     asked = menu(monkeypatch, "done")
     watch(monkeypatch, True, enter=True)
     jobs, _ = cut_jobs(monkeypatch, "--proof")
-    assert len(jobs) == 1 and [m for m, _ in asked] == ["Sheet 1 done. Lift a corner:"]
+    assert len(jobs) == 1 and [m for m, _ in asked] == ["Sheet 1 done:"]
 
 
 def test_a_mat_that_cant_be_watched_falls_back_to_the_menu(monkeypatch, tmp_path):
@@ -543,10 +543,10 @@ def test_a_mat_that_cant_be_watched_falls_back_to_the_menu(monkeypatch, tmp_path
     assert len(jobs) == 1 and len(asked) == 1 and "choose from the menu" in output
 
 
-def test_from_a_script_one_cut_and_the_passes_hint(monkeypatch, tmp_path):
+def test_from_a_script_one_cut_and_no_reminder_to_lift_a_corner(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     jobs, output = cut_jobs(monkeypatch)
-    assert len(jobs) == 1 and "Rerun with --passes 1" in output
+    assert len(jobs) == 1 and "--passes 1" not in output and "through" not in output
 
 
 def failing_then_cutting(monkeypatch, fails: int) -> list[cutting.CutOptions]:
@@ -569,7 +569,7 @@ def test_a_failed_job_can_be_retried(monkeypatch, tmp_path):
     result = CliRunner().invoke(cli.app, ["cut", "--proof"])
     assert result.exit_code == 0, result.output
     assert "registration marks not found" in result.output
-    assert [m.split(".")[0] for m, _ in asked] == [
+    assert [m.split(".")[0].rstrip(":") for m, _ in asked] == [
         "Sheet 1 failed",
         "Sheet 1 done",
         "Sheet 2 done",

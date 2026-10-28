@@ -346,7 +346,7 @@ def run_cut(o: CutOptions) -> int:
         transcript.write_bytes(bytes(t.sent))
         print(f"cut-proxies: dry run OK — transcript {transcript}, session log {log_path}")
         return 0
-    print(f"cut-proxies: done — {what} cut. Don't eject yet: lift a corner and check it's through.")
+    print(f"cut-proxies: done — {what} cut.")
     if job.scores:
         print("cut-proxies: its folds are scored: another pass wants --no-scores, or they are scored again.")
     return 0

@@ -564,7 +564,6 @@ def cut(
         if rc or o.dry_run or o.probe or o.sense or o.diagnose:
             break
         if not _at_terminal():
-            typer.echo("cut-proxies: not through? Rerun with --passes 1 (it rescans the marks).")
             break
         then = _await_next_sheet(o, sheet)
         if then == "menu":
@@ -588,8 +587,8 @@ def _await_next_sheet(o: cutting.CutOptions, sheet: int) -> str:
     """Watch the mat after a sheet: "next" once it went out and came back and the countdown ran
     out, "menu" when the operator pressed Enter or the mat can't be watched."""
     typer.echo(
-        f"cut-proxies: sheet {sheet} done. Lift a corner. Through? Unload, load the next sheet and it "
-        "starts by itself. Enter: menu (one more pass, done). Ctrl-C: stop."
+        f"cut-proxies: sheet {sheet} done. Unload, load the next sheet and it starts by itself. "
+        "Enter: menu (one more pass, done). Ctrl-C: stop."
     )
     try:
         if not cutting.wait_for_next_sheet(o, _enter_within):
