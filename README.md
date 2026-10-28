@@ -301,7 +301,7 @@ cut-proxies --no-check     # skips the sensor check of the marks before and afte
 cut-proxies --diagnose     # before any scan: where each mark sits and how it reads; cuts nothing
 cut-proxies --proof        # traces a printed proof target after the scan; y cuts, r rescans, q stops
 cut-proxies --layout 4x2   # a 4x2 sheet without its run.json (a plain sheet is 3x3)
-cut-proxies --paper-at 3   # the paper's corner 3 mm right of and below the grid's (see Placement)
+cut-proxies --paper-at 3   # expect the paper's corner 3 mm right of and below the grid's (see Placement)
 cut-proxies --svg job.svg --layout 4x2 --reg-inset 5   # any SVG the size of that layout's page
 ```
 
@@ -338,15 +338,14 @@ driver waits for as long as it stays paused, and pressing pause again carries on
 order holds within each pass, so a part whose outline goes through in an early pass is loose for
 the later passes of the slits and holes inside it.
 
-Don't eject after a cut: lift a corner. At a terminal,
-cut-proxies then watches the mat. Unload it, load the next sheet, and five seconds after the mat
+After a cut at a terminal, cut-proxies watches the mat. Unload it, load the next sheet, and five seconds after the mat
 is back in, the same job starts on it, counting sheets as it goes. It only starts after it has
 seen the mat leave, and Enter during the countdown holds it. A batch started with proof cuts has
 them on its first sheet only.
 
 Enter while it watches brings up the menu instead: "next sheet" cuts a sheet that's already
 loaded, "next sheet, proof cuts first" asks for proof cuts again, "one more pass" rescans the
-marks and cuts this sheet once more, for a cut that isn't through, and "done" stops. Ctrl-C stops
+marks and cuts this sheet once more, and "done" stops. Ctrl-C stops
 at any point. When a job fails (marks not found, proof stopped, the connection lost), it offers to
 try the same job again. From a script, a failure exits, and `--passes 1` is the extra pass
 (`--passes 1 --no-scores` for a sheet with scored folds).
@@ -386,7 +385,8 @@ Registration:
   first time (2026-10-25). On plain A4, starts on or past the square never found it (`1`). A 4x2
   sheet registered once from (8, 4), 2 mm above its square (2026-10-24); (12, 4) follows the 3x3
   sheets and hasn't been tried. `--scan-start TOP,LEFT` (repeatable) replaces the start with
-  exactly those; `--paper-at` moves only the default start (see Placement). Coordinates are from
+  exactly those; `--paper-at` moves only the default start, and the check moves any start to where it
+  finds the square (see Placement). Coordinates are from
   the job's own origin, which the job's first command (`TG1`) moves 16.5 mm in once per mat load:
   anything that measures positions on the machine must send it first.
 - `--reg-inset MM` puts the expected marks MM from every paper edge instead of the layout's
@@ -401,56 +401,87 @@ The machine reports no mark positions (FQ5 reads -64 after every successful scan
 tilted; its firmware keeps them to itself), so a misread can't be caught from the replies. Its
 sensor can be read, though: TB63 reports how much light the spot under the head needs, 255 over
 black ink and 151-242 over laminated paper. So every cut reads the marks itself (`cameo/sensing.py`):
-the square's middle before the scan, which must be ink or the sheet isn't where its marks should
-be, and after it 9 points through the frame the scan made: ink in the middle of the square and on
-each L leg's centre line, paper just outside the square. A frame off by about half a millimetre
-fails. A leg that never reads full ink still passes when it is a narrow line darker than the paper
-on both sides by 40 (a double-sided sheet's leg peaked at 239 over paper at 91-132); the edge of a
-shadow is dark on one side only. Paper just outside the square that reads dark on all four sides,
-with the square and every leg where the scan put them, is a sheet lifting off the mat there: the
-run stops at once and says to press that corner down (rescans can't help; Meren's sheet,
-2026-10-26).
+before the scan, where the square lies, and after it 9 points through the frame the scan made: ink
+in the middle of the square and on each L leg's centre line, paper just outside the square. A frame
+off by about half a millimetre fails. A leg that never reads full ink still passes when it is a
+narrow line darker than the paper on both sides by 40 (a double-sided sheet's leg peaked at 239
+over paper at 91-132); the edge of a shadow is dark on one side only.
 
-When the square's middle reads no ink before the scan, the head hunts for it on a 3 mm grid from 3
-mm up and left of where it should be to 6 mm down and right, nearest first, and measures its edges
-from the first reading that lands on it (`driver.hunt`, then `measure`): a sheet 3 mm off is found
-in about a minute, where rows a millimetre apart took over four.
+A sheet lies a few millimetres from where it was laid every time (laid against the mat's edge,
+laminated, fed in), so before the scan the sensor finds the square and everything after follows
+where it lies, without a word on the terminal: the session log has it ("square found … right and
+… up of where it should be"). It reads the square's middle where the sheet is expected
+(`--paper-at`, below) and blank paper 6 mm right of it. Ink there, and it halves its way to the
+square's right edge (three readings) and bottom edge (four), which pins the square to 0.4 mm across
+and 0.2 mm down, about 25 s.
+The right and bottom edges because only blank paper lies past them on every sheet; past the top and
+left lies the paper's edge, which a pouch reads as dark as ink. The scan then starts 3.5 mm into the
+square wherever it is: the deck box's start has about a millimetre to spare. Until 2026-10-28 a
+middle that read ink passed the sheet where it was expected, up to 2.5 mm off: two Betor runs
+stopped "not flat" because the point inside the bottom-left L landed on the L's own leg, and three
+deck boxes 1.5-2.3 mm right had every scan start off the paper and miss (43 s each).
+
+When the square's middle reads no ink, the head hunts for it on a 3 mm grid out to 4.5 mm either
+way, nearest first, and measures its top and left edges from the first reading that lands on it
+(`driver.hunt`, then `measure`): a sheet 3 mm off is found in about a minute. One reading past the
+right of each hit first skips ink that isn't the square (the pouch's band along the paper's top
+edge, paper lifting off the mat) for one reading instead of the measure's eleven.
 
 A landscape sheet (4x2, the deck box) comes out of the printer portrait with its square top-right,
-and goes on the mat landscape with the square top-left. When the square's middle reads no ink on a
+and goes on the mat landscape with the square top-left. When the square is found nowhere on a
 landscape sheet, the head reads once more where the square lies on a sheet loaded as printed, and
 ink there stops the run with "the sheet lies portrait, as it leaves the printer: turn it a quarter
 anticlockwise so the square is top-left, reload and rerun".
 
-Before the scan it also reads blank paper beside each mark: 3 mm above the square, inside each L's
-elbow 3 mm from its corner, and the middle of the top margin for comparison. On glossy film the
-sensor reads the light the film mirrors back, so it sees the film's angle: where the sheet doesn't
-lie flat, blank paper reads 255 like black ink, the scan misreads or finds nothing, and an ink
-reading there proves nothing. When paper beside a mark reads like ink, the run stops before
-scanning: "sheet not detected as flat (blank paper inside the top-right L: 255, mid-top: 171)".
-Unload it and press the sheet down onto the mat on a table. That sheet had been stuck down on a mat lying on
-a chair cushion: the waves were too slight to see, and re-laying it on a table fixed it. Paper above 220 there is only a warning: the
-scan may misread, and the check after it catches a misread. Sheets that registered read 150-210
-beside their marks; a sheet that didn't lie flat along its top edge (2026-10-26) read 255 inside
-the top-right L with 171 in the middle of the top margin. The check adds about 50 s a sheet,
-and each reading stores a light level in the machine's slot 4, which the scan never uses (it checks that first, and gives the scan its
-own light back afterwards: TB63 leaves the light where its ramp stopped, and TB123 starts with the
-light as it finds it).
+Then it reads blank paper beside each mark, where the square says the sheet lies: 3 mm above the
+square, inside each L's elbow 3 mm from its corner, and the middle of the top margin for comparison.
+On glossy film the sensor reads the light the film mirrors back, so it sees the film's angle: where
+the sheet lifts off the mat, blank paper reads 255 like black ink, the scan misreads or finds
+nothing, and an ink reading there proves nothing. When paper beside a mark reads like ink, the run
+stops before scanning and names the corner: "the sheet lifts off the mat at its top-right corner
+(blank paper inside the top-right L reads 255, like ink; mid-top: 171). Press it down onto the mat,
+the mat on a table; if it won't stay down, retack the mat or use its other side." One such sheet
+had been stuck down on a mat lying on a chair cushion: the waves were too slight to see, and
+re-laying it on a table fixed it. Paper above 220 there is only a warning: the scan may misread,
+and the check after it catches a misread. Sheets that registered read 95-223 beside their marks.
+Each reading stores a light level in the machine's slot 4, which the scan never uses (it checks
+that first, and gives the scan its own light back afterwards: TB63 leaves the light where its ramp
+stopped, and TB123 starts with the light as it finds it).
+
+A sheet lifting off the mat is named as soon as the readings show it, before any rescan. Before the
+scan, paper right of or below the square that reads like its ink stops the run. After it, when the
+check fails and three or four of its paper readings beside the square read 70 or more above the
+top margin's paper, the run stops with the same advice for the top-left corner. Meren's sheet
+(2026-10-26) read 213-223 on all four sides against 110, and a Betor box on a worn mat (2026-10-28)
+255, 185, 213 and 202 against 101; each rescanned three times, darker each time, until it was
+pressed down. On every sheet that registered and cut, one side at most ever read 70 above, and a
+misread frame can put at most two of the four points on the square's ink:
+`tests/test_cameo_lifting.py` holds the rule against every check in the session logs.
 
 A scan that finds nothing, or one the check disagrees with, is tried again, then once more as
 TB122, the firmware's two-mark scan: the square and the bottom-left L only. The check still reads
 the top-right L, so a two-mark frame is cut only when that L reads where it puts it. On
 2026-10-26 a double-sided sheet whose back showed through behind its top-right L misread on every
 TB123 and registered first time as TB122. After the first scan that finds nothing, the sensor
-measures the square's top and left edges (about 45 s) and the next scan starts from where it lies:
-the check before the scan passes a square whose middle reads ink, up to 2.5 mm off, and the scan
-needs its start on white paper left of the square and through its lower half. On 2026-10-26 a
-laminated sheet 1.5 mm further right than `--paper-at` said missed three scans; measured, it
-registered first time. When all three disagree, nothing is cut, and
-`cut-proxies --diagnose` shows why: before any scan it reads across the square and each leg in the
-loaded mat's frame (about 4 minutes), and says where the sheet sits, how it is turned and
-stretched, which marks never read as full ink or sit on unusually bright paper, and what the blank
-paper beside each mark reads, in the words a cut would stop or warn with.
+measures the square's right and bottom edges again, to 0.1 mm, and the next scan starts from where
+it lies now. When all three disagree, nothing is cut, and `cut-proxies --diagnose` shows why: before
+any scan it reads across the square and each leg in the loaded mat's frame (about 4 minutes), and
+says where the sheet sits, how it is turned and stretched, which marks never read as full ink or
+sit on unusually bright paper, and what the blank paper beside each mark reads, in the words a cut
+would stop or warn with.
+
+After the blade has cut, the marks' ink is read again where nothing more can be lost by it: the
+legs of the nearest L after a proof cut (before anyone is asked) and after a job's scored lines
+(before the outline), two readings, about 10 s. On 2026-10-26 a run at force 30, speed 10 and depth
+8 cut its whole outline 2.5 mm left: the carriage slipped, and a slip moves the whole frame, which
+one leg across each axis sees. Nothing is read once the job is cut: until 2026-10-28 five readings
+there (27 s) never failed in 13 cuts, and another pass rescans the marks first.
+
+What the checks cost, on the 220 gsm deck box of 2026-10-28 (betor-box.20261028-094916, 374 s):
+before the scan about 45 s (it took 64 s there, the sheet 3.2 mm right of where it was expected and
+hunted for; a sheet found at once took 17 s before 2026-10-28 and then scanned from where it was
+expected), after the scan 35 s, after the scores about 10 s (28), after the cut nothing (27): about
+90 s of checking where there were 154, the cut about 310 s.
 
 A misread can also be caught by eye. With `--proof` the blade traces the edge of one proof target
 and crosses it with an X corner to corner after the scan, in one light pass at force 10, speed 5, depth 2 (`--proof-blade FORCE,SPEED,DEPTH`
@@ -490,15 +521,20 @@ very bright nor very dark. A sheet that creeps on a worn mat skews long jobs: us
 or tape the edges. If the scan fails nothing is cut. Glare from glossy laminate is a known cause
 of failed scans; glossy sheets cut fine here, but matte is the safer choice if scans fail.
 
+`--paper-at RIGHT,DOWN` says where the paper's top-left corner is expected, in mm right of and
+below the grid's corner (negative: left or above; one number for both). Every reading before the
+scan starts there, `--diagnose`'s included, and so does the default scan start; the check then finds
+the sheet within a few millimetres of it and follows it. Without `--paper-at`, a laminated sheet is
+expected where the cut logs found them: 5 mm right of and 1.75 mm above the grid's corner
+(`cutting.LAMINATED_AT`). The six proxy sheets of 2026-10-28, the first printed through the PC, lay
+4.2-6.1 mm right and 0.7-3.4 mm above it, and with the paper expected on the grid's corner each one
+was hunted for (50-160 s). `--preset paper` expects plain paper on the grid's corner. After the scan
+everything is measured from the top-left mark, so the cut itself is the same.
+
 A laminated sheet can also lie with its whole pouch on the mat's tacky area, the pouch's corner on
 the grid's: a pouch margin left on the untacky border lifts, and the scan misreads the marks beside
-it. The paper then sits a few millimetres right of and below the grid's corner, and
-`--paper-at RIGHT,DOWN` says how far, in mm, right first and then down (`--paper-at 3` for 3 mm
-both ways). Every reading before the scan moves by that much, `--diagnose`'s included, and so does
-the default scan start; a `--scan-start` is used as given. Left at 0 for such a sheet, the
-placement reading lands beside the square and the run stops before the scan. After the scan
-everything is measured from the top-left mark, so the cut itself is the same. The deck box lays
-its sheets this way, with the paper about 3 mm in.
+it. The deck box lays its sheets this way and passes its own `--paper-at` (formeriet's `job.ts`):
+where its cut logs found them, 5.5 mm right and 2.75 mm down.
 
 Finish: cut cards can delaminate at the edges. Run them through the laminator again. Cloudy
 lamination is too cold (run 80 µm pouches on the 5 mil setting); wavy cards are too hot.
