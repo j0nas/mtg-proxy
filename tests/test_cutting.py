@@ -98,18 +98,32 @@ def test_the_paper_preset_and_explicit_flags_override_it(monkeypatch, tmp_path):
 
 def test_paper_at_is_right_then_down_or_one_number_for_both(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    assert cut_options(monkeypatch).paper_at == (0.0, 0.0)
     assert cut_options(monkeypatch, "--paper-at", "3,2").paper_at == (3.0, 2.0)
     assert cut_options(monkeypatch, "--paper-at", "3").paper_at == (3.0, 3.0)
     assert cut_options(monkeypatch, "--paper-at", "2.5, 0").paper_at == (2.5, 0.0)
+    assert cut_options(monkeypatch, "--paper-at", "5,-1.75").paper_at == (5.0, -1.75)  # above the grid's
 
 
-@pytest.mark.parametrize("value", ["3,2,1", "3,", "", "x", "3,y", "-1", "3,-2", "nan", "inf,3"])
-def test_paper_at_refuses_anything_but_one_or_two_lengths_of_0_or_more(monkeypatch, tmp_path, value):
+def test_a_laminated_sheet_is_expected_where_the_cut_logs_found_them_and_plain_paper_on_the_grid(
+    monkeypatch, tmp_path
+):
+    # The six proxy sheets of 2026-10-28, where the placement found each (paper corner, mm from the
+    # grid's): with the frame expecting them at (0, 0) every one was hunted for, 50-160 s each.
+    found = [(5.61, -0.86), (4.17, -3.39), (6.08, -2.45), (4.17, -0.7), (4.8, -1.17), (5.27, -1.02)]
+    right, down = cutting.LAMINATED_AT
+    assert all(abs(x - right) <= 1.5 and abs(y - down) <= 1.7 for x, y in found)  # its middle reads ink
+    monkeypatch.chdir(tmp_path)
+    assert cut_options(monkeypatch).paper_at == cutting.LAMINATED_AT
+    assert cut_options(monkeypatch, "--preset", "paper").paper_at == (0.0, 0.0)
+    assert cut_options(monkeypatch, "--preset", "paper", "--paper-at", "3").paper_at == (3.0, 3.0)
+
+
+@pytest.mark.parametrize("value", ["3,2,1", "3,", "", "x", "3,y", "-21", "3,25", "nan", "inf,3"])
+def test_paper_at_refuses_anything_but_one_or_two_lengths_within_reach(monkeypatch, tmp_path, value):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cutting, "run_cut", lambda o: pytest.fail(f"cut with --paper-at {value!r}"))
     result = CliRunner().invoke(cli.app, ["cut", f"--paper-at={value}"])
-    want = f"--paper-at wants RIGHT,DOWN in mm, 0 or more (one number for both), got {value!r}"
+    want = f"--paper-at wants RIGHT,DOWN in mm, each within 20 of 0 (one number for both), got {value!r}"
     assert result.exit_code == 1 and want in result.output
 
 

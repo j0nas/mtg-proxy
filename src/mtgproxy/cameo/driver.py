@@ -468,9 +468,9 @@ def _off(d: float, plus: str, minus: str) -> str:
 
 
 HUNT_STEP = 3.0  # mm between the hunt's readings: under the square's 5 mm, so one lands on it
-# mm the square's middle may lie from where the frame expects it, either way: Jonas lays a sheet
-# within about 3 mm of where it is expected, any way (the deck box's --paper-at is where its cut
-# logs found its sheets). A grid over it finds any
+# mm the square's middle may lie from where the frame expects it, either way. The frame now
+# expects the sheet where the cut logs found such sheets lying (cutting.LAMINATED_AT, the deck box's
+# --paper-at), and Jonas lays one within about 3 mm of that, any way. A grid over it finds any
 # square whose middle lies within HUNT_STEP / 2 + 1 mm past either end. Until 2026-10-28 it ran 3
 # mm up and left to 6 mm down and right, for a frame that expected a pouch's paper 3 mm in, where
 # every deck box lay further right.

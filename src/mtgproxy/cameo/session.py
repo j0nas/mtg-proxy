@@ -46,8 +46,9 @@ class Frame:
     length: float = 9.4  # leg length
     thickness: float = 1.0
     inset_y: float | None = None  # from the top and bottom edges, when it differs from inset (3x3)
-    # (right, down) mm from the mat grid's corner to the paper's top-left corner (--paper-at). About
-    # 3 mm both ways for a laminated sheet laid with its whole pouch on the tack (the deck box).
+    # (right, down) mm from the mat grid's corner to the paper's top-left corner (--paper-at): where
+    # the sheet is expected, and once the placement found it, where it lies. A laminated sheet sits
+    # where the cut logs put such sheets (cutting.LAMINATED_AT; the deck box passes its own).
     paper_at: tuple[float, float] = (0.0, 0.0)
     targets: tuple[Target, ...] = ()
 
@@ -68,7 +69,8 @@ class Frame:
         if self.paper_at == (0, 0):
             return "on the mat grid's"
         right, down = self.paper_at
-        return f"{right:g} mm right and {down:g} mm down of the mat grid's"
+        across = f"{abs(right):g} mm {'right' if right >= 0 else 'left'}"
+        return f"{across} and {abs(down):g} mm {'down' if down >= 0 else 'up'} of the mat grid's"
 
 
 @dataclass

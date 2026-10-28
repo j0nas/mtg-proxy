@@ -42,18 +42,31 @@ def parse_start(value: str) -> tuple[float, float]:
     return top, left
 
 
+PAPER_AT_REACH = 20.0  # mm either way from the grid's corner a --paper-at may put the paper
+
+
 def parse_paper_at(value: str) -> tuple[float, float]:
-    """--paper-at RIGHT,DOWN (x first, unlike --scan-start), or one number for both."""
+    """--paper-at RIGHT,DOWN (x first, unlike --scan-start), or one number for both; negative is
+    left of or above the grid's corner, where the 2026-10-28 proxy sheets lay (cutting.LAMINATED_AT)."""
     try:
         parts = [float(v) for v in value.split(",")]
     except ValueError:
         parts = []
     if len(parts) == 1:
         parts *= 2
-    if len(parts) != 2 or not all(math.isfinite(v) and v >= 0 for v in parts):
-        fail(f"--paper-at wants RIGHT,DOWN in mm, 0 or more (one number for both), got {value!r}")
+    if len(parts) != 2 or not all(math.isfinite(v) and abs(v) <= PAPER_AT_REACH for v in parts):
+        fail(
+            f"--paper-at wants RIGHT,DOWN in mm, each within {PAPER_AT_REACH:g} of 0 (one number for both), "
+            f"got {value!r}"
+        )
     right, down = parts
     return right, down
+
+
+def default_paper_at(preset: str) -> tuple[float, float]:
+    """Where the paper is expected without --paper-at: a laminated sheet where the cut logs found
+    them (cutting.LAMINATED_AT), plain paper on the grid's corner."""
+    return cutting.LAMINATED_AT if preset == "laminate" else (0.0, 0.0)
 
 
 def parse_target(value: str) -> tuple[float, float]:
@@ -460,16 +473,17 @@ def cut(
         ),
     ] = None,
     paper_at: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--paper-at",
             metavar="RIGHT,DOWN",
-            help="where the paper's top-left corner sits: RIGHT mm right of the mat grid's corner, "
-            "then DOWN mm below it (x first, the other way round from --scan-start's TOP,LEFT); one "
-            "number sets both. Moves the default scan start and every reading before the scan. About "
-            "3 for a laminated sheet laid with its pouch's corner on the grid's",
+            help="where the paper's top-left corner is expected: RIGHT mm right of the mat grid's corner, "
+            "then DOWN mm below it (x first, the other way round from --scan-start's TOP,LEFT; negative "
+            "is left or up); one number sets both. The sensor finds the sheet within a few mm of it "
+            "either way and reads it there. Default: where laminated proxy sheets lie (5,-1.75), "
+            "0,0 with --preset paper",
         ),
-    ] = "0,0",
+    ] = None,
 ) -> None:
     if scan:
         raise typer.Exit(cutting.ble_scan())
@@ -528,7 +542,7 @@ def cut(
         proof_targets=[parse_target(v) for v in proof_target] if proof_target else None,
         proof_target_size=proof_target_size, proof_from=proof_from,
         proof_blade=parse_blade(proof_blade) if proof_blade else None,
-        paper_at=parse_paper_at(paper_at),
+        paper_at=parse_paper_at(paper_at) if paper_at is not None else default_paper_at(preset),
     )  # fmt: skip
     try:
         cutting.check(o)  # before the loop: a retry can't fix the options

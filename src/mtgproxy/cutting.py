@@ -37,6 +37,16 @@ PRESETS = {
     "paper": Preset(force=10, speed=5, depth=1, passes=1),
 }
 
+# Where a laminated proxy sheet's paper corner lies on the loaded mat, (right, down) mm from the
+# grid's corner, unless --paper-at says: the middle of where the cut logs found them. On 2026-10-28,
+# the first proxy sheets printed through the PC, all six 3x3 sheets lay 4.2-6.1 mm right of and
+# 0.7-3.4 mm above the grid's corner, and the placement hunted for every one, 50-160 s each; within
+# 1.1 mm right or left and 1.7 mm up or down of this, their squares' middles read ink where it looks
+# first (cameo.driver.check_placement: 2.5 mm either way). Sheets printed from the Mac (until
+# 2026-10-26) lay at the grid's corner, 5 mm off this: the hunt finds those. Plain paper
+# (--preset paper) lies on the grid's corner. The deck box passes its own (formeriet job.ts).
+LAMINATED_AT = (5.0, -1.75)
+
 # The blade for an SVG's scored lines (cameo.geometry.SCORE): one pass before the cut, meant to mark
 # a laminated sheet's top film along each fold and leave the sheet whole. A guess, untested on the
 # machine: Jonas's 220 gsm deck box in an 80 µm pouch cuts through at force 33, depth 6, 3 passes,
@@ -88,7 +98,7 @@ class CutOptions:
     paper_at: tuple[float, float] = (
         0.0,
         0.0,
-    )  # (right, down) mm: the paper's corner from the grid's
+    )  # (right, down) mm: the paper's corner from the grid's (cli: LAMINATED_AT)
     # The SVG's scored lines (cameo.geometry.SCORE), cut first in one pass; False leaves them out.
     scores: bool = True
     score_force: int = SCORE_FORCE
