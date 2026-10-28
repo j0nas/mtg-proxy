@@ -326,14 +326,15 @@ def test_a_3x3_dry_run_scans_its_own_frame(tmp_path, capsys):
 
 
 @needs_engine
-def test_a_dry_run_says_where_the_paper_lies_only_when_its_off_the_grids_corner(tmp_path, capsys):
+def test_a_dry_run_moves_the_scan_start_with_the_paper_and_never_says_where_the_paper_lies(tmp_path, capsys):
     o = cutting.CutOptions(
         layout="4x2", reg_inset=5, dry_run=True, out_dir=tmp_path, label="box", paper_at=(3.0, 3.0)
     )
     assert cutting.run_cut(o) == 0
     out = capsys.readouterr().out
-    assert "cut-proxies: the paper's top-left corner 3 mm right and 3 mm down of the mat grid's\n" in out
-    assert "scan starts at (11.5, 4) mm, 3.5 mm into the square" in out
+    assert (
+        "scan starts at (11.5, 4) mm, 3.5 mm into the square" in out and "paper's top-left corner" not in out
+    )
     assert "TB123,4000,5740,230,80" in (tmp_path / "box.cmds").read_bytes().decode().split("\x03")
     assert cutting.run_cut(replace(o, paper_at=(0.0, 0.0))) == 0
     out = capsys.readouterr().out
@@ -554,7 +555,11 @@ def test_a_failed_job_can_be_retried(monkeypatch, tmp_path):
     result = CliRunner().invoke(cli.app, ["cut", "--proof"])
     assert result.exit_code == 0, result.output
     assert "registration marks not found" in result.output
-    assert [m.split(".")[0] for m, _ in asked] == ["Sheet 1 failed", "Sheet 1 done", "Sheet 2 done"]
+    assert [m.split(".")[0] for m, _ in asked] == [
+        "Sheet 1 failed",
+        "Sheet 1 done",
+        "Sheet 2 done",
+    ]
     assert jobs[0] == jobs[1] and jobs[1].proof  # the retry proofs again: no sheet has passed yet
     assert replace(jobs[2], proof=True) == jobs[0]
 

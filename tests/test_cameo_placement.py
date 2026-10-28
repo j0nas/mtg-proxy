@@ -100,20 +100,41 @@ def test_dim_ink_on_dark_paper_is_ink_against_that_paper():
     assert c.reads(242) is False and c.reads(242, 130) is True and c.reads(150, 130) is False
 
 
+def said(record) -> list[str]:
+    return [f["message"] for e, f in record if e == "say"]
+
+
+# How close the placement puts the square before the scan, across and down: three and four halvings
+# of 6 mm (0.38 and 0.19 mm) and the moves' 0.05 mm steps.
+ACROSS, DOWN = 0.4, 0.25
+
+
+def near(got, want) -> bool:
+    """(x, y) within ACROSS and DOWN of ``want``."""
+    return abs(got[0] - want[0]) <= ACROSS and abs(got[1] - want[1]) <= DOWN
+
+
 def test_a_sheet_placed_right_with_dim_ink_is_cut_without_a_search():
     sheet = Sheet()
     record = run(sheet)
     events = [e for e, _ in record]
-    assert "search" not in events and "placement paper" in events
+    assert "hunt" not in events and "placement paper" in events
     assert sheet.sent.count(b"TB123") == 1 and b"D" in sheet.sent.replace(b"TB", b"")
-    assert any(e == "say" and "every mark reads where the scan put it" in f["message"] for e, f in record)
+    assert any("every mark reads where the scan put it" in m for m in said(record))
 
 
-@pytest.mark.parametrize("off", [(2.0, 1.5), (-1.5, 0.0), (0.5, -2.0)])
-def test_a_sheet_within_the_square_of_where_it_should_be_needs_no_search(off):
-    sheet = Sheet(at=(3.0 + off[0], 3.0 + off[1]))
+@pytest.mark.parametrize("off", [(2.0, 1.5), (-1.5, 0.0), (0.5, -2.0), (-2.2, 2.2), (2.3, -0.7)])
+def test_a_sheet_within_the_square_of_where_it_should_be_is_read_where_it_lies_without_a_search(off):
+    # 2026-10-28: a middle that read ink passed the frame unmoved, so the readings after it landed
+    # up to 2.5 mm off; two Betor runs read the bottom-left L's own leg as its blank paper and stopped.
+    at = (3.0 + off[0], 3.0 + off[1])
+    sheet = Sheet(at=at)
     record = run(sheet)
-    assert not any(e == "search" for e, _ in record) and cut_once(sheet)
+    (located,) = [f for e, f in record if e == "located"]
+    assert near(located["paper_at"], at)
+    assert not any(e == "hunt" for e, _ in record)
+    assert all(f["level"] == PAPER for e, f in record if e == "quiet")  # blank paper, where it lies
+    assert cut_once(sheet)
 
 
 @pytest.mark.parametrize("off", [(3.0, 3.0), (-2.0, 4.0), (4.0, -1.0), (6.0, 2.0), (2.0, 5.0), (5.0, 5.0)])
@@ -122,10 +143,19 @@ def test_a_sheet_lying_further_off_is_found_and_read_where_it_lies(off):
     sheet = Sheet(at=at)
     record = run(sheet)
     (located,) = [f for e, f in record if e == "located"]
-    assert located["paper_at"] == pytest.approx(at, abs=0.75)  # a reading every millimetre
+    assert located["paper_at"] == pytest.approx(at, abs=0.2)  # the hunt's measure: five halvings
     assert all(f["level"] == PAPER for e, f in record if e == "quiet")  # blank paper, where it lies
-    assert any(e == "say" and m["message"].startswith("square found") for e, m in record)
     assert cut_once(sheet)
+
+
+@pytest.mark.parametrize("at", [(3.0, 3.0), (5.0, 2.0), (7.0, 6.0)])
+def test_where_the_sheet_was_found_goes_to_the_log_not_the_terminal(at):
+    # Jonas, 2026-10-28: a sheet lies up to about 3 mm from where it was laid against the mat's
+    # edge, laminated and fed in; that is no news.
+    record = run(Sheet(at=at))
+    (note,) = [f["msg"] for e, f in record if e == "note" and f["msg"].startswith("square found")]
+    assert note.endswith("of the mat grid's")
+    assert not any("square found" in m or "paper's corner" in m for m in said(record))
 
 
 def test_the_scan_starts_where_the_square_was_found():
@@ -177,21 +207,27 @@ def test_a_middle_that_reads_paper_is_looked_for_not_passed_on_a_try_at_its_edge
 
 class FussySheet(Sheet):
     """A sheet whose scan finds the marks only as the firmware does: its first search row has to run
-    through the square at least 2 mm below its top edge and 1.5 mm above its bottom one, starting on
-    paper left of it. ``finds`` False: no scan ever finds them."""
+    through the square at least 2 mm below its top edge and 1 mm above its bottom one, the pass that
+    measures the square, starting BACKUP above that row, must start 1 mm inside the paper (the deck
+    box's 5 mm square, 5 mm from the paper's edge, leaves a window a millimetre high: docs/someday.md),
+    and the search starts on paper left of the square. ``finds`` False: no scan ever finds them.
+    ``slips`` (right, down) mm moves the sheet as the first scan feeds the mat in and out."""
 
-    def __init__(self, at=(3.0, 3.0), finds=True, **kw):
+    def __init__(self, at=(3.0, 3.0), finds=True, slips=(0.0, 0.0), **kw):
         super().__init__(at=at, **kw)
-        self.finds = finds
+        self.finds, self.slips = finds, slips
         self.answers[b"TB122"] = [b"    0\x03"]
 
     def write(self, data: bytes) -> None:
         ok = None
         for cmd in data.split(b"\x03"):
             if cmd.startswith((b"TB123", b"TB122")):
+                if self.slips != (0.0, 0.0):
+                    self.at, self.slips = (self.at[0] + self.slips[0], self.at[1] + self.slips[1]), (0.0, 0.0)
                 y, x = (int(v) / 20 for v in cmd.decode().split(",")[3:5])
                 top, left = self.at[1] + FRAME.top, self.at[0] + FRAME.inset
-                ok = self.finds and top + 2 <= y <= top + 3.5 and self.at[0] < x <= left - 1
+                row = max(top + 2, self.at[1] + driver.BACKUP + 1) <= y <= top + 4
+                ok = self.finds and row and self.at[0] < x <= left - 1
                 self.answers[cmd[:5]] = [b"    0\x03" if ok else b"    1\x03"]
         super().write(data)
         if ok is not None:
@@ -206,22 +242,43 @@ def test_measure_pins_the_square_to_a_fraction_of_a_millimetre():
         assert got == pytest.approx(off, abs=0.2)
 
 
+def scan_starts(record) -> list[list[float]]:
+    """Each scan's start (top, left) mm, from its message."""
+    out = []
+    for m in said(record):
+        if m.startswith("marks found") or m.startswith("scan "):
+            at = m.split("scan start ")[1] if "scan start" in m else m.split(" from (")[1]
+            out.append([float(v) for v in at.split(")")[0].removesuffix(" mm").split(", ")])
+    return out
+
+
+@pytest.mark.parametrize("at", [(3.0, 3.0), (4.5, 3.0), (4.6, 3.23), (5.27, 1.2), (1.0, 4.7), (6.2, 2.9)])
+def test_the_first_scan_starts_where_the_square_lies(at):
+    # 2026-10-26 and 27: three deck boxes 1.5-2.3 mm right of --paper-at 3 passed the placement
+    # reading unmoved and every scan missed until the square was measured: mech-test (4.48, 3.23),
+    # lorehold (5.27, 1.2), xenagos (4.48, 2.14). The scan window here is the firmware's.
+    sheet = FussySheet(at=at)
+    record = run(sheet)
+    assert sheet.sent.count(b"TB123") == 1 and cut_once(sheet)
+    top, left = driver.default_start(replace(FRAME, paper_at=at))
+    ((got_top, got_left),) = scan_starts(record)
+    assert near((got_left, got_top), (left, top))
+
+
 def test_a_scan_that_finds_nothing_measures_the_square_and_scans_from_where_it_is():
-    # 2026-10-26: a laminated plain sheet 1.5 mm right of --paper-at 3 (here 2 mm right and down).
-    # Its square's middle read ink, so nothing was looked for, and every scan replied 1.
-    sheet = FussySheet(at=(5.0, 5.0))
+    # The sheet moves a millimetre as the first scan feeds the mat in and out: that scan starts
+    # where it lay, misses, and the square measured again puts the next one where it lies now.
+    sheet = FussySheet(at=(5.0, 3.0), slips=(0.0, 1.0))
     record = run(sheet)
     (measured,) = [f for e, f in record if e == "measured"]
-    assert measured["paper_at"] == pytest.approx((5.0, 5.0), abs=0.2)
-    top, left = driver.default_start(job().frame)
-    scans = [
-        m["message"] for e, m in record if e == "say" and m["message"].startswith(("scan 1/1", "marks found"))
-    ]
-    assert scans[0].startswith(f"scan 1/1 from ({top:g}, {left:g}) mm: not found")
-    found_at = [float(v) for v in scans[1].split("scan start ")[1].removesuffix(" mm)").split(", ")]
-    assert found_at == pytest.approx([top + 2, left + 2], abs=0.2)
+    assert measured["paper_at"] == pytest.approx((5.0, 4.0), abs=0.15)  # five halvings
+    first, second = scan_starts(record)
+    top, left = driver.default_start(replace(FRAME, paper_at=(5.0, 3.0)))
+    assert near((first[1], first[0]), (left, top))
+    assert second == pytest.approx(list(driver.default_start(replace(FRAME, paper_at=(5.0, 4.0)))), abs=0.15)
     assert sheet.sent.count(b"TB123") == 2
     assert b"D" in sheet.sent.replace(b"TB", b"")
+    assert not any("measured" in m for m in said(record))  # the log has it, not the terminal
 
 
 def test_a_square_that_measures_where_it_should_be_is_scanned_again_as_before():
@@ -235,7 +292,7 @@ def test_a_square_that_measures_where_it_should_be_is_scanned_again_as_before():
 def test_a_sheet_where_the_frame_says_scans_once():
     sheet = FussySheet()
     record = run(sheet)
-    assert not any(e in ("measure", "measured") for e, _ in record) and cut_once(sheet)
+    assert not any(e in ("hunt", "measure", "measured") for e, _ in record) and cut_once(sheet)
 
 
 def test_a_sheet_three_millimetres_right_is_found_in_a_few_readings():

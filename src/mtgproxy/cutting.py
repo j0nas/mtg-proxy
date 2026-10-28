@@ -85,7 +85,10 @@ class CutOptions:
     proof_from: int = 0
     proof_blade: tuple[int, int, int] | None = None  # (force, speed, depth); None = cameo.proof.BLADE
     scan_starts: list[tuple[float, float]] | None = None  # (top, left) mm; None = the driver's defaults
-    paper_at: tuple[float, float] = (0.0, 0.0)  # (right, down) mm: the paper's corner from the grid's
+    paper_at: tuple[float, float] = (
+        0.0,
+        0.0,
+    )  # (right, down) mm: the paper's corner from the grid's
     # The SVG's scored lines (cameo.geometry.SCORE), cut first in one pass; False leaves them out.
     scores: bool = True
     score_force: int = SCORE_FORCE
@@ -267,8 +270,6 @@ def run_cut(o: CutOptions) -> int:
         uncut = len(geometry.load_kinds(svg)[1])
         if uncut:
             print(f"cut-proxies: {uncut} scored line(s) left uncut (--no-scores)")
-    if frame.paper_at != (0, 0):
-        print(f"cut-proxies: the paper's top-left corner {frame.placed()}")
     proof_blade = proof_blade_of(o)
     if o.proof and targets:
         b, first = proof_blade, targets[0]
@@ -279,7 +280,8 @@ def run_cut(o: CutOptions) -> int:
         )
     top, left = starts[0]
     more = f"; a miss tries {len(starts) - 1} more around it" if len(starts) > 1 else ""
-    print(f"cut-proxies: scan starts at ({top:g}, {left:g}) mm, {origin}{more}")
+    follows = ", moved to where the sensor finds the square" if o.check and not o.dry_run else ""
+    print(f"cut-proxies: scan starts at ({top:g}, {left:g}) mm, {origin}{follows}{more}")
     # One log per run: a batch of sheets used to overwrite it, losing the runs before a bad one.
     log_path = o.out_dir / f"{name}.{time.strftime('%Y%m%d-%H%M%S')}.session.jsonl"
     log = session.SessionLog(log_path, echo=lambda m: print(f"cut-proxies: {m}"))

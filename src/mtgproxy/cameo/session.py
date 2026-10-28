@@ -166,6 +166,11 @@ class SessionLog:
         if self.echo:
             self.echo(msg)
 
+    def note(self, msg: str) -> None:
+        """A note for the log alone, not the terminal: where the sheet was found, which varies by a
+        few millimetres every time it is laid and is no news to the operator."""
+        self("note", msg=msg)
+
     def close(self) -> None:
         if self.fh:
             self.fh.close()

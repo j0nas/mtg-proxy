@@ -140,13 +140,13 @@ def test_the_verdict_names_placement_turn_and_size():
     assert len(lines) == 5  # sharp, full-ink marks on ordinary paper: nothing to warn about
 
 
-def test_a_sheet_well_off_its_marks_is_told_where_the_papers_corner_goes():
+def test_a_sheet_well_off_its_marks_is_told_where_it_sits_and_nothing_more():
+    # A cut finds the square where it lies (driver.check_placement): no advice to move the sheet.
     rows = sensing.square_rows(FRAME)
     seen = [sensing.Seen(r, (), 255, 170, (170, 170), d) for r, d in zip(rows, (2.0, 0.0), strict=True)]
-    advice = "  that is more than the scan likes: put the paper's corner "
-    assert sensing.verdict(seen, FRAME)[1] == advice + "(not the laminate's) on the grid's"
-    laid = replace(FRAME, paper_at=(3.0, 3.0))  # a laminated sheet with its pouch's corner on the grid's
-    assert sensing.verdict(seen, laid)[1] == advice + "3 mm right and 3 mm down of the mat grid's"
+    for frame in (FRAME, replace(FRAME, paper_at=(3.0, 3.0))):
+        lines = sensing.verdict(seen, frame)
+        assert lines == ["the sheet sits 2.00 mm right and 0.00 mm down of where its marks should be"]
 
 
 def test_a_leg_that_barely_stands_out_is_called_faint_not_missing():

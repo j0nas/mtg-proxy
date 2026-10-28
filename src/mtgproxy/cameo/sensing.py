@@ -18,8 +18,9 @@ square. A frame off by about half a millimetre or more fails it. A leg needs no 
 is 1 mm wide, so its centre reads paper once the frame is off by about 0.4 mm across it, and
 nothing else printed comes within 3 mm of it. The 5 mm square needs its four.
 
-``quiet`` is blank paper beside each mark, read before the scan: it must read as paper, or the
-sheet doesn't lie flat there and an ink reading at that mark would prove nothing (``Flatness``).
+``quiet`` is blank paper beside each mark, read before the scan where the placement found the
+sheet: it must read as paper, or the sheet doesn't lie flat there and an ink reading at that mark
+would prove nothing (``Flatness``).
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ LEG_STEP = 0.25  # mm between readings across a 1 mm L leg
 LEG_REACH = 2.0  # mm read either side of its centre line
 
 INK = 250  # at or above: ink. Ink read 255 on 2026-10-25 (253 where the spot was half on it)
+FULL = 255  # what TB63 gives over black ink, the most it gives (238-255 over the deck box's dim ink)
 PAPER = 245  # at or below: paper. Paper read 151-242, 242 only half a mm from a leg
 OUTSIDE_SQUARE = 1.25  # mm from the square's edge to its paper checks (it read 0.5 mm wide each side)
 NUDGE = 0.25  # mm either side of a leg's centre line, read when the centre itself isn't ink
@@ -147,6 +149,17 @@ def placement(frame: Frame) -> Check:
     )
 
 
+BESIDE = 6.0  # mm right of the square's middle: past its right edge however far off it lies, if ink is under its middle
+
+
+def beside(frame: Frame) -> Check:
+    """Blank paper BESIDE right of the square's middle, read before the scan with ``placement``: when
+    that middle reads ink, the square ends at least 1 mm short of it, and nothing else is printed
+    there on any sheet (``driver.locate``). The paper the readings near the square are judged against."""
+    c = placement(frame)
+    return replace(c, what="blank paper right of the square", x=c.x + BESIDE, ink=False, nudge=None)
+
+
 def turned(frame: Frame) -> Check | None:
     """Where ``placement`` lies on a landscape sheet loaded as it leaves the printer, mm from that
     sheet's top-left corner: print-sheet turns a landscape page a quarter clockwise onto portrait
@@ -189,6 +202,11 @@ def checks(frame: Frame) -> list[Check]:
 # The scan then misread or found nothing, and the check's top-right leg readings passed only because
 # everything there read 255. Paper read 150-210 beside the marks of sheets that registered, 91-132 on
 # double-sided paper; 205-243 beside the legs of one that misread on every scan.
+#
+# These points are read where the placement found the sheet (driver.check_placement), never where
+# the frame first expected it: on 2026-10-28 two Betor runs stopped here with 255 inside the
+# bottom-left L because the sheet lay 3 mm right of the frame, which put that point on the L's own
+# leg.
 
 QUIET = 3.0  # mm from a mark to the blank paper read beside it: 2.5 mm clear of a 1 mm leg's edge
 LOW_CONTRAST = 220  # above: paper that barely stands out from ink (210 the most a sheet that registered read)
@@ -215,6 +233,28 @@ def reference(frame: Frame) -> Check:
 def blank(level: int | None) -> bool:
     """Reads as paper."""
     return level is not None and level <= PAPER
+
+
+# --- a sheet lifting off the mat ------------------------------------------------------------------
+#
+# Paper that lifts off the mat comes nearer the sensor, reads darker and blurs the ink beside it
+# over it: the paper beside the square then reads like its ink (driver.locate).
+
+
+def corners(names: list[str]) -> str:
+    """'top-left corner', 'top-right and bottom-left corners'."""
+    return f"{' and '.join(names)} corner{'s' if len(names) > 1 else ''}"
+
+
+def press_down(names: list[str], why: str) -> str:
+    """The stop for a sheet that lifts off the mat at the corners ``names``, ``why`` the readings
+    that say so. A rescan can't help: on 2026-10-26 and 10-28 every rescan read darker."""
+    it = "it" if len(names) == 1 else "them"
+    return (
+        f"the sheet lifts off the mat at its {corners(names)} ({why}). Press {it} down onto the mat, "
+        "the mat on a table; if it won't stay down, retack the mat or use its other side. Reload and "
+        "rerun: nothing was cut"
+    )
 
 
 @dataclass(frozen=True)
@@ -355,7 +395,8 @@ def see(row: Row, levels: list[int | None]) -> Seen:
 def verdict(seen: list[Seen], frame: Frame, flat: Flatness | None = None) -> list[str]:
     """Plain lines: where the sheet sits, how it is turned and stretched, and which marks will be
     hard for the scan; with ``flat``, whether blank paper beside the marks reads as paper, in the
-    words a cut stops or warns with."""
+    words a cut stops or warns with. Where it sits is news, not advice: a cut finds the square up to
+    2.5 mm off without a search, and further off by its hunt (``driver.check_placement``)."""
     by = {(s.row.mark, s.row.what): s for s in seen}
     out = []
     if flat is not None:
@@ -373,9 +414,6 @@ def verdict(seen: list[Seen], frame: Frame, flat: Flatness | None = None) -> lis
         out.append(
             f"the sheet sits {abs(sx):.2f} mm {side} and {abs(sy):.2f} mm {down} of where its marks should be"
         )
-        if max(abs(sx), abs(sy)) > 1.5:
-            where = "(not the laminate's) on the grid's" if frame.paper_at == (0, 0) else frame.placed()
-            out.append(f"  that is more than the scan likes: put the paper's corner {where}")
     blx, try_ = shift("bottom-left L", "vertical leg"), shift("top-right L", "horizontal leg")
 
     def turned(rad: float, by: str) -> str:  # page y runs down: turned clockwise moves the right side down

@@ -149,14 +149,16 @@ def cut(
 ) -> Result:
     """The whole job. Once anything moved the machine, it always ends back at the origin.
 
-    With ``check``, the sensor reads the square before the scan (is the sheet where its marks
-    should be?), blank paper beside each mark (does the sheet lie flat there? ``check_flat``) and
-    every mark after it (does the print agree with the frame the scan made?). A
-    scan that finds nothing or disagrees with the print is tried again, then once more as TB122,
-    which skips the top-right L (SCANS); after the first that finds nothing, the sensor measures the
-    square (``measure``) and the next scan starts from where it lies; when none agrees, the job stops before anything is cut
-    (``sensing``). With ``confirm``, each proof round traces the next of the frame's proof targets
-    with ``proof_blade`` between the scan and the cut (``prove``), and nothing else is cut until the
+    With ``check``, the sensor finds the square before the scan and every reading and the scan's
+    start follow where it lies (``check_placement``), reads blank paper beside each mark (does the
+    sheet lie on the mat there? ``check_flat``) and every mark after the scan (does the print agree
+    with the frame the scan made?). A scan that finds nothing or disagrees with the print is tried
+    again, then once more as TB122, which skips the top-right L (SCANS); after the first that finds
+    nothing, the sensor measures the square again (``locate``) and the next scan starts from where it
+    lies; when none agrees, the job stops before anything is cut (``sensing``). A sheet lifting off
+    the mat stops the job as soon as the readings show it, with no rescan (``sensing.press_down``).
+    With ``confirm``, each proof round traces the next of the frame's proof targets with
+    ``proof_blade`` between the scan and the cut (``prove``), and nothing else is cut until the
     operator says so; ``on_target`` hears of each target as it is cut. A rescan returns to the
     origin and repeats a fresh run's start."""
     s = Session(t, log)
@@ -178,7 +180,6 @@ def cut(
         rounds = max(proofs, CHECK_ROUNDS if check else 1)
         done = 0  # proof rounds cut
         remeasure = measured = False  # after a scan that found nothing, once
-        square_paper: int | None = None  # blank paper above the square, from the check before the scan
         for attempt in range(rounds):
             if attempt:
                 s.finish()
@@ -188,38 +189,32 @@ def cut(
             if check and attempt == 0:
                 slot = check_light_slot(s, log)
             s.prepare()
-            if remeasure:
-                remeasure = False
-                off = measure(s, job.frame, log, square_paper)
-                if off is None:
-                    log.say("the square's edges don't measure: scanning from the same start")
-                elif max(abs(off[0]), abs(off[1])) < MEASURE_MOVE:
-                    log.say("the square measures where the frame puts it")
-                else:
-                    dx, dy = off
-                    right, down = job.frame.paper_at
-                    job = replace(
-                        job, frame=replace(job.frame, paper_at=(round(right + dx, 2), round(down + dy, 2)))
-                    )
-                    starts = [(top + dy, left + dx) for top, left in starts]
-                    log("measured", dx=dx, dy=dy, paper_at=job.frame.paper_at)
-                    log.say(
-                        f"square measured {_off(dx, 'right', 'left')} and {_off(dy, 'down', 'up')} of where "
-                        f"the frame put it: the paper's corner is {job.frame.placed()}; scanning from there"
-                    )
-            if check and attempt == 0:
-                try:
+            try:
+                if remeasure:
+                    remeasure = False
+                    off = locate(s, job.frame, log, halvings=REMEASURE_HALVINGS)
+                    if off is None:
+                        log.note("the square's middle doesn't read ink: scanning from the same start")
+                    elif max(abs(off[0]), abs(off[1])) < MEASURE_MOVE:
+                        log.note("the square measures where the frame puts it")
+                    else:
+                        before = job.frame
+                        job = replace(job, frame=moved(job.frame, off))
+                        starts = follow(starts, before, job.frame)
+                        log("measured", dx=off[0], dy=off[1], paper_at=job.frame.paper_at)
+                        log.note(
+                            f"square measured {_off(off[0], 'right', 'left')} and {_off(off[1], 'down', 'up')} "
+                            f"of where the frame put it: the paper's corner is {job.frame.placed()}; scanning "
+                            "from there"
+                        )
+                if check and attempt == 0:
                     placed = check_placement(s, job.frame, log)
-                    if placed is not job.frame:  # the square sits off: so does the whole sheet
-                        dx = placed.paper_at[0] - job.frame.paper_at[0]
-                        dy = placed.paper_at[1] - job.frame.paper_at[1]
-                        starts = [(top + dy, left + dx) for top, left in starts]
-                        job = replace(job, frame=placed)
+                    starts = follow(starts, job.frame, placed)  # the square sits off: so does the sheet
+                    job = replace(job, frame=placed)
                     flat = check_flat(s, job.frame, log)
-                    square_paper = flat.paper_at("top-left")
-                except CutError:
-                    s.send(protocol.select_light(slot))  # the next job's scan, checked or not, gets its light
-                    raise
+            except CutError:
+                s.send(protocol.select_light(slot))  # the next job's scan, checked or not, gets its light
+                raise
             if check:  # the readings leave the light wherever their ramp stopped: back to the scan's level
                 s.send(protocol.select_light(slot))
             marks = SCANS[min(attempt, len(SCANS) - 1)] if check else 3
@@ -357,37 +352,66 @@ def read_loaded(s: Session, frame: Frame, pt: sensing.Point | sensing.Check) -> 
     return s.sense(*frame.on_mat(pt.y, pt.x), SENSE_SLOT)
 
 
+def moved(frame: Frame, off: tuple[float, float]) -> Frame:
+    """``frame`` with the paper ``off`` (right, down) mm further on the mat."""
+    right, down = frame.paper_at
+    return replace(frame, paper_at=(round(right + off[0], 2), round(down + off[1], 2)))
+
+
+def follow(starts: list[tuple[float, float]], before: Frame, after: Frame) -> list[tuple[float, float]]:
+    """The scan starts (top, left) moved as the paper moved from ``before`` to ``after``."""
+    dx = after.paper_at[0] - before.paper_at[0]
+    dy = after.paper_at[1] - before.paper_at[1]
+    return starts if (dx, dy) == (0, 0) else [(top + dy, left + dx) for top, left in starts]
+
+
 def check_placement(s: Session, frame: Frame, log: SessionLog) -> Frame:
-    """Before the scan: is the square where the frame says? Ink under its middle passes, and so does
-    dim ink, DIM_INK above the blank paper over it (``sensing.thresholds``), there or NUDGE either
-    side. Otherwise the head hunts for the square (``hunt``): found within HUNT_RANGE, every later
-    reading and the scan's start follow it there, in the frame this returns. Found nowhere, a
-    landscape sheet is read once more where the square lies when the sheet is loaded portrait, as it
-    leaves the printer (``sensing.turned``): ink there says so. Either way nothing is scanned.
+    """Before the scan: where is the square? Its middle where the frame expects it, then blank paper
+    right of it (``sensing.beside``), which the readings near the square are judged against
+    (``sensing.thresholds``). Ink there, or dim ink DIM_INK above that paper, there or NUDGE either
+    side, and the square's right and bottom edges say where it lies (``locate``); no ink, and the
+    head hunts for it (``hunt``). Either way every later reading and the scan's start follow it
+    there, in the frame this returns, and only the session log says how far it moved: a sheet lies a
+    few millimetres from where it was laid every time, laid against the mat's edge, laminated and fed
+    in, and that is no news to the operator. Found nowhere, a landscape sheet is read once more where
+    the square lies when the sheet is loaded portrait, as it leaves the printer (``sensing.turned``):
+    ink there says so. Either way nothing is scanned.
+
+    Until 2026-10-28 a middle that read ink passed the frame unmoved, and so did a sheet up to 2.5
+    mm off: the readings after it and the scan then assumed the frame. On 2026-10-28 two Betor runs
+    stopped before the scan with 255 inside the bottom-left L, its own leg with the sheet 3 mm right;
+    on 2026-10-26 and 27 three deck boxes 1.5-2.3 mm right of the frame had their scans start on the
+    pouch's dark band past the paper's edge, and miss, 43 s each, until the square was measured.
 
     On 2026-10-26 a laminated deck box went on the mat as it came out of the printer, its square
     top-right. The millimetres in the stop are where the head read, on the mat."""
     c = sensing.placement(frame)
     level, reply = read_loaded(s, frame, c)
     log("placement", x=c.x, y=c.y, level=level, reply=reply)
-    if c.reads(level) is True:
-        return frame
-    above = sensing.quiet(frame)[0]
-    paper, reply = read_loaded(s, frame, above)
-    log("placement paper", x=above.x, y=above.y, level=paper, reply=reply)
-    if sensing.blank(paper):
-        if c.reads(level, paper) is True:
-            return frame
-        # Single readings inside the square swing (238-255 on the deck box's sheet): a dim one gets a
-        # second try either side. A middle that reads like the paper beside it is off the square, and
-        # a try at its edge would pass a sheet lying 2.5 mm off (2026-10-26): that one is looked for.
-        dim = level is not None and paper is not None and level >= paper + sensing.CONTRAST
-        for k in (-1, 1) if dim else ():
-            nl, reply = read_loaded(s, frame, c.nudged(k * sensing.NUDGE))
-            log("placement", x=c.x + k * sensing.NUDGE, y=c.y, level=nl, reply=reply)
-            if c.reads(nl, paper) is True:
-                return frame
-    found = hunt(s, frame, log, paper if sensing.blank(paper) else None)
+    side = sensing.beside(frame)
+    paper, reply = read_loaded(s, frame, side)
+    log("placement paper", x=side.x, y=side.y, level=paper, reply=reply)
+    local = paper if sensing.blank(paper) else None
+    ink = level if c.reads(level, local) is True else None
+    # Single readings inside the square swing (238-255 on the deck box's sheet): a dim one gets a
+    # second try either side. A middle that reads like the paper beside it is off the square, and
+    # a try at its edge would pass a sheet lying 2.5 mm off (2026-10-26): that one is looked for.
+    dim = ink is None and level is not None and local is not None and level >= local + sensing.CONTRAST
+    for k in (-1, 1) if dim else ():
+        nl, reply = read_loaded(s, frame, c.nudged(k * sensing.NUDGE))
+        log("placement", x=c.x + k * sensing.NUDGE, y=c.y, level=nl, reply=reply)
+        if c.reads(nl, local) is True:
+            ink = nl
+            break
+    if ink is not None:
+        found = locate(s, frame, log, ink, paper)
+        assert found is not None  # its middle read ink: it measures, or locate stops the job
+        if max(abs(found[0]), abs(found[1])) < MEASURE_MOVE:
+            found = (0.0, 0.0)
+    else:
+        # The middle missed the square, so it may be the paper, and the point right of it the square's
+        # own dim ink (238-249 passes as blank) when the sheet lies 3.5 mm or more right: the paler.
+        found = hunt(s, frame, log, min((v for v in (level, paper) if sensing.blank(v)), default=None))
     if found is None:
         t = sensing.turned(frame)
         if t is not None:
@@ -399,21 +423,18 @@ def check_placement(s: Session, frame: Frame, log: SessionLog) -> Frame:
                     "the square is top-left, reload and rerun"
                 )
         my, mx = frame.on_mat(c.y, c.x)
-        lo, hi = HUNT_RANGE
         raise CutError(
-            f"no square at {my:g} mm down, {mx:g} mm in on the mat, where it should be, nor up to {-lo:g} mm "
-            f"above or left of it or {hi:g} mm below or right of it: put the paper's top-left corner "
-            f"{frame.placed()}, reload and rerun"
+            f"no square at {my:g} mm down, {mx:g} mm in on the mat, where it should be, nor within "
+            f"{HUNT_RANGE[1]:g} mm of it any way: put the paper's top-left corner {frame.placed()}, reload "
+            "and rerun"
         )
-    dx, dy = found
-    right, down = frame.paper_at
-    moved = replace(frame, paper_at=(round(right + dx, 2), round(down + dy, 2)))
-    log("located", dx=dx, dy=dy, paper_at=moved.paper_at)
-    log.say(
-        f"square found {_off(dx, 'right', 'left')} and {_off(dy, 'down', 'up')} of where it should be: "
-        f"the paper's corner is {moved.placed()}"
+    there = frame if found == (0.0, 0.0) else moved(frame, found)
+    log("located", dx=found[0], dy=found[1], paper_at=there.paper_at)
+    log.note(
+        f"square found {_off(found[0], 'right', 'left')} and {_off(found[1], 'down', 'up')} of where it "
+        f"should be: the paper's corner is {there.placed()}"
     )
-    return moved
+    return there
 
 
 def _off(d: float, plus: str, minus: str) -> str:
@@ -421,11 +442,14 @@ def _off(d: float, plus: str, minus: str) -> str:
 
 
 HUNT_STEP = 3.0  # mm between the hunt's readings: under the square's 5 mm, so one lands on it
-# mm the square's middle may lie from where the frame expects it, left/up to right/down: a pouch on
-# the tack holds its paper about 3 mm in, so the paper sits at most that far left or up of where
-# --paper-at says, and 2026-10-26's pouches held theirs up to 3.3 mm further right. A grid over it
-# finds any square whose middle lies within HUNT_STEP / 2 + 1 mm past either end.
-HUNT_RANGE = (-3.0, 6.0)
+# mm the square's middle may lie from where the frame expects it, either way: Jonas lays a sheet
+# within about 3 mm of where it is expected, any way (the deck box's --paper-at is where its cut
+# logs found its sheets). A grid over it finds any
+# square whose middle lies within HUNT_STEP / 2 + 1 mm past either end. Until 2026-10-28 it ran 3
+# mm up and left to 6 mm down and right, for a frame that expected a pouch's paper 3 mm in, where
+# every deck box lay further right.
+HUNT_RANGE = (-4.5, 4.5)
+BESIDE_HIT = 0.75  # mm past the right edge of any square holding a hunt's ink reading
 
 
 def hunt(s: Session, frame: Frame, log: SessionLog, paper: int | None) -> tuple[float, float] | None:
@@ -435,6 +459,11 @@ def hunt(s: Session, frame: Frame, log: SessionLog, paper: int | None) -> tuple[
     the square (the pouch's dark band past the paper's edge) has no paper within a square's width
     above or left of it, so it measures as nothing and the hunt goes on. ``paper`` is blank paper's
     level near the square; without it the lowest reading so far stands in.
+
+    Before measuring, one reading BESIDE_HIT past the right edge of any square that could hold the
+    hit: blank paper there, or the hit isn't the square. Dark there, it is the pouch's band along
+    the paper's top edge or paper lifting off the mat, and nine to eleven readings are saved: on
+    2026-10-28 a lifting Betor sheet measured ten such hits and hunted for 7 minutes.
 
     It replaced rows of readings a millimetre apart, 64 of them at about 4 s each, which took over
     four minutes on 2026-10-26 for a sheet lying 3 mm right: the grid finds a square that far off
@@ -454,7 +483,12 @@ def hunt(s: Session, frame: Frame, log: SessionLog, paper: int | None) -> tuple[
         base = paper if paper is not None else (min(seen) if seen else None)
         if level is not None:
             seen.append(level)
-        if c.reads(level, base) is not True:
+        if level is None or c.reads(level, base) is not True:
+            continue
+        side = replace(pt, x=pt.x + proof.SQUARE + BESIDE_HIT)
+        beside, reply = read_loaded(s, frame, side)
+        log("hunt", x=side.x, y=side.y, dx=dx, dy=dy, level=beside, reply=reply, beside=True)
+        if beside is not None and beside >= (level + (sensing.PAPER if base is None else base)) / 2:
             continue
         right, down = frame.paper_at
         there = replace(frame, paper_at=(right + dx, down + dy))  # its middle on the ink just read
@@ -470,18 +504,12 @@ MEASURE_MOVE = 0.25  # mm: a measured square closer than this to the frame's lea
 
 def measure(s: Session, frame: Frame, log: SessionLog, paper: int | None) -> tuple[float, float] | None:
     """Where the square sits from where the frame expects it, (right, down) mm, from its top and left
-    edges. Ink under the frame's square middle (``sensing.placement``) puts each edge within the
-    square's width above or left of it, with blank paper beyond: halving that span EDGE_HALVINGS
-    times pins the edge, a reading counting as ink when it is nearer the middle's level than
-    ``paper``'s. Eleven readings, about 45 s. None when the middle isn't ink against the paper, or
-    an edge's readings never reach paper (no edge in that span).
-
-    The placement check passes a sheet whose square's middle reads ink, up to 2.5 mm off, and the
-    scan's first search row runs only 1.5 mm above the square's bottom edge (``default_start``). On
-    2026-10-26 a laminated plain sheet lay 1.5 mm right of where --paper-at 3 put it, so the scan
-    started on the pouch's dark band past the paper's edge: its middle read 255, and TB123 twice and
-    TB122 replied 1 (no square), 43 s each. Measured after the first miss, it registered first time
-    from the moved start (11 s)."""
+    edges, for a hunt's hit. Ink under the frame's square middle (``sensing.placement``) puts each
+    edge within the square's width above or left of it, with blank paper beyond: halving that span
+    EDGE_HALVINGS times pins the edge, a reading counting as ink when it is nearer the middle's level
+    than ``paper``'s. Eleven readings, about 45 s. None when the middle isn't ink against the paper,
+    or an edge's readings never reach paper (no edge in that span: the pouch's dark band past the
+    paper's edge reads so, which is why a hit is measured from this side and not ``locate``'s)."""
     c = sensing.placement(frame)
     ink, reply = read_loaded(s, frame, c)
     log("measure", edge="middle", x=c.x, y=c.y, level=ink, reply=reply)
@@ -510,6 +538,100 @@ def measure(s: Session, frame: Frame, log: SessionLog, paper: int | None) -> tup
     return round(c.x + ex - frame.inset, 2), round(c.y + ey - frame.top, 2)
 
 
+LOCATE_SPAN = sensing.BESIDE  # mm right of and below the square's middle its edge is looked for in
+# Halvings (across x, down y) before the scan. The start sits 1 mm inside the paper's left edge and
+# misses only when the sheet lies further right than measured, by 0.7 mm or more (2026-10-26:
+# 1.5 mm): three, 0.38 mm, do across. Down, the deck box's start has about a millimetre to spare
+# (``locate``): four, 0.19 mm.
+LOCATE_HALVINGS = (3, 4)
+REMEASURE_HALVINGS = (5, 5)  # after a scan that found nothing: 0.09 mm both ways
+# mm past the square's 5 mm an edge may measure from a middle that reads ink and stay the square's.
+# That middle lies 0.1 mm or more inside the square (ink reads from 0.1 mm inside the 50 % point of
+# an edge measured on 2026-10-28), so a clean sheet's edge lies within 4.93 mm of it (the moves'
+# 0.05 mm steps included), which halvings of LOCATE_SPAN place at 5.06 at most; the next estimate
+# up, 5.44, is paper reading like ink past where any square can end.
+LIFTED_EDGE = 0.3
+
+
+def locate(
+    s: Session,
+    frame: Frame,
+    log: SessionLog,
+    ink: int | None = None,
+    beside: int | None = None,
+    halvings: tuple[int, int] = LOCATE_HALVINGS,
+) -> tuple[float, float] | None:
+    """Where the square lies from where the frame expects it, (right, down) mm, from its right and
+    bottom edges. Its middle where the frame puts it reads ``ink`` and blank paper right of it
+    (``sensing.beside``) reads ``beside`` (each read here when None); not ink against that paper,
+    and this returns None. Ink there puts each edge within 5 mm right of and below that middle, with
+    blank paper past it: ``halvings`` (across, down) readings across LOCATE_SPAN pin each edge to
+    LOCATE_SPAN / 2^halvings, a reading counting as ink when it is nearer full ink than the palest
+    paper read. Before the scan, three across and four down, about 24 s: the deck box's scan start,
+    3.5 mm into its square (``default_start``), has about a millimetre to spare upward (2 mm in
+    failed on 2026-10-26, 2.3 mm in registered on 2026-10-28) and no more known downward, so its
+    bottom edge is pinned to 0.19 mm.
+
+    The right and bottom edges, because nothing but blank paper lies past them on any sheet: the
+    deck box prints nothing within 6 mm of a mark's legs (formeriet MARK_QUIET), a proxy sheet's
+    cards start below the square's row. Past the top and left edges lies the paper's edge, which a
+    laminated sheet's pouch shows as dark as ink 5 mm out on the deck box. So paper beside the square
+    that reads like ink, LOCATE_SPAN right of its middle or out to an edge more than LIFTED_EDGE past
+    the 5 mm a square with ink under its middle can reach, is the sheet lifting off the mat there,
+    and the job stops before the scan (``sensing.press_down``)."""
+    c = sensing.placement(frame)
+    if ink is None:
+        ink, reply = read_loaded(s, frame, c)
+        log("locate", edge="middle", x=c.x, y=c.y, level=ink, reply=reply)
+    if beside is None:
+        side = sensing.beside(frame)
+        beside, reply = read_loaded(s, frame, side)
+        log("locate", edge="beside", x=side.x, y=side.y, level=beside, reply=reply)
+    if ink is None or c.reads(ink, beside if sensing.blank(beside) else None) is not True:
+        return None
+    if beside is not None and not sensing.blank(beside):
+        raise CutError(
+            sensing.press_down(
+                ["top-left"],
+                f"blank paper {LOCATE_SPAN:g} mm right of the square's middle reads {beside}, like its ink ({ink})",
+            )
+        )
+    # Halfway between the paper and full ink (sensing.FULL), not the middle's own reading: a middle
+    # near an edge of the square (the sheet up to 2.5 mm off) reads dim, and halfway to that would put
+    # the other edge up to 0.3 mm out. The paper is the palest read beside the square so far.
+    pale = [sensing.PAPER if beside is None else beside]
+
+    def edge(axis: str, n: int) -> float:
+        lo, hi = 0.0, LOCATE_SPAN  # offsets from the middle: ink at lo, paper at hi
+        levels = []
+        for _ in range(n):
+            mid = (lo + hi) / 2
+            pt = replace(c, x=c.x + mid) if axis == "x" else replace(c, y=c.y + mid)
+            level, reply = read_loaded(s, frame, pt)
+            log("locate", edge=axis, x=pt.x, y=pt.y, level=level, reply=reply)
+            levels.append("no reading" if level is None else str(level))
+            if level is not None:
+                pale[0] = min(pale[0], level)
+            if level is not None and level >= (sensing.FULL + pale[0]) / 2:
+                lo = mid
+            else:
+                hi = mid
+        if (lo + hi) / 2 > proof.SQUARE + LIFTED_EDGE:
+            side = "right of" if axis == "x" else "below"
+            raise CutError(
+                sensing.press_down(
+                    ["top-left"],
+                    f"blank paper {side} the square reads {', '.join(levels)} out to {lo:.1f} mm from its "
+                    f"middle, like its ink ({ink}), where the paper beside it reads {pale[0]}",
+                )
+            )
+        return (lo + hi) / 2
+
+    ex = edge("x", halvings[0])
+    ey = edge("y", halvings[1])
+    return round(c.x + ex - proof.SQUARE - frame.inset, 2), round(c.y + ey - proof.SQUARE - frame.top, 2)
+
+
 def read_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
     """Blank paper beside each mark and in the middle of the top margin, in the loaded mat's frame
     (``read_loaded``, as the placement reading). The square's point first, then the reference on
@@ -525,9 +647,9 @@ def read_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
 
 
 def check_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
-    """Before the scan: blank paper beside every mark reads as paper, or the sheet doesn't lie flat
-    there (``sensing.Flatness``) and nothing is scanned. Paper that only just reads as paper is a
-    warning: the scan may misread there, and the check after it catches that."""
+    """Before the scan, where the placement found the sheet: blank paper beside every mark reads as
+    paper, or the sheet doesn't lie flat there (``sensing.Flatness``) and nothing is scanned. Paper that only just reads as paper is a warning: the scan may misread there, and the
+    check after it catches that."""
     flat = read_flat(s, frame, log)
     stop = flat.stop()
     if stop:
@@ -743,8 +865,9 @@ def diagnose(frame: Frame, t: Transport, log: SessionLog) -> tuple[list[sensing.
     """Before any scan, rows of readings across every mark in the loaded mat's frame
     (``read_loaded``): the square first (``sensing.square_rows``), then each leg
     (``sensing.leg_rows``) centred on where the square says the sheet sits, then the blank paper a
-    cut reads beside each mark (``read_flat``). Where each mark really is and how it reads. Cuts
-    nothing and scans nothing, so it works on a sheet the scan can't register."""
+    cut reads beside each mark (``read_flat``), also where the square says, as a cut reads it. Where
+    each mark really is and how it reads. Cuts nothing and scans nothing, so it works on a sheet the
+    scan can't register."""
     s = Session(t, log)
     seen: list[sensing.Seen] = []
     try:
@@ -765,7 +888,7 @@ def diagnose(frame: Frame, t: Transport, log: SessionLog) -> tuple[list[sensing.
         read(sensing.square_rows(frame))
         dx, dy = (v.shift or 0.0 for v in seen)  # the legs' rows follow the square
         read(sensing.leg_rows(frame, dx, dy))
-        flat = read_flat(s, frame, log)
+        flat = read_flat(s, moved(frame, (dx, dy)), log)
         s.send(protocol.select_light(slot))
         return seen, flat
     finally:
