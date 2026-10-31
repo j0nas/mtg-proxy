@@ -104,8 +104,9 @@ def profiles(frame: Frame) -> list[Point]:
 
 
 def registered(frame: Frame, pt: Point | Check) -> tuple[float, float]:
-    """(y, x) mm from the top-left mark, as a move takes them: no cut bias, which is the blade's."""
-    return pt.y - frame.top, pt.x - frame.inset
+    """(y, x) mm in the registered frame, as a move takes them (``Frame.machine``): no cut bias,
+    which is the blade's."""
+    return frame.machine(pt.x, pt.y)
 
 
 @dataclass(frozen=True)

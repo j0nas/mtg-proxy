@@ -265,28 +265,24 @@ def test_the_first_scan_starts_where_the_square_lies(at):
     assert near((got_left, got_top), (left, top))
 
 
-def test_a_scan_that_finds_nothing_measures_the_square_and_scans_from_where_it_is():
-    # The sheet moves a millimetre as the first scan feeds the mat in and out: that scan starts
-    # where it lay, misses, and the square measured again puts the next one where it lies now.
+def test_a_scan_that_finds_nothing_is_followed_by_the_sensor_finding_the_marks_where_they_lie():
+    # The sheet moves a millimetre as the scan feeds the mat in and out: the scan misses, and the
+    # sensor finds every mark where it lies now and the job is cut through that.
     sheet = FussySheet(at=(5.0, 3.0), slips=(0.0, 1.0))
     record = run(sheet)
-    (measured,) = [f for e, f in record if e == "measured"]
-    assert measured["paper_at"] == pytest.approx((5.0, 4.0), abs=0.15)  # five halvings
-    first, second = scan_starts(record)
-    top, left = driver.default_start(replace(FRAME, paper_at=(5.0, 3.0)))
-    assert near((first[1], first[0]), (left, top))
-    assert second == pytest.approx(list(driver.default_start(replace(FRAME, paper_at=(5.0, 4.0)))), abs=0.15)
-    assert sheet.sent.count(b"TB123") == 2
+    (fit,) = [f for e, f in record if e == "surveyed"]
+    assert fit["origin"] == pytest.approx([5.0 + FRAME.inset, 4.0 + FRAME.top], abs=0.1)
+    assert fit["turn"] == pytest.approx(0.0, abs=0.02)
+    assert sheet.sent.count(b"TB123") == 1 and b"TB122" not in sheet.sent
     assert b"D" in sheet.sent.replace(b"TB", b"")
-    assert not any("measured" in m for m in said(record))  # the log has it, not the terminal
 
 
-def test_a_square_that_measures_where_it_should_be_is_scanned_again_as_before():
+def test_a_sheet_the_scan_never_finds_is_cut_through_what_the_sensor_finds():
     sheet = FussySheet(finds=False)
-    with pytest.raises(session.CutError):
-        run(sheet)
-    assert sheet.sent.count(b"TB123") == 2 and sheet.sent.count(b"TB122") == 1
-    assert b"D" not in sheet.sent.replace(b"TB", b"")
+    record = run(sheet)
+    assert any(m.startswith("the sensor found every mark") for m in said(record))
+    assert sheet.sent.count(b"TB123") == 1 and b"TB122" not in sheet.sent
+    assert b"D" in sheet.sent.replace(b"TB", b"")
 
 
 def test_a_sheet_where_the_frame_says_scans_once():

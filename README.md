@@ -458,17 +458,33 @@ pressed down. On every sheet that registered and cut, one side at most ever read
 misread frame can put at most two of the four points on the square's ink:
 `tests/test_cameo_lifting.py` holds the rule against every check in the session logs.
 
-A scan that finds nothing, or one the check disagrees with, is tried again, then once more as
-TB122, the firmware's two-mark scan: the square and the bottom-left L only. The check still reads
-the top-right L, so a two-mark frame is cut only when that L reads where it puts it. On
-2026-10-26 a double-sided sheet whose back showed through behind its top-right L misread on every
-TB123 and registered first time as TB122. After the first scan that finds nothing, the sensor
-measures the square's right and bottom edges again, to 0.1 mm, and the next scan starts from where
-it lies now. When all three disagree, nothing is cut, and `cut-proxies --diagnose` shows why: before
-any scan it reads across the square and each leg in the loaded mat's frame (about 4 minutes), and
-says where the sheet sits, how it is turned and stretched, which marks never read as full ink or
-sit on unusually bright paper, and what the blank paper beside each mark reads, in the words a cut
-would stop or warn with.
+The scan finds the square itself, then walks two fixed passes from it: down to the bottom-left L
+and across to the top-right L, each starting 10 mm short of its L and crossing it half a leg from
+the corner. On a 3x3 sheet both passes started beside a card's print, 2.0 and 2.6 mm off, and a sheet
+turned 0.2-0.45° clockwise put the bottom-left card's corner on the pass, which the scan took for the
+L (2026-10-31). So the scan is told a frame 5.5 mm taller and 6.05 mm wider than printed
+(`driver.run_ups`, worked out from the job's outlines): each pass starts past the print and walks
+only blank paper to its leg, and every coordinate after the scan is stretched back by the same
+ratio, since the scan scales the frame by measured over told size (TB55,1). The firmware checks the
+frame's turn (within 5°), not its size. `mtg-proxy simulate` walks the passes the same way.
+
+The 6 mm legs still limit the scan to a sheet turned about 0.4° either way, and a laminated sheet
+lies as crooked as its paper sits in the pouch. A scan that finds nothing, or a frame the check
+disagrees with, isn't tried again: the sensor finds the marks itself (`cameo/survey.py`). It finds
+the square by its four edges and each L by both edges of both legs, halfway along each, looking
+6 mm either side for the bottom-left L's upright leg (about 1.2° of turn) and placing the rest from
+what that says. An edge is pinned by halving between ink and paper and interpolating between the
+last two readings, and a line's centre is the middle of its two edges, so ink spread and the spot's
+blur cancel. Print that isn't a mark (a card, a pouch's band, glare) shows as the wrong width and is
+passed over. The page is fitted to the marks as the firmware fits its frame, and refused unless its
+edges come out square to 0.4° and the marks as far apart as printed to 1.5 %. About 30 readings,
+100 s; the job is then cut through that fit, in the same machine frame the readings were taken in.
+In tests, sheets turned up to 1.1° cut within 0.15 mm of the line. A mark it can't find stops the
+run with where it looked, nothing cut, and `cut-proxies --diagnose` shows why: before any scan it
+reads across the square and each leg in the loaded mat's frame (about 4 minutes), and says where
+the sheet sits, how it is turned and stretched, which marks never read as full ink or sit on
+unusually bright paper, and what the blank paper beside each mark reads, in the words a cut would
+stop or warn with.
 
 After the blade has cut, the marks' ink is read again where nothing more can be lost by it: the
 legs of the nearest L after a proof cut (before anyone is asked) and after a job's scored lines

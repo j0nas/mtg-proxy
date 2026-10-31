@@ -4,13 +4,15 @@ cut, and — whatever happens after the machine was touched — a return to the 
 Coordinates: the job is in page millimetres (y down). Before the scan the origin is the mat
 grid's corner, and a page point is where the paper lies on the mat (``Frame.on_mat``). After the
 scan the machine's origin is the top-left mark's corner, so a page point maps to
-(x − inset + bias_x, y − top + bias_y). Nothing may land above or left of that corner (negative
-registered coordinates are untested), and nothing may leave the paper.
+(x − inset + bias_x, y − top + bias_y), stretched by the frame's run-ups (``Frame.machine``).
+When the sensor measured the marks instead (``survey``), a page point maps through that fit.
+Nothing may leave the paper.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -29,6 +31,33 @@ class CutError(Exception):
 SCAN_TIMEOUT_S = 90.0  # a whole scan, the firmware's own second try included (28 s on 2026-10-25)
 CHUNK_BYTES = 1024
 CHUNK_TIMEOUT_S = 180.0
+# s between status polls while the head moves to a reading: at 0.5 s every reading waited 0.25 s
+# on average for nothing, and a survey takes about 30 of them.
+SENSE_POLL_S = 0.1
+
+
+@dataclass(frozen=True)
+class Fit:
+    """Where the page lies in the machine's current frame, measured with the sensor (``survey``):
+    page ``corner`` (the top-left mark's corner, page mm) lies at ``origin``, and each page mm
+    across and down moves ``across`` and ``down`` (x, y mm as a move takes them)."""
+
+    corner: tuple[float, float]
+    origin: tuple[float, float]
+    across: tuple[float, float]
+    down: tuple[float, float]
+
+    def at(self, x: float, y: float) -> tuple[float, float]:
+        """Page point (x, y) → (x, y) in the machine's frame."""
+        u, v = x - self.corner[0], y - self.corner[1]
+        return (
+            self.origin[0] + u * self.across[0] + v * self.down[0],
+            self.origin[1] + u * self.across[1] + v * self.down[1],
+        )
+
+    def turn(self) -> float:
+        """Degrees the page's left edge is turned clockwise on the mat (its bottom further left)."""
+        return math.degrees(math.atan2(-self.down[0], self.down[1]))
 
 
 @dataclass(frozen=True)
@@ -36,7 +65,13 @@ class Frame:
     """The printed registration marks, in page millimetres: 3-mark registration, a 5 mm square
     top-left and L marks top-right and bottom-left. The proof targets printed with them (``proof``),
     in the order the proof rounds take them. And where the paper lies on the loaded mat
-    (``paper_at``), which everything before the scan moves by (``on_mat``)."""
+    (``paper_at``), which everything before the scan moves by (``on_mat``).
+
+    ``run_up`` (down, across) mm is added to the height and width the scan is told
+    (``scan_size``), so that the firmware's run-ups to the bottom-left and top-right L start past
+    the print beside them (``driver.run_ups``); every coordinate after the scan is stretched to
+    match (``machine``). ``fit``, once the sensor measured the marks (``survey``), replaces the
+    scan's frame altogether."""
 
     page_w: float
     page_h: float
@@ -51,11 +86,30 @@ class Frame:
     # where the cut logs put such sheets (cutting.LAMINATED_AT; the deck box passes its own).
     paper_at: tuple[float, float] = (0.0, 0.0)
     targets: tuple[Target, ...] = ()
+    run_up: tuple[float, float] = (0.0, 0.0)
+    fit: Fit | None = None
 
     @property
     def top(self) -> float:
         """The mark corners' distance from the top (and bottom) paper edge."""
         return self.inset if self.inset_y is None else self.inset_y
+
+    @property
+    def scan_size(self) -> tuple[float, float]:
+        """(height, width) mm the scan is told: the marks' own, plus the run-ups."""
+        return self.height + self.run_up[0], self.width + self.run_up[1]
+
+    def machine(self, x: float, y: float, bias: tuple[float, float] = (0.0, 0.0)) -> tuple[float, float]:
+        """Page point (x, y) mm → (y, x) mm as a move takes it after the registration, ``bias``
+        (x, y) added: through the sensor's fit, or from the top-left mark, stretched by the run-ups.
+        The scan's transform shrinks every coordinate by the told size over the measured one
+        (TB55,1, cameo-re NOTES.md), so a told size run-up mm larger is undone by stretching here."""
+        bx, by = bias
+        if self.fit is not None:
+            mx, my = self.fit.at(x, y)
+            return my + by, mx + bx
+        h, w = self.scan_size
+        return (y - self.top + by) * h / self.height, (x - self.inset + bx) * w / self.width
 
     def on_mat(self, y: float, x: float) -> tuple[float, float]:
         """A page point (y, x mm) in the loaded mat's frame, (y, x) as a move takes it: where the
@@ -89,15 +143,16 @@ class Job:
 
 
 def registered(job: Job) -> list[list[tuple[float, float]]]:
-    """Every polyline in the machine's registered frame (x, y mm from the top-left mark)."""
-    f, (bx, by) = job.frame, job.bias
-    return [[(x - f.inset + bx, y - f.top + by) for x, y in pl.points] for pl in job.lines]
+    """Every polyline in the machine's registered frame (x, y mm as moves take them, from the
+    top-left mark after a scan; ``Frame.machine``)."""
+    f = job.frame
+    return [[f.machine(x, y, job.bias)[::-1] for x, y in pl.points] for pl in job.lines]
 
 
 def check_bounds(job: Job) -> tuple[float, float, float, float]:
-    """The commanded extent (x0, y0, x1, y1) from the top-left mark, scores and cuts alike. Raises
+    """The commanded extent (x0, y0, x1, y1) in the registered frame, scores and cuts alike. Raises
     if the design itself (page coordinates, before the machine's bias) leaves the paper. A cut may
-    reach above or left of the top-left mark (negative coordinates, down to the paper's edge): the
+    reach above or left of the frame's origin (negative coordinates, down to the paper's edge): the
     cutting area is widened to cover it (see ``low_corner``)."""
     every = replace(job, lines=[*job.scores, *job.lines]) if job.scores else job
     pts = [pt for line in registered(every) for pt in line]
@@ -121,9 +176,10 @@ def low_corner(extent: tuple[float, float, float, float]) -> tuple[float, float]
 
 
 def far_corner(frame: Frame) -> tuple[float, float]:
-    """The cutting area's far corner (y, x) from the top-left mark: the paper's far edges, +2 mm
+    """The cutting area's far corner (y, x) in the registered frame: the paper's far edges, +2 mm
     for the bias."""
-    return frame.page_h - frame.top + 2, frame.page_w - frame.inset + 2
+    corners = [frame.machine(x, y) for x in (0, frame.page_w) for y in (0, frame.page_h)]
+    return max(y for y, _ in corners) + 2, max(x for _, x in corners) + 2
 
 
 POINTS_PER_DRAW = 32  # keeps each D command under ~400 bytes
@@ -241,7 +297,7 @@ class Session:
         """Move the head to (y, x) mm in the current frame and read the spot under it
         (protocol.sense): the level, and the reply as it came."""
         self.send(p.move(y_mm, x_mm))
-        self.wait_ready(30)
+        self.wait_ready(30, poll=SENSE_POLL_S)
         reply = self.query(p.cmd(p.sense(slot)), timeout=10)
         return p.number(reply), None if reply is None else reply.decode("latin1").rstrip(p.ETX)
 
@@ -259,7 +315,7 @@ class Session:
             if stale:
                 self.log("stale", replies=[s.decode("latin1") for s in stale])
             self.send(*p.mark_setup(frame.length, frame.thickness))
-            scan = p.scan(frame.height, frame.width, top, left, marks)
+            scan = p.scan(*frame.scan_size, top, left, marks)
             t0 = time.monotonic()
             self.send(*scan)
             result, others = None, []

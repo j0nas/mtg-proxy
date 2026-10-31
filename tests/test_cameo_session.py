@@ -222,29 +222,12 @@ def test_a_frame_the_print_agrees_with_is_cut_after_nine_readings_and_nothing_is
     assert "TB63,4" not in out[first_cut:]  # the cut done, nothing is left to guard
 
 
-def test_a_misread_rescans_and_cuts_once_the_marks_agree():
-    misread = [
-        PAPER,
-        PAPER,
-        PAPER,
-        *SQUARE_OK[1:],
-        INK,
-        INK,
-        INK,
-        INK,
-    ]  # the square's middle and a quarter mm either side read paper
-    t = checked([*PLACED, *FLAT, *misread, *MARKS_OK])
-    driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
-    out = sent(t)
-    assert out.count("TB123") == 2 and "D" in out.replace("TB", "")
-
-
-def test_a_misread_on_every_scan_stops_before_anything_is_cut():
+def test_a_misread_the_sensor_cant_find_the_marks_for_either_stops_before_anything_is_cut():
     t = checked([INK, PAPER])  # every reading after the placement is paper
-    with pytest.raises(session.CutError, match="after 3 scans: nothing was cut"):
+    with pytest.raises(session.CutError, match="the sensor found no square within"):
         driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
-    assert out.count("TB123") == 2 and out.count("TB122") == 1  # three-mark twice, then two-mark
+    assert out.count("TB123") == 1 and "TB122" not in out  # one scan, then the sensor
     assert "D" not in out.replace("TB", "")
     assert out.endswith("TB0\x03L0\x03\\0,0\x03M0,0\x03TR0,0\x03J0\x03FN0\x03TB50,0\x03\x1b\x05")
 
@@ -283,23 +266,6 @@ def test_the_scan_and_the_next_sheet_get_the_scans_own_light_back_after_every_re
     assert out.rindex("TB63,4") < out.rindex("TB61,0")  # and for the next sheet's scan
 
 
-def test_two_failed_three_mark_scans_fall_back_to_two_marks_and_cut_when_the_check_agrees():
-    t = machine(
-        {
-            b"TB60": b"    0\x03",
-            b"TB63": [*PLACED, *FLAT, *REMEASURED_AS_FRAMED, *MARKS_OK],
-            b"TB123": NOT_FOUND,
-            b"TB122": FOUND,
-        }
-    )
-    driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
-    out = sent(t)
-    assert out.count("TB123") == 2 and out.count("TB122,4000,5740") == 1
-    before = out[: out.index("D")]
-    # the top-right L read before the cut, though TB122 skipped it
-    assert before.count("TB63,4") == len(PLACED) + 4 + len(REMEASURED_AS_FRAMED) + 9
-
-
 def test_without_the_check_a_missed_scan_never_falls_back_to_two_marks():
     t = machine({b"TB123": NOT_FOUND, b"TB122": FOUND})
     with pytest.raises(session.CutError, match="couldn't find the marks"):
@@ -319,11 +285,15 @@ def test_a_faint_leg_passes_when_it_is_darker_than_the_paper_on_both_sides():
 
 
 def test_a_shadow_edge_dark_on_one_side_only_is_no_leg():
+    said = []
     edge = [b"  215\x03", b"  220\x03", b"  205\x03", b"  230\x03", b"  180\x03"]
-    t = checked([*PLACED, *FLAT, *[*SQUARE_OK, *edge, INK, INK, INK] * 3])  # the same on all three scans
-    with pytest.raises(session.CutError, match="after 3 scans"):
-        driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
-    assert sent(t).count("TB63,4") == len(PLACED) + 4 + 3 * 13  # each scan: 5 square, 5 edge, 3 legs
+    t = checked([*PLACED, *FLAT, *SQUARE_OK, *edge, INK, INK, INK, PAPER])  # then paper everywhere
+    with pytest.raises(session.CutError, match="the sensor found no square"):
+        driver.cut(
+            job(), t, session.SessionLog(None, echo=said.append), [driver.default_start(FRAME)], check=True
+        )
+    assert "check: top-right, the vertical leg: read 215 (paper) where ink should be" in said
+    assert "D" not in sent(t).replace("TB", "")
 
 
 def one_mm_right():
@@ -480,8 +450,6 @@ def test_the_stops_after_a_scan_say_where_the_papers_corner_goes():
     corner = "corner 3 mm right and 2 mm down of the mat grid's"
     with pytest.raises(session.CutError, match=f"the paper's top-left {corner}, nothing printed"):
         driver.cut(replace(job(), frame=SHIFTED), machine({b"TB123": NOT_FOUND}), log(), [(9, 4)])
-    with pytest.raises(session.CutError, match=f"lies flat with its paper's {corner} and its marks"):
-        driver.cut(replace(job(), frame=SHIFTED), checked([*PLACED, PAPER]), log(), [(9, 4)], check=True)
 
 
 # --- a landscape sheet loaded as it leaves the printer ---------------------------------------------

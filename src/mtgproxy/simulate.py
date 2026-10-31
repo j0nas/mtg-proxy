@@ -18,6 +18,9 @@ The passes are cameo-re NOTES.md, "The three-mark sequence, TB123" (firmware V1.
 4. Top-right: from (top edge + half a leg, left edge + w - 10 mm) carriage-wards across the
    vertical leg, then half a leg back and feed-wards (up) across the horizontal leg.
 
+h and w are what the scan is told: the frame's own plus its run-ups (``Frame.run_up``,
+``driver.run_ups``), which cut-proxies adds so that steps 3 and 4 start past the cards' print.
+
 Half a leg is what TB51 keeps (whole mm, see ``proof.crossing``): 3 mm on a 3x3 sheet, 4.5 on a
 4x2 one. The scratch script this came from started both crossing passes 2 mm past those points
 and swept every pass out to the paper's edge. The firmware's passes start where the notes say and
@@ -287,14 +290,17 @@ def simulate(grey: np.ndarray, frame: Frame, start: tuple[float, float] | None =
     half = proof.crossing(frame)
     h, w = frame.height, frame.width
     xb = x_edge + half
-    p, run = sh.walk("bottom-left: down", (xb, y_edge + h - RUN_UP), (xb, y_edge + h + BEYOND))
+    down, across = frame.run_up  # the scan is told a frame this much larger (driver.run_ups)
+    yb = y_edge + h - RUN_UP + down
+    p, run = sh.walk("bottom-left: down", (xb, yb), (xb, y_edge + h + BEYOND))
     passes.append(p)
-    yc = y_edge + h - RUN_UP + (run[0] + run[1]) / 2 if run else y_edge + h
+    yc = yb + (run[0] + run[1]) / 2 if run else y_edge + h
     passes.append(sh.walk("bottom-left: left", (xb, yc - half), (0.2, yc - half))[0])
     yt = y_edge + half
-    p, run = sh.walk("top-right: right", (x_edge + w - RUN_UP, yt), (frame.page_w - 0.2, yt))
+    xr = x_edge + w - RUN_UP + across
+    p, run = sh.walk("top-right: right", (xr, yt), (frame.page_w - 0.2, yt))
     passes.append(p)
-    xc = x_edge + w - RUN_UP + (run[0] + run[1]) / 2 if run else x_edge + w
+    xc = xr + (run[0] + run[1]) / 2 if run else x_edge + w
     passes.append(sh.walk("top-right: up", (xc - half, yt), (xc - half, 0.2))[0])
     return Report(passes, frame, (top, left))
 

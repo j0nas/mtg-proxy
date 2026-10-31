@@ -11,12 +11,13 @@ from __future__ import annotations
 import contextlib
 import math
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 
-from . import geometry, proof, protocol, sensing
+from . import geometry, proof, protocol, sensing, survey
 from .session import CutError, Frame, Job, Session, SessionLog, check_bounds, far_corner, low_corner
 from .transport import BleTransport, RecordingTransport, Transport, UsbTransport
 
@@ -152,34 +153,26 @@ def cut(
     With ``check``, the sensor finds the square before the scan and every reading and the scan's
     start follow where it lies (``check_placement``), reads blank paper beside each mark (does the
     sheet lie on the mat there? ``check_flat``) and every mark after the scan (does the print agree
-    with the frame the scan made?). A scan that finds nothing or disagrees with the print is tried
-    again, then once more as TB122, which skips the top-right L (SCANS); after the first that finds
-    nothing, the sensor measures the square again (``locate``) and the next scan starts from where it
-    lies; when none agrees, the job stops before anything is cut (``sensing``). A sheet lifting off
-    the mat stops the job as soon as the readings show it, with no rescan (``sensing.press_down``).
-    With ``confirm``, each proof round traces the next of the frame's proof targets with
-    ``proof_blade`` between the scan and the cut (``prove``), and nothing else is cut until the
-    operator says so; ``on_target`` hears of each target as it is cut. A rescan returns to the
-    origin and repeats a fresh run's start."""
+    with the frame the scan made?). The scan is told a frame stretched by its run-ups, so that it
+    walks to the far Ls over blank paper (``run_ups``). A scan that finds nothing, or a frame the
+    print disagrees with, isn't tried again: the sensor finds the marks itself and the job is cut
+    through what it found (``surveyed``). A sheet lifting off the mat stops the job as soon as the
+    readings show it (``sensing.press_down``). With ``confirm``, each proof round traces the next of
+    the frame's proof targets with ``proof_blade`` between the registration and the cut
+    (``prove``), and nothing else is cut until the operator says so; ``on_target`` hears of each
+    target as it is cut. A rescan returns to the origin and repeats a fresh run's start."""
     s = Session(t, log)
     try:
-        extent = reach = check_bounds(job)
+        if check:
+            job = replace(job, frame=replace(job.frame, run_up=run_ups(job.frame, job.shapes or job.lines)))
+            if job.frame.run_up != (0.0, 0.0):
+                log("run_up", down=job.frame.run_up[0], across=job.frame.run_up[1])
         targets: list[proof.Target] = []
         if confirm:  # the area must hold the targets' cuts too, which may reach past the job's own
             targets = proof_targets(job, log)
-            reach = check_bounds(replace(job, lines=[*job.lines, *(tg.outline() for tg in targets)]))
-        if check:  # and the paper points beside the marks
-            points = [sensing.registered(job.frame, c) for c in sensing.checks(job.frame)]
-            reach = (
-                min(reach[0], *(x for _, x in points)),
-                min(reach[1], *(y for y, _ in points)),
-                *reach[2:],
-            )
-        low = low_corner(reach)
+        extent, reach, low = reach_of(job, targets, check)
         proofs = min(proof.ROUNDS, len(targets))
-        rounds = max(proofs, CHECK_ROUNDS if check else 1)
-        done = 0  # proof rounds cut
-        remeasure = measured = False  # after a scan that found nothing, once
+        rounds = max(proofs, 1)
         for attempt in range(rounds):
             if attempt:
                 s.finish()
@@ -190,23 +183,6 @@ def cut(
                 slot = check_light_slot(s, log)
             s.prepare()
             try:
-                if remeasure:
-                    remeasure = False
-                    off = locate(s, job.frame, log, halvings=REMEASURE_HALVINGS)
-                    if off is None:
-                        log.note("the square's middle doesn't read ink: scanning from the same start")
-                    elif max(abs(off[0]), abs(off[1])) < MEASURE_MOVE:
-                        log.note("the square measures where the frame puts it")
-                    else:
-                        before = job.frame
-                        job = replace(job, frame=moved(job.frame, off))
-                        starts = follow(starts, before, job.frame)
-                        log("measured", dx=off[0], dy=off[1], paper_at=job.frame.paper_at)
-                        log.note(
-                            f"square measured {_off(off[0], 'right', 'left')} and {_off(off[1], 'down', 'up')} "
-                            f"of where the frame put it: the paper's corner is {job.frame.placed()}; scanning "
-                            "from there"
-                        )
                 if check and attempt == 0:
                     placed = check_placement(s, job.frame, log)
                     starts = follow(starts, job.frame, placed)  # the square sits off: so does the sheet
@@ -217,27 +193,27 @@ def cut(
                 raise
             if check:  # the readings leave the light wherever their ramp stopped: back to the scan's level
                 s.send(protocol.select_light(slot))
-            marks = SCANS[min(attempt, len(SCANS) - 1)] if check else 3
-            if marks == 2:
-                log.say(
-                    "two-mark scan (TB122): the square and the bottom-left L; the check reads the top-right L"
-                )
+            job = replace(job, frame=replace(job.frame, fit=None))  # each round registers afresh
+            extent, reach, low = reach_of(job, targets, check)
+            where: survey.Where | None = None  # where the survey looks first, when it must
+            start = starts[0]
+            scanned = False  # the scan found marks, and installed its frame
             try:
-                start = s.register(job.frame, starts, marks)
+                start = s.register(job.frame, starts)
+                scanned = True
             except CutError as e:
-                if check and attempt + 1 < rounds:
-                    remeasure, measured = not measured, True
-                    then = "measuring the square, then scanning again" if remeasure else "scanning again"
-                    log.say(f"{e.args[0].split('. ')[0]}: {then}")
-                    continue
-                raise
-            if low != (0.0, 0.0) and attempt == 0:
-                log.say(
-                    f"cut reaches {max(0.0, -reach[1]):.2f} mm above / {max(0.0, -reach[0]):.2f} mm left of the "
-                    f"top-left mark: cutting area widened to {low[0]:g}, {low[1]:g} mm"
-                )
-            s.setup(job.blade, job.frame, low)
-            if check:
+                if not check:
+                    raise
+                log.say(f"{e.args[0].split('. ')[0]}: finding the marks with the sensor instead")
+                where = partial(_on_mat, job.frame)
+            if where is None:
+                if low != (0.0, 0.0) and attempt == 0:
+                    log.say(
+                        f"cut reaches {max(0.0, -reach[1]):.2f} mm above / {max(0.0, -reach[0]):.2f} mm left "
+                        f"of the top-left mark: cutting area widened to {low[0]:g}, {low[1]:g} mm"
+                    )
+                s.setup(job.blade, job.frame, low)
+            if check and where is None:
                 seen: dict[tuple[str, str], int | None] = {}
                 failed = check_marks(s, job.frame, log, flat, seen=seen)
                 s.send(protocol.select_light(slot))  # for the rescan, or the next sheet's scan
@@ -246,10 +222,10 @@ def cut(
                         log.say(f"check: {line}")
                     beside = {what: level for (mark, what), level in seen.items() if mark == "top-left"}
                     if sensing.lifts_by_square(beside, flat.reference):
-                        where = ("to its left", "to its right", "above it", "below it")
+                        sides = ("to its left", "to its right", "above it", "below it")
                         *each, last = (
                             f"{beside.get(w)} {at}"
-                            for w, at in zip(sensing.BESIDE_SQUARE, where, strict=True)
+                            for w, at in zip(sensing.BESIDE_SQUARE, sides, strict=True)
                         )
                         raise CutError(
                             sensing.press_down(
@@ -258,21 +234,21 @@ def cut(
                                 f"{flat.reference} in the middle of the top margin",
                             )
                         )
-                    if attempt + 1 < rounds:
-                        log.say("the marks don't read where the scan put them: scanning again")
-                        continue
-                    raise CutError(
-                        f"the marks don't read where the scan put them, after {rounds} scans: nothing was cut. "
-                        f"Check that the sheet lies flat with its paper's corner {job.frame.placed()} and "
-                        "its marks are clean, then rerun; cut-proxies --diagnose shows what the sensor sees "
-                        "at each mark"
+                    log.say(
+                        "the marks don't read where the scan put them: finding them with the sensor instead"
                     )
-                log.say(
-                    f"check: every mark reads where the scan put it ({len(sensing.checks(job.frame))} readings)"
-                )
+                    where = job.frame.machine
+                else:
+                    log.say(
+                        f"check: every mark reads where the scan put it ({len(sensing.checks(job.frame))} readings)"
+                    )
+            if where is not None:
+                job = surveyed(s, job, log, flat, slot, where, through_scan=scanned)
+                extent, reach, low = reach_of(job, targets, False)
+                s.setup(job.blade, job.frame, low)
             if confirm is None:
                 break
-            done += 1
+            done = attempt + 1  # proof rounds cut
             rescan = attempt + 1 < rounds and done < proofs
             target = targets[done - 1]
             end = target.cuts()[-1].points[-1]  # where the proof cut leaves the blade
@@ -290,6 +266,124 @@ def cut(
         return Result(firmware, start, extent)
     finally:
         wrap_up(s, t, log)
+
+
+def _on_mat(frame: Frame, x: float, y: float) -> tuple[float, float]:
+    return frame.on_mat(y, x)
+
+
+def reach_of(
+    job: Job, targets: list[proof.Target], check: bool
+) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float], tuple[float, float]]:
+    """The job's commanded extent, the reach its cutting area must hold (the proof targets' cuts
+    and, with ``check``, the paper points the check reads beside the marks), and that area's near
+    corner (``low_corner``), all in the job's frame as it stands."""
+    extent = reach = check_bounds(job)
+    if targets:
+        reach = check_bounds(replace(job, lines=[*job.lines, *(tg.outline() for tg in targets)]))
+    if check:
+        points = [sensing.registered(job.frame, c) for c in sensing.checks(job.frame)]
+        reach = (min(reach[0], *(x for _, x in points)), min(reach[1], *(y for y, _ in points)), *reach[2:])
+    return extent, reach, low_corner(reach)
+
+
+# The firmware's run-ups to the far Ls (cameo-re NOTES.md, "The three-mark sequence"): each starts
+# RUN_UP short of its L's corner line, half a leg in, and walks to the first dark run. On a 3x3
+# sheet both start beside a card: the bottom-left one 2.0 mm left of the bottom-left card's print,
+# the top-right one 2.6 mm above the top-right card's (mtg-proxy simulate), and on 2026-10-31 a
+# sheet turned a few tenths of a degree had TB123 take the bottom-left card's corner for its L.
+RUN_UP = 10.0
+PRINT_NEAR = 5.0  # mm from a run-up's line within which print counts as beside it, turned or not
+PRINT_CLEAR = 1.75  # mm past an outline a run-up starts: the engine's 0.7 mm bleed, and the spot
+RUN_UP_KEEP = 2.0  # mm of blank paper a run-up keeps before its leg
+
+
+def run_ups(frame: Frame, shapes: list[geometry.Polyline]) -> tuple[float, float]:
+    """(down, across) mm to stretch the frame the scan is told by, so that each run-up starts
+    PRINT_CLEAR past every outline (and proof target) within PRINT_NEAR of its line, keeping
+    RUN_UP_KEEP of blank paper before its leg. The scan scales every later coordinate by the told
+    size over the measured one, and ``Frame.machine`` stretches them back; the firmware checks only
+    the frame's turn against the told size (within tan 5°, cameo-re NOTES.md), not its stretch.
+    3x3: (5.5, 6) mm, so both run-ups start below and right of the cards' print."""
+    half = proof.crossing(frame)
+    t = frame.thickness / 2
+    boxes = [s.bbox() for s in shapes]
+    boxes += [
+        (tg.x - tg.size / 2, tg.y - tg.size / 2, tg.x + tg.size / 2, tg.y + tg.size / 2)
+        for tg in frame.targets
+    ]
+    most = RUN_UP - t - RUN_UP_KEEP
+
+    def stretch(ends: list[float], start: float) -> float:
+        need = max((e + PRINT_CLEAR - start for e in ends), default=0.0)
+        return math.ceil(min(max(need, 0.0), most) * 20 - 1e-9) / 20
+
+    # Bottom-left: down the line x = inset + half, from RUN_UP above the corner line to the leg.
+    x, y0, leg = frame.inset + half, frame.top + frame.height - RUN_UP, frame.top + frame.height - t
+    down = stretch(
+        [
+            b[3]
+            for b in boxes
+            if b[0] - PRINT_NEAR <= x <= b[2] + PRINT_NEAR and b[1] < leg and b[3] + PRINT_CLEAR > y0
+        ],
+        y0,
+    )
+    # Top-right: across the line y = top + half, from RUN_UP short of the corner line to the leg.
+    y, x0, leg = frame.top + half, frame.inset + frame.width - RUN_UP, frame.inset + frame.width - t
+    across = stretch(
+        [
+            b[2]
+            for b in boxes
+            if b[1] - PRINT_NEAR <= y <= b[3] + PRINT_NEAR and b[0] < leg and b[2] + PRINT_CLEAR > x0
+        ],
+        x0,
+    )
+    return down, across
+
+
+def surveyed(
+    s: Session,
+    job: Job,
+    log: SessionLog,
+    flat: sensing.Flatness,
+    slot: int,
+    where: survey.Where,
+    through_scan: bool = False,
+) -> Job:
+    """The job with its frame fitted to the marks the sensor finds (``survey``), starting where
+    ``where`` puts each: after a scan that found nothing, on the loaded mat; after one the check
+    disagreed with, through the frame the scan left (``through_scan``: the fit's shape is judged
+    loosely, that frame's own distortion unknown). The cutting area first opens to the whole page
+    there, so no reading is held back at its edge."""
+    f = job.frame
+    corners = [where(x, y) for x in (0, f.page_w) for y in (0, f.page_h)]
+    s.send(
+        *protocol.cutting_area(
+            max(y for y, _ in corners) + 2,
+            max(x for _, x in corners) + 2,
+            min(0.0, min(y for y, _ in corners) - 1),
+            min(0.0, min(x for _, x in corners) - 1),
+        )
+    )
+    t0 = time.monotonic()
+    n = [0]
+
+    def read(y: float, x: float) -> int | None:
+        n[0] += 1
+        return s.sense(y, x, SENSE_SLOT)[0]
+
+    try:
+        limits = survey.THROUGH_SCAN if through_scan else (survey.SQUARENESS, survey.STRETCH)
+        fit = survey.survey(f, read, where, log, flat.paper_at, limits)
+    finally:
+        s.send(protocol.select_light(slot))
+    turn = fit.turn()
+    way = "clockwise" if turn > 0 else "anticlockwise"
+    log.say(
+        f"the sensor found every mark ({n[0]} readings, {time.monotonic() - t0:.0f} s), the sheet turned "
+        f"{abs(turn):.2f}° {way}: cutting through where it found them"
+    )
+    return replace(job, frame=replace(f, fit=fit))
 
 
 def proof_targets(job: Job, log: SessionLog) -> list[proof.Target]:
@@ -350,13 +444,6 @@ def kept_place(
             "machine lost its place changing blades, so nothing else was cut"
         )
     log.say("check: the marks still read where the scan put them after the scores")
-
-
-# The scans a checked job tries, in order, until one agrees with the print. TB122 reads only the square
-# and the bottom-left L: on 2026-10-26 a double-sided sheet whose back showed through behind its
-# top-right L misread on every TB123 and registered first time as TB122, the check confirming the L.
-SCANS = (3, 3, 2)
-CHECK_ROUNDS = len(SCANS)
 
 
 def check_light_slot(s: Session, log: SessionLog) -> int:
@@ -570,7 +657,6 @@ LOCATE_SPAN = sensing.BESIDE  # mm right of and below the square's middle its ed
 # 1.5 mm): three, 0.38 mm, do across. Down, the deck box's start has about a millimetre to spare
 # (``locate``): four, 0.19 mm.
 LOCATE_HALVINGS = (3, 4)
-REMEASURE_HALVINGS = (5, 5)  # after a scan that found nothing: 0.09 mm both ways
 # mm past the square's 5 mm an edge may measure from a middle that reads ink and stay the square's.
 # That middle lies 0.1 mm or more inside the square (ink reads from 0.1 mm inside the 50 % point of
 # an edge measured on 2026-10-28), so a clean sheet's edge lies within 4.93 mm of it (the moves'
@@ -793,7 +879,8 @@ def prove(
                 f"after the proof cut the marks no longer read where the scan put them ({'; '.join(lost)}): "
                 "the machine lost its place cutting it, so the job isn't cut. Rerun"
             )
-    s.send(protocol.move(0, job.frame.width / 2))  # the head to the top edge's middle, off every corner
+    f = job.frame  # the head to the top edge's middle, off every corner
+    s.send(protocol.move(*f.machine(f.inset + f.width / 2, f.top)))
     s.wait_ready(60)
     log("proof", round=round_, target=target.number, x=target.x, y=target.y, size=target.size)
     answer = ask(s, confirm, round_ - 1, rescan)

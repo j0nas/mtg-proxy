@@ -6,6 +6,7 @@ import math
 import select
 import shutil
 import sys
+import tempfile
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -654,6 +655,8 @@ def simulate(
     page: Annotated[int, typer.Option("--page", min=1, help="which page of the PDF")] = 1,
 ) -> None:
     from . import simulate as sim
+    from .cameo import driver
+    from .cameo.geometry import load_kinds
 
     sidecar = find_run(run)
     if run is not None and sidecar is None:
@@ -675,11 +678,21 @@ def simulate(
         if reg_inset is not None:
             geom = cutting.with_inset(geom, reg_inset)
         frame = cutting.frame_of(geom, reg_length, reg_thickness)
+        with (
+            tempfile.TemporaryDirectory() as tmp
+        ):  # the cut outlines, for the scan's run-ups as cut-proxies tells it
+            svg = Path(tmp) / "cut.svg"
+            layout.build_cut_svg(paper, card, svg, name)
+            frame = replace(frame, run_up=driver.run_ups(frame, load_kinds(svg)[0]))
         report = sim.run(pdf, frame, page, parse_start(scan_start) if scan_start else None)
     except (LayoutError, engine.EngineMissing, sim.SimulationError, RuntimeError) as e:
         fail(str(e))
     top, left = report.start
-    typer.echo(f"simulate: {pdf.name} page {page}, {name}, scan starts at ({top:g}, {left:g}) mm")
+    down, across = frame.run_up
+    typer.echo(
+        f"simulate: {pdf.name} page {page}, {name}, scan starts at ({top:g}, {left:g}) mm, "
+        f"run-ups {down:g} mm down and {across:g} mm across"
+    )
     for line in report.lines():
         typer.echo(line)
     if not report.ok:
