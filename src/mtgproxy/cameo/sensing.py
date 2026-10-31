@@ -231,21 +231,40 @@ QUIET = 3.0  # mm from a mark to the blank paper read beside it: 2.5 mm clear of
 LOW_CONTRAST = 220  # above: paper that barely stands out from ink (210 the most a sheet that registered read)
 
 
+# mm a blank-paper reading keeps from the paper's edge, where a pouch's border and its step down onto
+# the paper read dark. The first 3x3 layout (2026-10-24, marks 3.5 mm from every edge) leaves 3.5 mm
+# above the square: a point QUIET above it read 255 at 0.5 mm from the edge on 2026-11-01. The deck
+# box's, 2 mm from its edge, has always read paper.
+EDGE_KEEP = 1.5
+
+
 def quiet(frame: Frame) -> list[Check]:
     """Blank paper beside each mark, page mm: QUIET above the square's top edge at its middle, and
     inside each L's elbow, QUIET along both legs from its corner, between the legs and clear of the
-    cards (which start past the marks' frame)."""
+    cards (which start past the marks' frame). Where the point above the square would come within
+    EDGE_KEEP of the paper's top edge, the square's point is QUIET right of it at its middle, where
+    the cards haven't started either."""
     x0, y0 = frame.inset, frame.top
-    out = [Check("top-left", f"{QUIET:g} mm above the square", x0 + SQUARE / 2, y0 - QUIET, False)]
+    if y0 - QUIET >= EDGE_KEEP:
+        out = [Check("top-left", f"{QUIET:g} mm above the square", x0 + SQUARE / 2, y0 - QUIET, False)]
+    else:
+        out = [
+            Check(
+                "top-left", f"{QUIET:g} mm right of the square", x0 + SQUARE + QUIET, y0 + SQUARE / 2, False
+            )
+        ]
     for name, (i, j), (sx, sy) in L_MARKS:
         cx, cy = frame.inset + i * frame.width, frame.top + j * frame.height
         out.append(Check(name, f"inside the {name} L", cx + sx * QUIET, cy + sy * QUIET, False))
     return out
 
 
-def reference(frame: Frame) -> Check:
+def reference(frame: Frame) -> Check | None:
     """Blank paper in the middle of the top margin, level with the square's quiet point: what the
-    paper reads where nothing printed is near, for the messages and ``lifts_by_square``."""
+    paper reads where nothing printed is near, for the messages and ``lifts_by_square``. None where
+    the margin is too narrow for it (EDGE_KEEP)."""
+    if frame.top - QUIET < EDGE_KEEP:
+        return None
     return Check("top", "in the middle of the top margin", frame.page_w / 2, frame.top - QUIET, False)
 
 

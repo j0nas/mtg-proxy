@@ -748,14 +748,19 @@ def read_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
     """Blank paper beside each mark and in the middle of the top margin, in the loaded mat's frame
     (``read_loaded``, as the placement reading). The square's point first, then the reference on
     the way to the top-right L, then the bottom-left: one pass along the top."""
-    first, *ls = sensing.quiet(frame)
-    readings = []
-    for c in (first, sensing.reference(frame), *ls):
+    points = sensing.quiet(frame)
+    ref = sensing.reference(frame)
+    if ref is not None:  # on the way from the square's point to the top-right L
+        points.insert(1, ref)
+    readings, mid = [], None
+    for c in points:
         level, reply = read_loaded(s, frame, c)
         log("quiet", mark=c.mark, what=c.what, x=c.x, y=c.y, level=level, reply=reply)
-        readings.append((c, level))
-    (_, mid), rest = readings[1], [readings[0], *readings[2:]]
-    return sensing.Flatness(tuple(rest), mid)
+        if c is ref:
+            mid = level
+        else:
+            readings.append((c, level))
+    return sensing.Flatness(tuple(readings), mid)
 
 
 def check_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:

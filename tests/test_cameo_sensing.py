@@ -238,3 +238,13 @@ def test_diagnose_says_what_a_cut_would_stop_or_warn_with():
         "blank paper beside the marks: 3 mm above the square 180, inside the top-right L 255, "
         "inside the bottom-left L 232; in the middle of the top margin 171"
     )
+
+
+def test_a_top_margin_too_narrow_for_blank_paper_reads_it_right_of_the_square():
+    # The first 3x3 layout (2026-10-24): marks 3.5 mm from every edge. 3 mm above the square is the
+    # paper's edge, which read 255 on laminate (2026-11-01).
+    old = session.Frame(page_w=210, page_h=297, inset=3.5, width=203, height=290, length=10.5)
+    first = sensing.quiet(old)[0]
+    assert (first.mark, first.what, first.x, first.y) == ("top-left", "3 mm right of the square", 11.5, 6.0)
+    assert sensing.reference(old) is None
+    assert sensing.quiet(FRAME)[0].what == "3 mm above the square" and sensing.reference(FRAME) is not None
