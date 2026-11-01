@@ -12,8 +12,9 @@ the L (TB123 twice and TB122 found nothing on 2026-10-31). A laminated sheet goe
 its pouch, which has to reach the tack, and the paper inside the pouch is as crooked as it lies.
 
 The sensor (TB63) reads the one spot under the head wherever it is sent, so here each mark is
-looked for where it actually is: the square by its four edges, each L's legs by both edges of
-each, halfway along the leg. Edges are pinned by halving between ink and blank paper and then
+looked for where it actually is: the square by its right and bottom edges and, where the paper
+beside them reads clean, its left and top ones; each L's legs by both edges of each, halfway along
+the leg. Edges are pinned by halving between ink and blank paper and then
 interpolating between the last two readings; a line's centre is the middle of its two edges, so
 the ink's spread and the spot's blur cancel. The bottom-left L's upright leg is looked for up to
 TILT_REACH either side (about 1.2° of turn), and it says how the sheet is turned, which places
@@ -49,10 +50,11 @@ LOST_REACH = 7.0  # mm either side an L's other leg is looked for when the first
 LEG_EDGE = 1.75  # mm from an ink reading on a leg to where blank paper is taken to lie, either side
 LEG_HALVINGS = 2  # each edge of a leg to 0.44 mm, then interpolated
 SQUARE_EDGE = proof.SQUARE + 1.0  # mm from an ink reading in the square to blank paper past it
-SQUARE_HALVINGS = 3  # each edge of the square to 0.75 mm, then interpolated
+SQUARE_HALVINGS = 4  # the square's far edge to 0.38 mm, then interpolated
 SQUARE_HUNT = 3.0  # mm between the readings that look for the square when its middle isn't ink
+FAR_EDGE = 0.75  # mm either side of where the square's size puts its near edge
+FAR_HALVINGS = 2
 LEG_WIDTH = (0.4, 2.4)  # mm a leg may measure: 1 mm printed, blurred by the spot either side
-SQUARE_WIDTH = (4.0, 6.5)  # mm the 5 mm square may measure
 SQUARENESS = 0.4  # degrees the page's left edge may differ from square to its top edge
 STRETCH = 0.015  # the marks' spacing may differ from the print's by this fraction
 # Those limits for readings taken through a frame a scan misread: they see the page through that
@@ -229,6 +231,24 @@ def judge(
     return None
 
 
+def square_side(read: Callable[[float], int | None], t: float, level: int, paper: int) -> float | None:
+    """The square's middle along one axis, from ``t`` inside it: its far edge (right, or bottom),
+    past which only blank paper lies on every sheet, then its near one within FAR_EDGE of where
+    the 5 mm square puts it. Past the near edge lies the paper's own edge, which a pouch reads as
+    dark as ink, as close as 3.5 mm on the first 3x3 layout: when no reading there comes out
+    paper, the near edge is taken from the square's size. None when the far edge isn't found
+    (the ink runs on: a pouch's band, a card), or the near one isn't where the size says."""
+    cut = (sensing.FULL + paper) / 2
+    if level < cut:
+        return None
+    far = edge(read, t, level, t + SQUARE_EDGE, paper, cut, SQUARE_HALVINGS)
+    if far is None:
+        return None
+    guess = far - proof.SQUARE
+    near = edge(read, guess + FAR_EDGE, level, guess - FAR_EDGE, paper, cut, FAR_HALVINGS)
+    return (guess + far) / 2 if near is None else (near + far) / 2
+
+
 def survey(
     frame: Frame,
     read_at: Read,
@@ -277,22 +297,13 @@ def survey(
             continue
         assert level is not None
         base = sensing.PAPER if sq_paper is None else min(sq_paper, level - sensing.CONTRAST)
-        across = line(
-            at("top-left", "the square across", "x", hy), hx, level, base, SQUARE_EDGE, SQUARE_HALVINGS
-        )
-        if across is None or not SQUARE_WIDTH[0] <= across.width <= SQUARE_WIDTH[1]:
+        across = square_side(at("top-left", "the square across", "x", hy), hx, level, base)
+        if across is None:
             continue
-        down = line(
-            at("top-left", "the square down", "y", across.centre),
-            hy,
-            level,
-            base,
-            SQUARE_EDGE,
-            SQUARE_HALVINGS,
-        )
-        if down is None or not SQUARE_WIDTH[0] <= down.width <= SQUARE_WIDTH[1]:
+        down = square_side(at("top-left", "the square down", "y", across), hy, level, base)
+        if down is None:
             continue
-        found = (across.centre, hy, down.centre)
+        found = (across, hy, down)
         break
     if found is None:
         raise missing("square", (gy, gx), SQUARE_HUNT + half)

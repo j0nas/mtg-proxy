@@ -271,7 +271,9 @@ def test_a_scan_that_finds_nothing_is_followed_by_the_sensor_finding_the_marks_w
     sheet = FussySheet(at=(5.0, 3.0), slips=(0.0, 1.0))
     record = run(sheet)
     (fit,) = [f for e, f in record if e == "surveyed"]
-    assert fit["origin"] == pytest.approx([5.0 + FRAME.inset, 4.0 + FRAME.top], abs=0.1)
+    # This sheet's edges are sharp, so only the halvings pin them (0.38 mm brackets each side); the
+    # real sensor's blur is what the survey interpolates (tests/test_cameo_survey.py: 0.15 mm cuts).
+    assert fit["origin"] == pytest.approx([5.0 + FRAME.inset, 4.0 + FRAME.top], abs=0.15)
     assert fit["turn"] == pytest.approx(0.0, abs=0.02)
     assert sheet.sent.count(b"TB123") == 1 and b"TB122" not in sheet.sent
     assert b"D" in sheet.sent.replace(b"TB", b"")

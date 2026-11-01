@@ -41,6 +41,10 @@ INK = 250  # at or above: ink. Ink read 255 on 2026-10-25 (253 where the spot wa
 FULL = 255  # what TB63 gives over black ink, the most it gives (238-255 over the deck box's dim ink)
 PAPER = 245  # at or below: paper. Paper read 151-242, 242 only half a mm from a leg
 OUTSIDE_SQUARE = 1.25  # mm from the square's edge to its paper checks (it read 0.5 mm wide each side)
+# mm a paper reading beside the square keeps from the paper's edge. The first 3x3 layout (marks
+# 3.5 mm from every edge) puts the points left of and above the square 2.25 mm from it, where a
+# laminated sheet's edge band read 245 on 2026-11-01 under a frame that was right: they are skipped.
+CHECK_EDGE_KEEP = 3.0
 NUDGE = 0.25  # mm either side of a leg's centre line, read when the centre itself isn't ink
 # A leg that reads no ink at all still passes as a faint one when it is a narrow dark line: CONTRAST
 # above the paper SIDE mm away on both sides. On double-sided glossy (2026-10-26) a correctly placed
@@ -181,10 +185,16 @@ def checks(frame: Frame) -> list[Check]:
     mid, far = SQUARE / 2, SQUARE + OUTSIDE_SQUARE
     out = [
         Check("top-left", "the square", x0 + mid, y0 + mid, True, nudge=(1, 0)),
-        Check("top-left", "left of the square", x0 - OUTSIDE_SQUARE, y0 + mid, False),
-        Check("top-left", "right of the square", x0 + far, y0 + mid, False),
-        Check("top-left", "above the square", x0 + mid, y0 - OUTSIDE_SQUARE, False),
-        Check("top-left", "below the square", x0 + mid, y0 + far, False),
+        *(
+            c
+            for c, edge in (
+                (Check("top-left", "left of the square", x0 - OUTSIDE_SQUARE, y0 + mid, False), x0),
+                (Check("top-left", "right of the square", x0 + far, y0 + mid, False), math.inf),
+                (Check("top-left", "above the square", x0 + mid, y0 - OUTSIDE_SQUARE, False), y0),
+                (Check("top-left", "below the square", x0 + mid, y0 + far, False), math.inf),
+            )
+            if edge - OUTSIDE_SQUARE >= CHECK_EDGE_KEEP
+        ),
     ]
     half = frame.length / 2
     for name, (i, j), (sx, sy) in L_MARKS:

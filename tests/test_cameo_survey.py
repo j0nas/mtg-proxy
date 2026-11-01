@@ -210,3 +210,30 @@ def test_an_edge_is_pinned_between_two_readings_by_their_levels():
     ramp = lambda t: round(PAPER + (INK - PAPER) * min(1, max(0, (t - 1.7) / 0.6)))  # noqa: E731
     got = survey.edge(ramp, 3.0, INK, 1.25, PAPER, (INK + PAPER) / 2, 2)  # a leg's reach, 1.75 mm
     assert got == pytest.approx(2.0, abs=0.08)
+
+
+def profile(ink_spans, blur=0.3):
+    """Levels along one axis: ink over ``ink_spans`` (from, to) mm, ramping over ``blur`` either side."""
+
+    def cover(t):
+        return max(
+            min(1.0, max(0.0, (min(b, t + blur) - max(a, t - blur)) / (2 * blur))) for a, b in ink_spans
+        )
+
+    return lambda t: round(PAPER + (INK - PAPER) * cover(t))
+
+
+def test_the_squares_middle_comes_from_both_edges_where_the_paper_beside_it_reads_clean():
+    # the first 3x3 layout: the paper's edge 3.5 mm left of the square, a pouch's band past it
+    read = profile([(-20, 0.0), (3.5, 8.5)])
+    assert survey.square_side(read, 6.0, INK, PAPER) == pytest.approx(6.0, abs=0.1)
+
+
+def test_a_band_against_the_square_leaves_its_near_edge_to_its_size():
+    read = profile([(-20, 3.0), (3.5, 8.5)])  # the band reaches to half a mm from the square
+    assert survey.square_side(read, 6.0, INK, PAPER) == pytest.approx(6.0, abs=0.15)
+
+
+def test_ink_that_runs_on_past_the_far_edge_is_no_square():
+    read = profile([(-20, 20)])  # a pouch's band, or a card
+    assert survey.square_side(read, 6.0, INK, PAPER) is None
