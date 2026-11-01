@@ -474,7 +474,9 @@ So the scan is told a frame 5.5 mm taller and 6.05 mm wider than printed
 (`driver.run_ups`, worked out from the job's outlines): each pass starts past the print and walks
 only blank paper to its leg, and every coordinate after the scan is stretched back by the same
 ratio, since the scan scales the frame by measured over told size (TB55,1). The firmware checks the
-frame's turn (within 5°), not its size. `mtg-proxy simulate` walks the passes the same way.
+frame's turn (within 5°), not its size. `mtg-proxy simulate` walks the passes the same way. First on
+the machine on 2026-11-01: a deck box told a frame 7.5 mm larger both ways registered first time,
+and every sensor check through the stretched frame agreed.
 
 The 6 mm legs still limit the scan to a sheet turned about 0.4° either way, and a laminated sheet
 lies as crooked as its paper sits in the pouch. A scan that finds nothing, or a frame the check

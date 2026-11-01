@@ -103,6 +103,12 @@ been pulled in weeks. It printed the first 3x3 layout (2026-10-24): marks 3.5 mm
 - **One run stopped as "lifting" for a sheet lying 2.5 mm off**: its square's edge read past where
   a square with ink under its middle can end. The placement now searches around it instead.
 
+The run-ups were built for the tilt that turned out not to be the cause, and were first tried on the
+machine the same night, on Gisa's deck box (a 125 µm pouch): told a frame 7.5 mm larger both ways,
+the scan registered first time and every sensor check through the stretched frame agreed. Its
+first try had stopped with the sheet lifting during the scan (paper beside the square 135-141
+before it, 197-224 after); a stickier mat held it.
+
 What changed for the class: `make-proxies` and `cut-proxies` compare this checkout and its engine
 with GitHub before they run, and stop when either is behind (`freshness.py`, `--allow-stale`
 overrides it); run.json records both versions and the printed marks, which `cut-proxies` checks
