@@ -249,3 +249,19 @@ def test_a_search_with_no_paper_round_it_gives_up_after_a_few_readings():
 
     assert survey.search(read, 0.0, survey.LOST_REACH, 150, survey.LEG_WIDTH, survey.LEG_EDGE, 2) is None
     assert len(reads) <= survey.BLIND + 2 * survey.LEG_HALVINGS
+
+
+def test_a_square_whose_paper_no_longer_reads_as_paper_stops_in_a_few_readings():
+    # 2026-11-01, Gisa in a 125 µm pouch: paper beside the square read 135-141 before the scan and
+    # 197-224 after it, the sheet lifted; the survey spent 90 s on the square before giving up.
+    n = []
+
+    def read(y, x):
+        n.append((y, x))
+        return 255 if abs(x - 6) < 2.5 and abs(y - 11.5) < 2.5 else 210
+
+    with pytest.raises(
+        session.CutError, match=r"lifts off the mat at its top-left corner .*where it read 135"
+    ):
+        survey.survey(FRAME, read, lambda x, y: (y, x), session.SessionLog(None), lambda mark: 135)
+    assert len(n) <= survey.BLIND + 2 * survey.SQUARE_HALVINGS + 2

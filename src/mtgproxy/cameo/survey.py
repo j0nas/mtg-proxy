@@ -302,20 +302,45 @@ def survey(
     gy, gx = where(x0 + half, y0 + half)
     sq_paper = paper("top-left")
     found = None
+    # Every reading round the square, for BLIND: none of them paper means the sheet no longer reads
+    # as it did before the scan (2026-11-01: Gisa's paper beside the square read 135-141 before it
+    # and 197-224 after, the 125 µm pouch lifted), and no square can be told from it.
+    seen: list[int | None] = []
+    blank_below = (sensing.FULL + (sensing.PAPER if sq_paper is None else sq_paper)) / 2
+
+    def sq(what: str, axis: str, fixed: float) -> Callable[[float], int | None]:
+        read = at("top-left", what, axis, fixed)
+
+        def tracked(t: float) -> int | None:
+            level = read(t)
+            seen.append(level)
+            return level
+
+        return tracked
+
     for dx, dy in sorted(
         ((a * SQUARE_HUNT, b * SQUARE_HUNT) for a in (-1, 0, 1) for b in (-1, 0, 1)),
         key=lambda d: (math.hypot(*d), d[1], d[0]),
     ):
+        if len(seen) >= BLIND and not any(v is not None and v < blank_below for v in seen):
+            raise CutError(
+                sensing.press_down(
+                    ["top-left"],
+                    f"blank paper round the square reads {min(v for v in seen if v is not None)}-"
+                    f"{max(v for v in seen if v is not None)}, like ink, where it read "
+                    f"{'paper' if sq_paper is None else sq_paper} before the scan",
+                )
+            )
         hy, hx = gy + dy, gx + dx
-        level = at("top-left", "the square", "x", hy)(hx)
+        level = sq("the square", "x", hy)(hx)
         if not hit(level, sq_paper):
             continue
         assert level is not None
         base = sensing.PAPER if sq_paper is None else min(sq_paper, level - sensing.CONTRAST)
-        across = square_side(at("top-left", "the square across", "x", hy), hx, level, base)
+        across = square_side(sq("the square across", "x", hy), hx, level, base)
         if across is None:
             continue
-        down = square_side(at("top-left", "the square down", "y", across), hy, level, base)
+        down = square_side(sq("the square down", "y", across), hy, level, base)
         if down is None:
             continue
         found = (across, hy, down)
