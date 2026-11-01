@@ -518,8 +518,9 @@ def check_placement(s: Session, frame: Frame, log: SessionLog) -> Frame:
             break
     if ink is not None:
         found = locate(s, frame, log, ink, paper)
-        assert found is not None  # its middle read ink: it measures, or locate stops the job
-        if max(abs(found[0]), abs(found[1])) < MEASURE_MOVE:
+        if found is None:  # its edge lies past where the square can end from its middle: look round it
+            found = hunt(s, frame, log, local)
+        elif max(abs(found[0]), abs(found[1])) < MEASURE_MOVE:
             found = (0.0, 0.0)
     else:
         # The middle missed the square, so it may be the paper, and the point right of it the square's
@@ -729,18 +730,21 @@ def locate(
             else:
                 hi = mid
         if (lo + hi) / 2 > proof.SQUARE + LIFTED_EDGE:
-            side = "right of" if axis == "x" else "below"
-            raise CutError(
-                sensing.press_down(
-                    ["top-left"],
-                    f"blank paper {side} the square reads {', '.join(levels)} out to {lo:.1f} mm from its "
-                    f"middle, like its ink ({ink}), where the paper beside it reads {pale[0]}",
-                )
+            # Ink past where a square with ink under its middle can end: the middle reading caught the
+            # square's near edge, the sheet 2.5 mm or more off (2026-11-01: 255 out to 5.2 mm, paper
+            # past it at 141), or blank paper reading like ink. Either way the hunt looks round it, and
+            # paper that reads like ink stops the run at the flatness check after it.
+            log.note(
+                f"the square's edge {'right of' if axis == 'x' else 'below'} its middle reads {', '.join(levels)} "
+                f"out to {lo:.1f} mm: looking round it"
             )
+            return None
         return (lo + hi) / 2
 
     ex = edge("x", halvings[0])
-    ey = edge("y", halvings[1])
+    ey = None if ex is None else edge("y", halvings[1])
+    if ex is None or ey is None:
+        return None
     return round(c.x + ex - proof.SQUARE - frame.inset, 2), round(c.y + ey - proof.SQUARE - frame.top, 2)
 
 

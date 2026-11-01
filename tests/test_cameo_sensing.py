@@ -210,7 +210,8 @@ def test_blank_paper_that_reads_like_ink_names_the_corner_that_lifts():
         "the sheet lifts off the mat at its top-left and top-right corners (blank paper 3 mm above the "
         "square reads 248 and inside the top-right L 255, like ink; mid-top: 171). " + PRESS.format(it="them")
     )
-    assert _flat().stop() is None and _flat(tl=245).stop() is None  # 245 is still paper (PAPER)
+    assert _flat().stop() is None and _flat(tl=235).stop() is None  # 235 is still paper (UNREADABLE)
+    assert "3 mm above the square reads 238, like ink" in _flat(tl=238).stop()  # 2026-11-01's 238
     assert "blank paper inside the bottom-left L reads nothing" in _flat(bl=None).stop()
 
 

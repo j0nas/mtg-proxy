@@ -44,6 +44,9 @@ Where = Callable[[float, float], tuple[float, float]]
 Read = Callable[[float, float], int | None]
 
 STEP = 0.75  # mm between search readings: a 1 mm leg reads as ink within about 0.4 mm of its centre
+# A search gives up once this many readings have none that reads as paper: on 2026-11-01 a sheet
+# whose bottom-left corner didn't lie flat read 221-255 all round its L, for 4.5 minutes of searching.
+BLIND = 5
 TILT_REACH = 6.0  # mm either side the bottom-left L's upright leg is looked for: about 1.2° of turn
 REACH = 2.5  # mm either side the top-right L's level leg is looked for, once the turn is known
 LOST_REACH = 7.0  # mm either side an L's other leg is looked for when the first isn't where expected
@@ -155,15 +158,25 @@ def search(
     order = [0.0, *(k * s * STEP for k in range(1, n + 1) for s in (1, -1))]
     passed: list[tuple[float, float]] = []
     base = sensing.PAPER if paper is None else paper
+    cut = (sensing.FULL + base) / 2
+    levels: list[int | None] = []
+
+    def tracked(t: float) -> int | None:
+        level = read(t)
+        levels.append(level)
+        return level
+
     for off in order:
+        if len(levels) >= BLIND and not any(v is not None and v < cut for v in levels):
+            return None  # nothing here reads as paper: no line can be told from it
         t = guess + off
         if any(a <= t <= b for a, b in passed):
             continue
-        level = read(t)
+        level = tracked(t)
         if not hit(level, paper):
             continue
         assert level is not None
-        found = line(read, t, level, min(base, level - sensing.CONTRAST), edge_reach, halvings)
+        found = line(tracked, t, level, min(base, level - sensing.CONTRAST), edge_reach, halvings)
         if found is None:
             continue
         if width[0] <= found.width <= width[1]:

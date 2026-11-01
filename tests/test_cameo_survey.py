@@ -237,3 +237,15 @@ def test_a_band_against_the_square_leaves_its_near_edge_to_its_size():
 def test_ink_that_runs_on_past_the_far_edge_is_no_square():
     read = profile([(-20, 20)])  # a pouch's band, or a card
     assert survey.square_side(read, 6.0, INK, PAPER) is None
+
+
+def test_a_search_with_no_paper_round_it_gives_up_after_a_few_readings():
+    # 2026-11-01: a corner that didn't lie flat read 221-255 all round its L for 4.5 minutes.
+    reads = []
+
+    def read(t):
+        reads.append(t)
+        return 240
+
+    assert survey.search(read, 0.0, survey.LOST_REACH, 150, survey.LEG_WIDTH, survey.LEG_EDGE, 2) is None
+    assert len(reads) <= survey.BLIND + 2 * survey.LEG_HALVINGS

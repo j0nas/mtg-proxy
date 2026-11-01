@@ -239,6 +239,10 @@ def legs(frame: Frame, near: tuple[float, float] | None = None) -> list[Check]:
 
 QUIET = 3.0  # mm from a mark to the blank paper read beside it: 2.5 mm clear of a 1 mm leg's edge
 LOW_CONTRAST = 220  # above: paper that barely stands out from ink (210 the most a sheet that registered read)
+# Above: paper beside a mark that no scan or survey can tell from its ink. No sheet that registered
+# read more than 223 there (output/cut to 2026-10-28); on 2026-11-01 one read 238 inside its
+# bottom-left L, the scan found nothing, and the survey read 221-255 all round the L for 4.5 minutes.
+UNREADABLE = 235
 
 
 # mm a blank-paper reading keeps from the paper's edge, where a pouch's border and its step down onto
@@ -354,7 +358,7 @@ class Flatness:
     def stop(self) -> str | None:
         """Why the scan can't be trusted, when blank paper beside a mark doesn't read as paper: the
         sheet lifts off the mat at that mark's corner (``press_down``)."""
-        dark = [(c, level) for c, level in self.readings if not blank(level)]
+        dark = [(c, level) for c, level in self.readings if not blank(level) or level > UNREADABLE]
         if not dark:
             return None
         (c0, l0), *rest = [(c.what, "nothing" if level is None else str(level)) for c, level in dark]

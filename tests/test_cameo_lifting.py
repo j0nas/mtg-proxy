@@ -226,10 +226,9 @@ def test_dark_paper_round_the_square_is_measured_through_or_stops_before_the_sca
     # and 200 further out. Where that ring reaches the point 6 mm right of the expected middle, it is
     # the paper the edges are judged against and the square measures where it lies (the check after
     # the scan then names the lift, sensing.lifts_by_square); where it doesn't, the ring reads as ink
-    # and an edge measures past 5.3 mm from a middle that reads ink, which no square can.
+    # and an edge measures past 5.3 mm from a middle that reads ink, which no square can: the hunt
+    # looks round it then (a square 2.5 mm off reads so too, 2026-11-01), and blank paper reading 240
+    # stops the run at the flatness check (sensing.UNREADABLE).
     ring = {"beside": 200, "near": 240, "reach": 4.0}
     assert locate(Sheet((0.4, -0.3), **ring)) == pytest.approx((0.4, -0.3), abs=0.3)
-    with pytest.raises(
-        session.CutError, match=r"^the sheet lifts off the mat at its top-left corner \(blank paper "
-    ):
-        locate(Sheet((-1.2, 1.0), **ring))
+    assert locate(Sheet((-1.2, 1.0), **ring)) is None
