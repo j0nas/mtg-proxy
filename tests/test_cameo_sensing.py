@@ -62,10 +62,9 @@ def test_tb63_stores_into_slots_one_to_four_only_and_replies_parse_as_numbers():
 
 def test_a_cut_reads_the_square_and_both_legs_of_each_l():
     c = sensing.checks(FRAME)
-    assert len(c) == 8 and sum(x.ink for x in c) == 5  # left of the square is 2.25 mm from the paper's edge
+    assert len(c) == 9 and sum(x.ink for x in c) == 5
     square = {x.what: (x.x, x.y) for x in c if x.mark == "top-left"}
-    assert square["the square"] == (6.0, 11.5) and "left of the square" not in square
-    assert square["above the square"] == (6.0, 7.75)
+    assert square["the square"] == (6.0, 11.5) and square["left of the square"] == (2.25, 11.5)
     assert square["below the square"] == (6.0, 15.25)  # 1.25 mm below its bottom edge
     legs = {(x.mark, x.what): (x.x, x.y) for x in c}
     assert legs[("top-right", "the vertical leg")] == (206.5, 12)
@@ -240,20 +239,3 @@ def test_diagnose_says_what_a_cut_would_stop_or_warn_with():
         "blank paper beside the marks: 3 mm above the square 180, inside the top-right L 255, "
         "inside the bottom-left L 232; in the middle of the top margin 171"
     )
-
-
-def test_a_top_margin_too_narrow_for_blank_paper_reads_it_right_of_the_square():
-    # The first 3x3 layout (2026-10-24): marks 3.5 mm from every edge. 3 mm above the square is the
-    # paper's edge, which read 255 on laminate (2026-11-01).
-    old = session.Frame(page_w=210, page_h=297, inset=3.5, width=203, height=290, length=10.5)
-    first = sensing.quiet(old)[0]
-    assert (first.mark, first.what, first.x, first.y) == ("top-left", "3 mm right of the square", 11.5, 6.0)
-    assert sensing.reference(old) is None
-    assert sensing.quiet(FRAME)[0].what == "3 mm above the square" and sensing.reference(FRAME) is not None
-
-
-def test_the_checks_skip_paper_beside_the_square_near_the_papers_edge():
-    old = session.Frame(page_w=210, page_h=297, inset=3.5, width=203, height=290, length=10.5)
-    whats = [c.what for c in sensing.checks(old) if c.mark == "top-left"]
-    assert whats == ["the square", "right of the square", "below the square"]
-    assert len([c for c in sensing.checks(FRAME) if c.mark == "top-left"]) == 4  # all but left of it
