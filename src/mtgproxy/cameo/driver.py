@@ -1034,7 +1034,11 @@ def wrap_up(s: Session, t: Transport, log: SessionLog) -> None:
     try:
         if s.touched:
             s.finish()
-            s.wait_ready(60)
+            if s.wait_ready(60, out_pause=False) == "paused":
+                log.say(
+                    "the Cameo is paused with the job's last commands in it: switch it off and on to drop "
+                    "them (pressing pause carries them out, then goes home)"
+                )
     except Exception as e:  # the link may already be gone
         log.say(
             f"WARNING: couldn't send the return to the origin ({e}); power-cycle the Cameo before the next job"

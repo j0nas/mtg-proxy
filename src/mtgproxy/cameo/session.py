@@ -254,16 +254,21 @@ class Session:
     def status(self) -> str:
         return p.status_of(self.query(p.raw(p.STATUS)))
 
-    def wait_ready(self, timeout: float, poll: float = 0.5) -> str:
+    def wait_ready(self, timeout: float, poll: float = 0.5, out_pause: bool = True) -> str:
         """Poll until the machine stops moving: its status then. A pause on the machine waits for
         the operator to press pause again, however long, and doesn't count against ``timeout``.
         On 2026-10-26 the driver took a pause mid-cut for an error, sent the head home and let go,
-        and the machine's pause button could no longer resume the cut."""
+        and the machine's pause button could no longer resume the cut. With ``out_pause`` False a
+        pause counts like any wait: the return to the origin after an interrupt, which waited on a
+        paused machine for ever on 2026-11-01."""
         end = time.monotonic() + timeout
         told = False
         while True:
             s = self.status()
-            if s == "paused":
+            if s == "paused" and not out_pause:
+                if time.monotonic() > end:
+                    return s
+            elif s == "paused":
                 if not told:
                     self.log.say("paused on the Cameo: press its pause button again to carry on")
                     told = True

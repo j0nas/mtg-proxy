@@ -109,6 +109,14 @@ the scan registered first time and every sensor check through the stretched fram
 first try had stopped with the sheet lifting during the scan (paper beside the square 135-141
 before it, 197-224 after); a stickier mat held it.
 
+Gisa's next cut, force 33, depth 7, 4 passes, worked out from 80 µm for its 125 µm pouch, cut the
+paper and the top film and stopped in the bottom one: the extrapolation took a thick film to cut
+like paper. A pass at force 38 then made the carriage sound like it skipped, and Jonas paused it.
+**Raise depth, then passes, before force**: a skipped stepper loses its place on an open-loop
+machine. Interrupting that paused run hung it: its return to the origin waited on the pause for
+ever, behind cut commands already in the Cameo's buffer. It now gives up after a minute and says
+to switch the Cameo off and on, which drops them; pressing pause would carry them out.
+
 What changed for the class: `make-proxies` and `cut-proxies` compare this checkout and its engine
 with GitHub before they run, and stop when either is behind (`freshness.py`, `--allow-stale`
 overrides it); run.json records both versions and the printed marks, which `cut-proxies` checks

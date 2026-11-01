@@ -724,3 +724,16 @@ def test_a_proofed_scored_job_proves_then_scores_then_cuts_reading_the_marks_aft
         "2 readings",  # kept_place: the legs of the L nearest where the scores ended
         "cuts",
     ]
+
+
+def test_going_home_on_a_paused_machine_gives_up_instead_of_waiting_for_ever(monkeypatch):
+    # 2026-11-01: a cut interrupted while the Cameo was paused waited in its return for ever.
+    t = machine({b"\x1b\x05": b"3\x03"})  # paused
+    said = []
+    clock = iter(range(0, 10_000, 30))
+    monkeypatch.setattr(session.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(session.time, "sleep", lambda s: None)
+    s = session.Session(t, session.SessionLog(None, echo=said.append))
+    s.touched = True
+    driver.wrap_up(s, t, session.SessionLog(None, echo=said.append))
+    assert any("switch it off and on" in m for m in said)
