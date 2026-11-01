@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from . import layout
+from . import freshness, layout
 from .paths import CUT_OFFSET_FILE, ROOT
 
 
@@ -99,6 +99,7 @@ class CutOptions:
         0.0,
         0.0,
     )  # (right, down) mm: the paper's corner from the grid's (cli: LAMINATED_AT)
+    printed_marks: dict | None = None  # run.json's marks: what the sheet printed, compared with the layout
     # The SVG's scored lines (cameo.geometry.SCORE), cut first in one pass; False leaves them out.
     scores: bool = True
     score_force: int = SCORE_FORCE
@@ -137,6 +138,33 @@ def with_inset(geom: layout.Geometry, inset: float) -> layout.Geometry:
         reg_x_mm=round(geom.page_w_mm - 2 * inset, 3),
         reg_y_mm=round(geom.page_h_mm - 2 * inset, 3),
         reg_inset_y_mm=None,
+    )
+
+
+def marks_mismatch(printed: dict, geom: layout.Geometry, reg_length: float | None = None) -> str | None:
+    """Why this checkout can't cut a sheet whose run.json says it printed ``printed`` marks, or None
+    when the layout here puts them where the sheet has them. A sheet and the cut that reads it must
+    come from the same layout: on 2026-11-01 a stale checkout printed eight sheets with marks 3.5 mm
+    from every edge, and a current one cut them as 9 mm from the top and bottom."""
+    here = {"inset": geom.reg_inset_mm, "inset_y": geom.reg_inset_y_mm, "length": geom.reg_length_mm}
+    keys = ("inset", "inset_y") if reg_length is not None else ("inset", "inset_y", "length")
+
+    def differs(a, b) -> bool:
+        return (a is None) != (b is None) or (a is not None and b is not None and abs(a - b) > 0.05)
+
+    bad = [k for k in keys if k in printed and differs(printed[k], here[k])]
+    if not bad:
+        return None
+
+    def say(m: dict) -> str:
+        y = m.get("inset_y")
+        return f"{m['inset']:g} mm from the sides, {m['inset'] if y is None else y:g} from the top and bottom, legs {m['length']:g} mm"
+
+    return (
+        f"this sheet was printed with its marks {say(printed)}, and this checkout's layout puts them "
+        f"{say(here)}: the machine that built it and this one run different versions. Update the one that "
+        "is behind (git pull, and the engine's) and rebuild the sheet, or cut it as printed with "
+        "--reg-inset and --reg-length"
     )
 
 
@@ -235,6 +263,10 @@ def run_cut(o: CutOptions) -> int:
         geom = layout.build_cut_svg(o.paper, o.card_size, None, o.layout)
     if o.reg_inset is not None:
         geom = with_inset(geom, o.reg_inset)
+    elif o.printed_marks:
+        mismatch = marks_mismatch(o.printed_marks, geom, o.reg_length)
+        if mismatch:
+            raise CutError(mismatch)
 
     # 2. The machine's fixed cut offset, measured with deckbox's calibration sheets (pnpm calib).
     cfg_x, cfg_y = read_cut_offset()
@@ -295,6 +327,7 @@ def run_cut(o: CutOptions) -> int:
     # One log per run: a batch of sheets used to overwrite it, losing the runs before a bad one.
     log_path = o.out_dir / f"{name}.{time.strftime('%Y%m%d-%H%M%S')}.session.jsonl"
     log = session.SessionLog(log_path, echo=lambda m: print(f"cut-proxies: {m}"))
+    log("versions", **freshness.versions())  # what cut this sheet, for when a cut goes wrong
     try:
         t = driver.open_transport(o.connection, o.ble_name, log, o.dry_run)
         if o.probe:

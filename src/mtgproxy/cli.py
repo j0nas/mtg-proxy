@@ -223,10 +223,17 @@ def make(
             ),
         ),
     ] = None,
+    allow_stale: Annotated[
+        bool,
+        typer.Option(
+            "--allow-stale", help="run even when this checkout or its engine is behind GitHub (freshness.py)"
+        ),
+    ] = False,
 ) -> None:
     if show_notes:
         _notes(deck, out or runs_parent())
         return
+    _fresh(allow_stale)
     if test and deck is not None:
         fail(f"--test takes no decklist (got {deck!r})")
     if tokens is not None and tokens_only is not None:
@@ -269,6 +276,16 @@ def make(
     build.print_summary(result, opts)
     if result.mirror_failed:
         raise typer.Exit(1)
+
+
+def _fresh(allow_stale: bool) -> None:
+    """Stop before a build or a cut on a checkout that is behind GitHub (``freshness``)."""
+    from . import freshness
+
+    try:
+        freshness.ensure_fresh(lambda m: typer.echo(f"mtg-proxy: {m}", err=True), allow_stale)
+    except freshness.StaleError as e:
+        fail(str(e))
 
 
 def _notes(name: str | None, parent: Path) -> None:
@@ -485,9 +502,16 @@ def cut(
             "0,0 with --preset paper",
         ),
     ] = None,
+    allow_stale: Annotated[
+        bool,
+        typer.Option(
+            "--allow-stale", help="run even when this checkout or its engine is behind GitHub (freshness.py)"
+        ),
+    ] = False,
 ) -> None:
     if scan:
         raise typer.Exit(cutting.ble_scan())
+    _fresh(allow_stale)
     if preset not in cutting.PRESETS:
         fail(f"--preset must be one of {', '.join(cutting.PRESETS)}, got {preset!r}")
     plain = False
@@ -544,6 +568,7 @@ def cut(
         proof_target_size=proof_target_size, proof_from=proof_from,
         proof_blade=parse_blade(proof_blade) if proof_blade else None,
         paper_at=parse_paper_at(paper_at) if paper_at is not None else default_paper_at(preset),
+        printed_marks=info.marks if info else None,
     )  # fmt: skip
     try:
         cutting.check(o)  # before the loop: a retry can't fix the options

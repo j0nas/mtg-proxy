@@ -290,8 +290,8 @@ def reach_of(
 # The firmware's run-ups to the far Ls (cameo-re NOTES.md, "The three-mark sequence"): each starts
 # RUN_UP short of its L's corner line, half a leg in, and walks to the first dark run. On a 3x3
 # sheet both start beside a card: the bottom-left one 2.0 mm left of the bottom-left card's print,
-# the top-right one 2.6 mm above the top-right card's (mtg-proxy simulate), and on 2026-10-31 a
-# sheet turned a few tenths of a degree had TB123 take the bottom-left card's corner for its L.
+# the top-right one 2.6 mm above the top-right card's (mtg-proxy simulate), which a sheet turned
+# 0.2-0.45° brings onto the pass (the simulator, tilting the page; not yet seen on the machine).
 RUN_UP = 10.0
 PRINT_NEAR = 5.0  # mm from a run-up's line within which print counts as beside it, turned or not
 PRINT_CLEAR = 1.75  # mm past an outline a run-up starts: the engine's 0.7 mm bleed, and the spot

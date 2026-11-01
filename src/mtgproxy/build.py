@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
-from . import engine, layout, local, manifest, mirror, notes, printing, printings, trim
+from . import engine, freshness, layout, local, manifest, mirror, notes, printing, printings, trim
 from .backlog import Backlog, Entry
 from .cache import ImageCache
 from .decks import FetchedDeck, fetch_deck, is_deck_url
@@ -619,6 +619,8 @@ def run_build(opts: BuildOptions) -> BuildResult:
         deferred=len(deferred),
         options=opts.recorded(),
         sheets={k: v.as_dict() for k, v in sheets.items()},
+        code=freshness.versions(),
+        marks=layout.printed_marks(opts.paper, opts.card_size, opts.layout),
     ).write(out)
 
     result = BuildResult(name, out, pdfs.pdf, pdfs.duplex_pdf, pdfs.dfc_count, printed)

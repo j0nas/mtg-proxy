@@ -13,6 +13,12 @@ needs_engine = pytest.mark.skipif(not (SCM / "create_pdf.py").is_file(), reason=
 
 
 @pytest.fixture(autouse=True)
+def no_github(monkeypatch) -> None:
+    """Builds and cuts compare the checkouts with GitHub first (freshness.py); tests never do."""
+    monkeypatch.setenv("MTG_PROXY_NO_FRESHNESS", "1")
+
+
+@pytest.fixture(autouse=True)
 def proxies_root(tmp_path_factory, monkeypatch) -> Path:
     """Builds without -o go to $MTG_PROXY_OUT: point it at a fresh, not yet created folder, never ~/Desktop."""
     root = tmp_path_factory.mktemp("home") / "proxies"

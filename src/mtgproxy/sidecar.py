@@ -38,6 +38,11 @@ class RunInfo:
     options: dict = field(default_factory=dict)  # build options needed to re-derive the sheets
     sheets: dict = field(default_factory=dict)  # per-slot manifest, see manifest.py
     version: str = __version__
+    # What printed it: each checkout's short hash (freshness.versions), and the marks the PDF carries
+    # (inset, inset_y, length mm, from the engine's layout), which cut-proxies compares with its own.
+    # Empty in run.json files from before 2026-11-01.
+    code: dict = field(default_factory=dict)
+    marks: dict = field(default_factory=dict)
 
     def write(self, out_dir: Path) -> Path:
         p = out_dir / SIDECAR_NAME

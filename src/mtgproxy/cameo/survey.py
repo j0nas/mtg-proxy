@@ -5,11 +5,13 @@ The scan (TB123) finds the square by an area search, then walks two fixed passes
 to the bottom-left L half a leg right of its upright leg, and across to the top-right L half a
 leg below its level leg, each starting 10 mm short of the L (cameo-re NOTES.md). On a 3x3 sheet
 those legs are 6 mm, so the passes cross them 3 mm from their corners, and a sheet turned on the
-mat moves the far Ls sideways off the passes: about 0.4° is all the scan takes either way. Before
-2026-10-31 the passes also ran 2 mm beside the bottom-left and top-right cards' print, and a sheet
-turned 0.2-0.45° clockwise put the bottom-left card's corner on the pass, which the scan took for
-the L (TB123 twice and TB122 found nothing on 2026-10-31). A laminated sheet goes on the mat by
-its pouch, which has to reach the tack, and the paper inside the pouch is as crooked as it lies.
+mat moves the far Ls sideways off the passes: about 0.4° is all the scan takes either way. The
+passes also ran 2 mm beside the bottom-left and top-right cards' print, which the simulator says a
+sheet turned 0.2-0.45° clockwise brings onto the bottom-left pass (``driver.run_ups`` now starts
+them past it). A laminated sheet goes on the mat by its pouch, which has to reach the tack, and the
+paper inside the pouch is as crooked as it lies. All of this is from the simulator and the
+firmware, not an observed failure: the misreads of 2026-10-31 that prompted it came from sheets
+printed with another layout (docs/lessons.md).
 
 The sensor (TB63) reads the one spot under the head wherever it is sent, so here each mark is
 looked for where it actually is: the square by its right and bottom edges and, where the paper

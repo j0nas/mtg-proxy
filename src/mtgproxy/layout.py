@@ -164,6 +164,18 @@ def registration_mm(paper: str, card_size: str, name: str) -> tuple[float, float
     return engine.size_to_mm(inset), engine.size_to_mm(length)
 
 
+def printed_marks(paper: str, card_size: str, name: str) -> dict:
+    """The marks a sheet of this layout prints, for run.json: inset and leg length, and the inset from
+    the top and bottom where the layout sets its own (None: the same)."""
+    inset, length = registration_mm(paper, card_size, name)
+    inset_y = registration_inset_y_mm(paper, card_size, name)
+    return {
+        "inset": round(inset, 3),
+        "inset_y": None if inset_y is None else round(inset_y, 3),
+        "length": round(length, 3),
+    }
+
+
 def registration_inset_y_mm(paper: str, card_size: str, name: str) -> float | None:
     """The marks' distance from the top and bottom edges when the layout sets its own (``inset_y``,
     the engine fork's 3x3 layout), else None: the same as the sides."""

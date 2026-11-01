@@ -49,6 +49,14 @@ mtg-proxy doctor        # what's missing and how to fix it
 Needs `uv` and `git`. USB cutting on a Mac also needs `libusb` from Homebrew. Rerun `setup.sh`
 after pulling; it's idempotent.
 
+Every `make-proxies` and `cut-proxies` first compares this checkout with GitHub's `main`, and the
+engine clone with its `local-patches` (`freshness.py`, about a second): behind either, it stops and
+prints the `git pull` to run; offline, it says it couldn't check and carries on. `--allow-stale`
+runs a stale checkout anyway. A sheet's `run.json` records both versions and the marks it printed,
+and `cut-proxies` refuses a sheet whose marks differ from its own layout's. On 2026-11-01 the PC
+printed eight sheets from a checkout weeks behind, with marks where the Mac's layout didn't expect
+them (docs/lessons.md).
+
 ## Test sheet first
 
 ```sh
@@ -460,9 +468,9 @@ misread frame can put at most two of the four points on the square's ink:
 
 The scan finds the square itself, then walks two fixed passes from it: down to the bottom-left L
 and across to the top-right L, each starting 10 mm short of its L and crossing it half a leg from
-the corner. On a 3x3 sheet both passes started beside a card's print, 2.0 and 2.6 mm off, and a sheet
-turned 0.2-0.45° clockwise put the bottom-left card's corner on the pass, which the scan took for the
-L (2026-10-31). So the scan is told a frame 5.5 mm taller and 6.05 mm wider than printed
+the corner. On a 3x3 sheet both passes started beside a card's print, 2.0 and 2.6 mm off, and the
+simulator, tilting the page, puts the bottom-left card's corner on the pass at 0.2-0.45° clockwise.
+So the scan is told a frame 5.5 mm taller and 6.05 mm wider than printed
 (`driver.run_ups`, worked out from the job's outlines): each pass starts past the print and walks
 only blank paper to its leg, and every coordinate after the scan is stretched back by the same
 ratio, since the scan scales the frame by measured over told size (TB55,1). The firmware checks the

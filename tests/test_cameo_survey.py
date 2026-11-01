@@ -183,7 +183,7 @@ def test_a_turned_sheet_the_scan_misses_is_found_by_the_sensor_and_cut_on_the_li
 
 
 def test_a_frame_the_check_disagrees_with_is_surveyed_through_and_cut_on_the_line():
-    # 2026-10-31: the bottom-left card's corner taken for the bottom-left L, 5.6 mm above it.
+    # The scan takes the bottom-left card's corner for the bottom-left L, 5.6 mm above it.
     mat = Mat(turn=0.4, scan="misread")
     events = cut(mat)
     assert any(m.startswith("check: bottom-left") for m in said(events))
