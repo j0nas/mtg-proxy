@@ -20,7 +20,9 @@ first 3x3 layout's marks". The class is "the machine that builds a sheet and the
 it can run different code, and nothing notices". Code that handled the old layout's narrow margins
 fixed the instance and was removed once the sheets were cut; the freshness check and the marks
 recorded in run.json fix the class. Before writing a fix, name the class it belongs to and ask
-whether the fix would still be needed if the class were fixed.
+whether the fix would still be needed if the class were fixed. A guard only protects the checkouts
+that have it: on 2026-11-10 the class came back on a checkout older than the check, and what ended
+it was running everything on one machine.
 
 **Make artifacts carry their contract, and check it where they meet.** A sheet's run.json now
 records the code that built it and the marks it printed, and `cut-proxies` refuses a sheet whose
@@ -121,3 +123,18 @@ What changed for the class: `make-proxies` and `cut-proxies` compare this checko
 with GitHub before they run, and stop when either is behind (`freshness.py`, `--allow-stale`
 overrides it); run.json records both versions and the printed marks, which `cut-proxies` checks
 against its layout; every cut's session log records the versions that cut it.
+
+## 2026-11-10: the PC's engine clone fell behind again
+
+`make-proxies` on the PC (WSL) stopped at the duplex PDF with `create_pdf: No such option
+'--no_back_marks'`. First thought: pull the engine; that fixed the run. Actual cause: the same class
+as 2026-10-31. The PC kept its own mtg-proxy clone with its own engine clone, pulled by hand and at
+different times: mtg-proxy there already passed the new flag, its engine was from before the fork
+added it, and the clone predated `freshness.py`, so nothing compared either with GitHub. Moving the
+engine into the dotfiles was considered and dropped: it would swap one pair of drifting checkouts for
+another.
+
+What changed for the class: everything runs from the Mac. `--print` already sent sheets to the PC's
+Epson queues over SSH, so the PC's clone only fed the Windows mirror (`mirror.py`, removed with it),
+and the clone is deleted. A bare `mtg-proxy` is now a wizard through make, print and cut, so there is
+one command to run, on one machine.

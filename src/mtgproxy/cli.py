@@ -1,4 +1,4 @@
-"""mtg-proxy command line. ``make-proxies.sh`` / ``cut-proxies.sh`` / ``save-offset.sh`` are thin shims onto it."""
+"""mtg-proxy command line. A bare ``mtg-proxy`` at a terminal starts the wizard (wizard.py). ``make-proxies.sh`` / ``cut-proxies.sh`` / ``save-offset.sh`` are thin shims onto it."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from typing import Annotated
 
 import typer
 from click.core import ParameterSource
+from click.exceptions import NoArgsIsHelpError
 
 from . import __version__, build, cutmenu, cutting, engine, layout, local, manifest, notes, printing, trim
 from . import backlog as backlog_mod
@@ -27,9 +28,12 @@ from .sidecar import RunInfo, find_run, find_sidecar, runs_parent
 
 app = typer.Typer(
     add_completion=False,
-    no_args_is_help=True,
+    invoke_without_command=True,
     context_settings={"help_option_names": ["-h", "--help"]},
-    help="Decklist in, print-ready PDF out, cut on the Cameo (ET-8550 + Cameo 5 Alpha).",
+    help=(
+        "Decklist in, print-ready PDF out, cut on the Cameo (ET-8550 + Cameo 5 Alpha). "
+        "Bare at a terminal, it walks through make, print and cut."
+    ),
 )
 
 
@@ -103,11 +107,17 @@ def _version(value: bool) -> None:
 
 @app.callback()
 def main(
+    ctx: typer.Context,
     version: Annotated[
         bool, typer.Option("--version", callback=_version, is_eager=True, help="Show version.")
     ] = False,
 ) -> None:
-    pass
+    if ctx.invoked_subcommand is None:
+        if not _at_terminal():
+            raise NoArgsIsHelpError(ctx)  # as no_args_is_help did: the help, exit 2
+        from . import wizard
+
+        wizard.run()
 
 
 @app.command(
@@ -254,13 +264,19 @@ def make(
         defer_partial=defer_partial,
         images=images.resolve() if images else None,  # absolute: run.json keeps it for rebuilds
     )
+    build_and_report(opts)
+
+
+def build_and_report(opts: build.BuildOptions) -> build.BuildResult | None:
+    """What `make` does with its options (and the wizard): build, then the summary. None for a dry run."""
     try:
         result = build.run_build(opts)
     except (build.BuildError, DeckError, engine.EngineMissing, RuntimeError) as e:
         fail(str(e))
     if opts.dry_run:
-        return
+        return None
     build.print_summary(result, opts)
+    return result
 
 
 def _fresh(allow_stale: bool) -> None:
@@ -501,6 +517,56 @@ def cut(
             raise typer.Exit()
         run, plain, preset = picked.run, picked.run is None, picked.preset
         dry_run, proof, probe = (picked.mode == m for m in ("dry-run", "proof", "probe"))
+    params = {k: v for k, v in ctx.params.items() if k not in ("scan", "allow_stale")}
+    cut_flow(
+        **{
+            **params,
+            "run": run,
+            "plain": plain,
+            "preset": preset,
+            "dry_run": dry_run,
+            "proof": proof,
+            "probe": probe,
+        }
+    )
+
+
+def cut_flow(
+    run: Path | None = None,
+    plain: bool = False,
+    preset: str = "laminate",
+    force: int | None = None,
+    speed: int | None = None,
+    depth: int | None = None,
+    passes: int | None = None,
+    pass_by_pass: bool = False,
+    score_force: int = cutting.SCORE_FORCE,
+    score_speed: int | None = None,
+    score_depth: int = cutting.SCORE_DEPTH,
+    no_scores: bool = False,
+    y_off: float | None = None,
+    x_off: float | None = None,
+    ble: bool = True,
+    ble_name: str = "CAMEO 5 ALPHA",
+    svg: Path | None = None,
+    dry_run: bool = False,
+    reg_inset: float | None = None,
+    reg_length: float | None = None,
+    reg_thickness: float = 1.0,
+    probe: bool = False,
+    diagnose: bool = False,
+    no_check: bool = False,
+    sense: bool = False,
+    proof: bool = False,
+    proof_target: list[str] | None = None,
+    proof_target_size: float | None = None,
+    proof_from: int = 0,
+    proof_blade: str | None = None,
+    scan_start: list[str] | None = None,
+    paper_at: str | None = None,
+) -> None:
+    """Cut a sheet and then watch the mat for the next, as `cut` does once its menu is answered. The
+    defaults are `cut`'s (tests/test_cutting.py checks they agree). Ends in typer.Exit."""
     blade = cutting.PRESETS[preset]
     info: RunInfo | None = None
     sidecar = None if plain else find_sidecar(run)
@@ -789,6 +855,17 @@ def redo(
         bool, typer.Option("--basics", help="older run without manifest: it was built with --basics")
     ] = False,
 ) -> None:
+    queue_redo(refs, run, dry_run, tokens, basics)
+
+
+def queue_redo(
+    refs: list[str],
+    run: Path | None = None,
+    dry_run: bool = False,
+    tokens: int | None = None,
+    basics: bool = False,
+) -> None:
+    """What `redo` does (and the wizard): put the cards ``refs`` name onto the backlog."""
     run_dir, info = _load_run(run)
     overrides: dict = {}
     if tokens is not None:
@@ -931,7 +1008,21 @@ def backlog_build(
     ] = False,
     dry_run: Annotated[bool, typer.Option("-n", "--dry-run", help="show what would be built")] = False,
 ) -> None:
-    out = (out or runs_parent()).resolve()
+    build_backlog(out or runs_parent(), backs, full_only, split_faces, front_only, name, print_, dry_run)
+
+
+def build_backlog(
+    out: Path,
+    backs: bool = False,
+    full_only: bool = False,
+    split_faces: bool = False,
+    front_only: list[str] | None = None,
+    name: str | None = None,
+    print_: bool = False,
+    dry_run: bool = False,
+) -> build.BuildResult | None:
+    """What `backlog build` does (and the wizard): build the queued cards as a run folder. None for a dry run."""
+    out = out.resolve()
     bl = Backlog.at(out)
     if not bl.entries:
         fail(f"backlog empty ({bl.path})")
@@ -950,7 +1041,7 @@ def backlog_build(
     typer.echo(f"{len(cards)} card(s) → {out / run_name}/" + (f", {len(keep)} stay queued" if keep else ""))
     if dry_run:
         typer.echo(backlog_mod.decklist_text(cards), nl=False)
-        return
+        return None
     run_dir = out / run_name
     images: Path | None = None
     if own := [(c.name, Path(c.image)) for c in cards if c.image]:
@@ -988,6 +1079,7 @@ def backlog_build(
         if keep
         else f"  Queue:    empty ({bl.path.name} removed)"
     )
+    return result
 
 
 def _fresh_name(parent: Path, base: str) -> str:

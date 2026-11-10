@@ -10,6 +10,12 @@ Cameo 5 Alpha with the AutoBlade. Finished card is ~0.32 mm; a real one is 0.305
 cards cost and why the stack looks like this is written up at
 [jona.no/docs/mtg-proxying](https://jona.no/docs/mtg-proxying).
 
+Run `mtg-proxy` bare at a terminal and it walks through the whole flow: make sheets from a deck URL
+or decklist, print them on the PC, cut them on the Cameo. Each step hands the run to the next (after
+a build it asks about printing, after a print about cutting), and the menu also requeues miscuts,
+builds the backlog sheet and shows cut notes. Ctrl-C leaves. The subcommands below do the same
+jobs one at a time, for scripts and power use; piped, a bare `mtg-proxy` prints the help.
+
 ```
 mtg-proxy make      decklist -> ~/Desktop/proxies/<deck>/{<deck>.pdf, <deck>-duplex.pdf?, CUT-NOTES.md, run.json}
 mtg-proxy cut       cut a printed sheet on the Cameo; reads run.json from the deck folder
@@ -24,14 +30,14 @@ mtg-proxy doctor    check engine and data files
 
 `make-proxies.sh`, `cut-proxies.sh`, `print-sheet.sh` and `save-offset.sh` are shims onto those commands, and
 `mtg-proxy.sh` onto the whole CLI. Output lands in `~/Desktop/proxies`, one folder per deck, wherever the command
-runs from; `-o` or `MTG_PROXY_OUT` puts it elsewhere. `cut-proxies`, `redo`, `backlog`, `notes` and `simulate` look there
+runs from; `-o` or `MTG_PROXY_OUT` puts it elsewhere. `mtg-proxy cut`, `redo`, `backlog`, `notes` and `simulate` look there
 too, unless you are standing in an older output folder (a deck folder, or the folder above one), which
-they use instead. `--run` takes a run's folder name: `cut-proxies --run mydeck`.
+they use instead. `--run` takes a run's folder name: `mtg-proxy cut --run mydeck`.
 
 ```
 src/mtgproxy/          engine.py (in-process engine), build.py (pipeline), decks.py (Moxfield/Archidekt),
                        local.py (--images),
-                       layout.py (the sheet layout, cut SVG), cutting.py (cut-proxies), cameo/ (the Cameo driver)
+                       layout.py (the sheet layout, cut SVG), cutting.py (mtg-proxy cut), cameo/ (the Cameo driver)
 data/cut_offset.json   the machine's cut offset in mm, applied to every cut
 data/offset_data.json  printer duplex offset, applied to every double-sided PDF
 assets/back.png        default card back for --backs; replace with your own
@@ -48,19 +54,19 @@ mtg-proxy doctor        # what's missing and how to fix it
 Needs `uv` and `git`. USB cutting on a Mac also needs `libusb` from Homebrew. Rerun `setup.sh`
 after pulling; it's idempotent.
 
-Every `make-proxies` and `cut-proxies` first compares this checkout with GitHub's `main`, and the
+Every `mtg-proxy make` and `mtg-proxy cut` first compares this checkout with GitHub's `main`, and the
 engine clone with its `local-patches` (`freshness.py`, about a second): behind either, it stops and
 prints the `git pull` to run; offline, it says it couldn't check and carries on. `--allow-stale`
 runs a stale checkout anyway. A sheet's `run.json` records both versions and the marks it printed,
-and `cut-proxies` refuses a sheet whose marks differ from its own layout's. On 2026-11-01 the PC
+and `mtg-proxy cut` refuses a sheet whose marks differ from its own layout's. On 2026-11-01 the PC
 printed eight sheets from a checkout weeks behind, with marks where the Mac's layout didn't expect
 them (docs/lessons.md).
 
 ## Test sheet first
 
 ```sh
-make-proxies --test                # ./test-sheet/test-sheet.pdf
-make-proxies --test --print        # and print it on the PC's plain-paper queue
+mtg-proxy make --test                # ./test-sheet/test-sheet.pdf
+mtg-proxy make --test --print        # and print it on the PC's plain-paper queue
 ```
 
 One portrait A4 of nine gauge cards: exact 63x88 mm geometry, hairline art, almost no ink. The
@@ -72,16 +78,16 @@ alignment against a light. A TOP marker catches flips.
 Print at actual size, borderless off. Scaling moves the registration marks and the scan fails.
 Duplex is manual, long-edge flip. If the gauges read clean, print real cards.
 
-Nothing is printed from the Mac. `--print` (and `print-sheet.sh`) copies the PDF to the Windows PC
+Nothing is printed from the Mac. `--print` (and `mtg-proxy print`) copies the PDF to the Windows PC
 over SSH and prints it there with SumatraPDF at 100 %, through one of the PC's Epson queues: real
 sheets go to `Glossy photo paper proxies`, `--test` sheets to `ET-8550 Series(Network)` (plain
 paper). Landscape pages are turned upright first, because the driver ignores a landscape setting
 and clips the page.
 
 ```sh
-print-sheet.sh deck/deck.pdf                       # glossy queue
-print-sheet.sh deck/deck.pdf --paper premium       # Premium glossy paper (220 gsm)
-print-sheet.sh deck/deck.pdf --paper plain --dry-run   # copy to the PC, show the command, stop
+mtg-proxy print deck/deck.pdf                       # glossy queue
+mtg-proxy print deck/deck.pdf --paper premium       # Premium glossy paper (220 gsm)
+mtg-proxy print deck/deck.pdf --paper plain --dry-run   # copy to the PC, show the command, stop
 ```
 
 The queues carry the paper presets as their defaults; `docs/printer-presets/README.md` lists them.
@@ -91,20 +97,20 @@ job once and never retries, since a resend prints a second sheet.
 ## Real decks
 
 ```sh
-make-proxies decks/mydeck.txt                    # MTGA format, A4, nine to a sheet
-make-proxies decks/mydeck.txt -f moxfield        # also mtgo, archidekt, deckstats, simple
-make-proxies https://moxfield.com/decks/<id>     # straight from Moxfield
-make-proxies https://archidekt.com/decks/<id>    # or Archidekt
-make-proxies <deck-url> --board considering      # main | side | considering
-make-proxies decks/mydeck.txt --backs            # double-sided; default is fronts only
-make-proxies decks/mydeck.txt --basics           # include basic lands; skipped by default
-make-proxies decks/mydeck.txt --images cards/    # your own card images where you have them
-make-proxies decks/mydeck.txt -t 2               # 2 of each distinct token at the end
-make-proxies decks/mydeck.txt --skip-fetch       # reuse fetched images
-make-proxies decks/mydeck.txt --dry-run
-make-proxies decks/mydeck.txt -- --prefer_set sld   # extra fetch.py args after --
-make-proxies decks/mydeck.txt --alt-names        # also rank printings with another name on the card
-make-proxies decks/mydeck.txt --trim "Temple Garden" --trim "Battle Angels of Tyr:0.5"
+mtg-proxy make decks/mydeck.txt                    # MTGA format, A4, nine to a sheet
+mtg-proxy make decks/mydeck.txt -f moxfield        # also mtgo, archidekt, deckstats, simple
+mtg-proxy make https://moxfield.com/decks/<id>     # straight from Moxfield
+mtg-proxy make https://archidekt.com/decks/<id>    # or Archidekt
+mtg-proxy make <deck-url> --board considering      # main | side | considering
+mtg-proxy make decks/mydeck.txt --backs            # double-sided; default is fronts only
+mtg-proxy make decks/mydeck.txt --basics           # include basic lands; skipped by default
+mtg-proxy make decks/mydeck.txt --images cards/    # your own card images where you have them
+mtg-proxy make decks/mydeck.txt -t 2               # 2 of each distinct token at the end
+mtg-proxy make decks/mydeck.txt --skip-fetch       # reuse fetched images
+mtg-proxy make decks/mydeck.txt --dry-run
+mtg-proxy make decks/mydeck.txt -- --prefer_set sld   # extra fetch.py args after --
+mtg-proxy make decks/mydeck.txt --alt-names        # also rank printings with another name on the card
+mtg-proxy make decks/mydeck.txt --trim "Temple Garden" --trim "Battle Angels of Tyr:0.5"
 ```
 
 Moxfield and Archidekt URLs are read from the sites' JSON, saved as `<deck>/<deck>.txt`, and
@@ -133,7 +139,7 @@ On borderless printings that row is a dark rim, so the bleed shows as a band. `-
 replaces the outer 0.3 mm with the ring just inside first; `:0.5` sets the width, `all` does
 every card.
 
-Every output folder gets a `CUT-NOTES.md` for that run and a `run.json` that `cut-proxies` reads,
+Every output folder gets a `CUT-NOTES.md` for that run and a `run.json` that `mtg-proxy cut` reads,
 so it cuts the marks the sheet printed. `run.json` also holds the
 manifest: which printing sits on which page and slot of each PDF, which is what `redo` uses.
 
@@ -145,8 +151,8 @@ after the card's front face, lower case, with dashes for anything that isn't a l
 Annex`. Case, punctuation and the line's set and number don't matter; .jpg and .png both work.
 
 ```sh
-make-proxies decks/aminatou.txt -f moxfield --basics --images cards/
-make-proxies decks/aminatou.txt -f moxfield --images cards/ --dry-run   # how many from cards/, how many fetched
+mtg-proxy make decks/aminatou.txt -f moxfield --basics --images cards/
+mtg-proxy make decks/aminatou.txt -f moxfield --images cards/ --dry-run   # how many from cards/, how many fetched
 ```
 
 - Every deck line with an image prints from it, as many copies as the line asks for, and is never
@@ -174,9 +180,9 @@ a laminated sheet, three scans out of three; at 7 mm its search began on the bot
 corner and once read that (2026-10-24). Now every pass stays 1.2–2.6 mm clear of the card print
 (simulated on a real sheet), and four laminated sheets registered and cut in a row (2026-10-25).
 
-The sheet also prints four proof targets, the 3 mm black squares `cut-proxies --proof` traces
+The sheet also prints four proof targets, the 3 mm black squares `mtg-proxy cut --proof` traces
 (see Cutting), in the strip between the top marks' row and the cards: 11.75 mm down at x 120, 142,
-164 and 186 mm (layouts.json `proof_targets`, which the engine prints from and `cut-proxies` cuts
+164 and 186 mm (layouts.json `proof_targets`, which the engine prints from and `mtg-proxy cut` cuts
 from). That strip runs from the marks' line 9 mm down to the cards' print at 14.5 mm (the print
 bleeds 0.7 mm past the cards' cut), and the bottom one, from 282.4 mm to 288, is the same height;
 the side strips are 5 mm wide and the gaps between cards 1.3 mm, filled with the cards' bleed. The
@@ -188,7 +194,7 @@ and the place a third of the way along where the firmware reads its light for a 
 Check a new mark layout offline before printing it. `mtg-proxy simulate sheet.pdf` (inside a run
 folder, just `mtg-proxy simulate`) walks the scan's passes over the page's print: the area search,
 the two passes that measure the square, and two across each L. It takes `--reg-inset`,
-`--reg-length` and `--scan-start` like `cut-proxies`, and `--page` for a later page. Each line gives
+`--reg-length` and `--scan-start` like `mtg-proxy cut`, and `--page` for a later page. Each line gives
 the dark runs the pass crosses and the nearest print that is not a mark. The firmware's detector is
 relative, so a pass fails when its first dark run is not a mark or print comes within 1 mm of it,
 the width of the sensor's spot; the command then exits 1. It needs no machine. Vector PDFs work as
@@ -210,7 +216,7 @@ long edge a back's square lands right behind the front's top-right L, where on d
 it showed through enough to make every TB123 misread that L (2026-10-26). The first 3x3 sheet
 printed double-sided (2026-10-26) had its backs slightly off with the offset measured on the
 landscape calibration sheet; check against a light before laminating a batch
-(`make-proxies --test --backs` numbers each back), and remeasure the offset if it is off.
+(`mtg-proxy make --test --backs` numbers each back), and remeasure the offset if it is off.
 
 ## Reprints and leftovers
 
@@ -219,7 +225,7 @@ was only half full and not worth a sheet. All of that goes into one queue, `BACK
 the directory the deck folders live in (`~/Desktop/proxies`), and gets printed as one well-filled sheet later.
 
 ```sh
-make-proxies decks/mydeck.txt --defer-partial   # partial last page → BACKLOG.txt, not the PDF
+mtg-proxy make decks/mydeck.txt --defer-partial   # partial last page → BACKLOG.txt, not the PDF
 mtg-proxy redo "Sol Ring" p3.5 last             # after cutting the newest run: by name, page.slot, or a whole page
 mtg-proxy redo dlast --run mydeck               # d = the duplex PDF (d1, d1.2, dlast); --run names another run
 mtg-proxy backlog                               # 11 fronts = 1 full sheet + 2 waiting, 2 duplex
@@ -240,12 +246,12 @@ A card printed from `--images` is queued with its image path (`image=…` in the
 `backlog build` copies those images into the run folder's `images/` and prints them again. If an
 image has moved since, the build stops and names it.
 
-The dotfiles' `make-proxies` and `cut-proxies` functions find the clone (`$MTG_PROXY_DIR`, then
-`~/Desktop/projects/code/mtg-proxy`) and run the shims from any shell.
+The dotfiles' `mtg-proxy` function finds the clone (`$MTG_PROXY_DIR`, then
+`~/Desktop/projects/code/mtg-proxy`) and runs it from any shell.
 
 ## Cut offset
 
-With cut-proxies' scan, the Cameo 5 Alpha cuts 0.5 mm high relative to the printed marks, and
+With `mtg-proxy cut`'s scan, the Cameo 5 Alpha cuts 0.5 mm high relative to the printed marks, and
 true in x. `data/cut_offset.json` holds the correction (`y_mm: 0.5`; positive shifts cuts
 right/down). It was measured with the deck-box project's calibration sheet (`pnpm calib` in
 `~/Desktop/projects/silhouette/deckbox`): printed vernier scales at five stations, cut vernier
@@ -266,12 +272,12 @@ the back pages in the landscape page's own pixels.
 
 ## Cutting
 
-`cut-proxies` drives the Cameo over Bluetooth LE (`--usb` for the cable) with its own driver,
+`mtg-proxy cut` drives the Cameo over Bluetooth LE (`--usb` for the cable) with its own driver,
 `src/mtgproxy/cameo/`, and scans the 3-mark registration every sheet is printed with (see
-Registration). It follows the sheet's `run.json`, which holds the PDFs and marks `make-proxies`
+Registration). It follows the sheet's `run.json`, which holds the PDFs and marks `mtg-proxy make`
 printed.
 
-Run bare at a terminal, `cut-proxies` asks first. Enter cuts the default: this folder's
+Run bare at a terminal, `mtg-proxy cut` asks first. Enter cuts the default: this folder's
 `run.json`, else the newest run in `~/Desktop/proxies`, or a plain 3x3 sheet when there is none,
 with the laminate preset over Bluetooth LE. "Choose…" picks
 another run, the preset, and
@@ -279,23 +285,23 @@ cut, proof first, dry run or probe. `--usb` and `--ble-name` keep the menu; any 
 pipe, skips it and cuts as told.
 
 ```sh
-cut-proxies                # menu; Enter cuts the newest run (from its run.json)
-cut-proxies --run mydeck   # a named run in ~/Desktop/proxies, no menu
-cut-proxies --preset paper # plain paper instead of laminate
-cut-proxies --passes 4     # also --force/--speed/--depth, --x-off/--y-off
-cut-proxies --pass-by-pass # every path once, then every path again, --passes times
-cut-proxies --score-force 12 --score-depth 2   # the blade for an SVG's scored lines (see below)
-cut-proxies --no-scores    # leaves an SVG's scored lines uncut: another pass on a scored sheet
-cut-proxies --usb          # over the cable instead of Bluetooth LE
-cut-proxies --scan         # list the Bluetooth devices in range
-cut-proxies --dry-run      # no machine: runs the whole job against a stand-in, checks the bounds
-cut-proxies --probe        # scans the marks, logs what the machine reports, cuts nothing
-cut-proxies --sense        # scans, then reads each mark back with the sensor (TB63), cuts nothing
-cut-proxies --no-check     # skips the sensor check of the marks before and after the scan
-cut-proxies --diagnose     # before any scan: where each mark sits and how it reads; cuts nothing
-cut-proxies --proof        # traces a printed proof target after the scan; y cuts, r rescans, q stops
-cut-proxies --paper-at 3   # expect the paper's corner 3 mm right of and below the grid's (see Placement)
-cut-proxies --svg job.svg --reg-inset 5   # any SVG with its page size in mm, its marks 5 mm in
+mtg-proxy cut                # menu; Enter cuts the newest run (from its run.json)
+mtg-proxy cut --run mydeck   # a named run in ~/Desktop/proxies, no menu
+mtg-proxy cut --preset paper # plain paper instead of laminate
+mtg-proxy cut --passes 4     # also --force/--speed/--depth, --x-off/--y-off
+mtg-proxy cut --pass-by-pass # every path once, then every path again, --passes times
+mtg-proxy cut --score-force 12 --score-depth 2   # the blade for an SVG's scored lines (see below)
+mtg-proxy cut --no-scores    # leaves an SVG's scored lines uncut: another pass on a scored sheet
+mtg-proxy cut --usb          # over the cable instead of Bluetooth LE
+mtg-proxy cut --scan         # list the Bluetooth devices in range
+mtg-proxy cut --dry-run      # no machine: runs the whole job against a stand-in, checks the bounds
+mtg-proxy cut --probe        # scans the marks, logs what the machine reports, cuts nothing
+mtg-proxy cut --sense        # scans, then reads each mark back with the sensor (TB63), cuts nothing
+mtg-proxy cut --no-check     # skips the sensor check of the marks before and after the scan
+mtg-proxy cut --diagnose     # before any scan: where each mark sits and how it reads; cuts nothing
+mtg-proxy cut --proof        # traces a printed proof target after the scan; y cuts, r rescans, q stops
+mtg-proxy cut --paper-at 3   # expect the paper's corner 3 mm right of and below the grid's (see Placement)
+mtg-proxy cut --svg job.svg --reg-inset 5   # any SVG with its page size in mm, its marks 5 mm in
 ```
 
 Settings, AutoBlade only (the Kraft blade can't turn the 3 mm corners):
@@ -331,7 +337,7 @@ driver waits for as long as it stays paused, and pressing pause again carries on
 order holds within each pass, so a part whose outline goes through in an early pass is loose for
 the later passes of the slits and holes inside it.
 
-After a cut at a terminal, cut-proxies watches the mat. Unload it, load the next sheet, and five seconds after the mat
+After a cut at a terminal, mtg-proxy cut watches the mat. Unload it, load the next sheet, and five seconds after the mat
 is back in, the same job starts on it, counting sheets as it goes. It only starts after it has
 seen the mat leave, and Enter during the countdown holds it. A batch started with proof cuts has
 them on its first sheet only.
@@ -474,7 +480,7 @@ passed over. The page is fitted to the marks as the firmware fits its frame, and
 edges come out square to 0.4° and the marks as far apart as printed to 1.5 %. About 30 readings,
 100 s; the job is then cut through that fit, in the same machine frame the readings were taken in.
 In tests, sheets turned up to 1.1° cut within 0.15 mm of the line. A mark it can't find stops the
-run with where it looked, nothing cut, and `cut-proxies --diagnose` shows why: before any scan it
+run with where it looked, nothing cut, and `mtg-proxy cut --diagnose` shows why: before any scan it
 reads across the square and each leg in the loaded mat's frame (about 4 minutes), and says where
 the sheet sits, how it is turned and stretched, which marks never read as full ink or sit on
 unusually bright paper, and what the blank paper beside each mark reads, in the words a cut would

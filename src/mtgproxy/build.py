@@ -27,6 +27,11 @@ from .testcards import write_test_cards
 TEST_SHEET_NAME = "test-sheet"
 
 
+def paper_for(run_name: str) -> str:
+    """The print queue for a run: plain paper for the ink-light test sheet, glossy for real sheets."""
+    return "plain" if run_name == TEST_SHEET_NAME else "glossy"
+
+
 class BuildError(Exception):
     """User-facing build failure."""
 
@@ -585,9 +590,9 @@ def run_build(opts: BuildOptions) -> BuildResult:
     # sent — manual duplex on photo paper is a hands-on job.
     if opts.print_mode and pdfs.pdf:
         try:
-            printing.print_pdf(pdfs.pdf, "plain" if opts.test_mode else "glossy", say=log)
+            printing.print_pdf(pdfs.pdf, paper_for(name), say=log)
         except printing.PrintError as e:
-            warn(f"warning: print failed: {e}. Print {pdfs.pdf} with: print-sheet {pdfs.pdf}")
+            warn(f"warning: print failed: {e}. Print {pdfs.pdf} with: mtg-proxy print {pdfs.pdf}")
         if pdfs.duplex_pdf:
             log(
                 f"NOTE: {pdfs.duplex_pdf.name} not sent — print it by hand with manual duplex (long-edge flip)."
@@ -613,10 +618,10 @@ def print_summary(r: BuildResult, opts: BuildOptions) -> None:
         log(f"  PDF:      {r.pdf}")
     if r.duplex_pdf:
         log(f"  Duplex:   {r.duplex_pdf} ({r.dfc_count} double-sided cards — manual duplex, long-edge flip)")
-    log(f"  Notes:    make-proxies --notes {r.name}")
+    log(f"  Notes:    mtg-proxy notes {r.name}")
     if r.out.parent == out_root().resolve():
-        log("  Cut:      cut-proxies   (Enter cuts the newest run, this one)")
+        log("  Next:     mtg-proxy   (print and cut this run from the menu)")
     else:
-        log(f"  Cut:      cd {os.path.relpath(r.out)} && cut-proxies   (reads run.json)")
+        log(f"  Cut:      cd {os.path.relpath(r.out)} && mtg-proxy cut   (reads run.json)")
     if r.deferred:
         log(f"  Backlog:  {len(r.deferred)} card(s) deferred → {r.backlog}   (mtg-proxy backlog)")

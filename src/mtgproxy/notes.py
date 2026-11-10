@@ -82,7 +82,7 @@ Generated: {c.today} | 3x3 on A4 | registration: 3-mark | cards: {c.cards} | sid
 
 ## Cut (Cameo 5 Alpha)
 With the Cameo on and in Bluetooth range of the Mac (`--usb` for the cable), `cd` into this folder
-and run `cut-proxies`. It reads run.json here.
+and run `mtg-proxy cut`. It reads run.json here.
 {MAT}
 2. Laminate settings by default: **Force {lam.force} · Speed {lam.speed} · Depth {lam.depth} · Passes {lam.passes}**.
    Plain paper: `--preset paper` (Force {paper.force} · Speed {paper.speed} · Depth {paper.depth} · Passes {paper.passes}).

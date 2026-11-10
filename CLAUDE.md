@@ -1,9 +1,10 @@
 # mtg-proxy
 
-Builds MTG proxy sheets (`make-proxies` → `mtg-proxy make`) and cuts them on a Silhouette Cameo 5
-Alpha (`cut-proxies` → `mtg-proxy cut`). The README is the reference for every setting and the
-measurements behind it; the Cameo's firmware is reverse-engineered in `~/Desktop/projects/cut/cameo-re`
-(`INVESTIGATION.md`, `NOTES.md`).
+Builds MTG proxy sheets, prints them on the Windows PC's Epson over SSH, and cuts them on a
+Silhouette Cameo 5 Alpha, all from the Mac. A bare `mtg-proxy` at a terminal is the wizard the
+operator uses (`wizard.py`); `mtg-proxy make|print|cut|…` are the same steps for scripts. The
+README is the reference for every setting and the measurements behind it; the Cameo's firmware is
+reverse-engineered in `~/Desktop/projects/cut/cameo-re` (`INVESTIGATION.md`, `NOTES.md`).
 
 ## Log every encounter, and learn from all of them
 

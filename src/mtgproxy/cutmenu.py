@@ -1,4 +1,4 @@
-"""The menu a bare ``cut-proxies`` shows at a terminal.
+"""The menu a bare ``mtg-proxy cut`` shows at a terminal (and the wizard's Cut step, with its run preselected).
 
 Enter on the first question cuts the default: this folder's run.json, else the newest run
 below it, or a plain A4 sheet (standard cards, the default layout) when there is none, with the
@@ -57,14 +57,17 @@ def describe(sidecar: Path) -> str | None:
     return f"{i.name}: {i.cards} cards"
 
 
-def ask(where: Path, via: str) -> Picked | None:
-    """Ask at the terminal; None when the operator quits. Ctrl-C raises KeyboardInterrupt."""
+def ask(where: Path, via: str, run: Path | None = None) -> Picked | None:
+    """Ask at the terminal; None when the operator quits. Ctrl-C raises KeyboardInterrupt.
+    ``run`` (a run.json) is the default sheet when the caller has one in hand, as the wizard after a print."""
     runs = runs_below(where)
+    if run is not None and run not in runs and describe(run):
+        runs.insert(0, run)
     here = where / SIDECAR_NAME
-    default = Picked(here if here in runs else (runs[0] if runs else None))
+    default = Picked(run or (here if here in runs else (runs[0] if runs else None)))
     sheet = describe(default.run) if default.run else PLAIN
     first = _select(
-        "cut-proxies:",
+        "Cut:",
         [
             Choice(f"Cut {sheet} · laminate · {via}", "default"),
             Choice("Choose run, preset, mode…", "choose"),
