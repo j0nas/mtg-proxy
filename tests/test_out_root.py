@@ -16,7 +16,7 @@ runner = CliRunner()
 
 def write_run(folder: Path, name: str, mtime: float | None = None) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
-    p = RunInfo(name, "a4", "standard", cards=1, fronts_only=True, generated="2026-10-26").write(folder)
+    p = RunInfo(name, cards=1, fronts_only=True, generated="2026-10-26").write(folder)
     if mtime is not None:
         os.utime(p, (mtime, mtime))
     return p
@@ -68,7 +68,7 @@ def test_make_without_out_lands_in_the_proxies_folder(decklist, monkeypatch, tmp
 
 
 def test_redo_outside_a_deck_folder_takes_the_newest_run_and_says_so(monkeypatch, tmp_path, proxies_root):
-    monkeypatch.setattr("mtgproxy.cli._per_page", lambda paper, card, sheet_layout: 9)
+    monkeypatch.setattr("mtgproxy.cli._per_page", lambda: 9)
     deck = proxies_root / "deck"
     deck.mkdir(parents=True)
     card = {

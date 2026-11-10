@@ -77,8 +77,8 @@ def test_a_folder_that_isnt_a_checkout_is_reported_not_refused(tmp_path, monkeyp
 
 
 def test_a_sheet_printed_with_other_marks_than_the_layout_here_is_refused():
-    geom = layout.build_cut_svg("a4", "standard", None, "3x3")
-    here = layout.printed_marks("a4", "standard", "3x3")
+    geom = layout.build_cut_svg(None)
+    here = layout.printed_marks()
     assert cutting.marks_mismatch(here, geom) is None
     # 2026-11-01: the PC's stale checkout printed the first 3x3 layout's marks
     first = {"inset": 3.5, "inset_y": None, "length": 10.5}

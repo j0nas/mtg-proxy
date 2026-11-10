@@ -21,8 +21,8 @@ The passes are cameo-re NOTES.md, "The three-mark sequence, TB123" (firmware V1.
 h and w are what the scan is told: the frame's own plus its run-ups (``Frame.run_up``,
 ``driver.run_ups``), which cut-proxies adds so that steps 3 and 4 start past the cards' print.
 
-Half a leg is what TB51 keeps (whole mm, see ``proof.crossing``): 3 mm on a 3x3 sheet, 4.5 on a
-4x2 one. The scratch script this came from started both crossing passes 2 mm past those points
+Half a leg is what TB51 keeps (whole mm, see ``proof.crossing``): 3 mm of the 3x3 sheet's 6 mm
+legs. The scratch script this came from started both crossing passes 2 mm past those points
 and swept every pass out to the paper's edge. The firmware's passes start where the notes say and
 stop at the first dark run, so this walks each pass only that far.
 

@@ -28,10 +28,9 @@ SHEET_3X3 = session.Frame(page_w=210, page_h=297, inset=3.5, width=203, height=2
     "frame, start",
     [
         (SHEET_3X3, (11, 1)),  # registered on laminated 3x3 sheets, 2026-10-25; inset - 6 is off the paper
-        (session.Frame(page_w=297, page_h=210, inset=10, width=277, height=190), (12, 4)),
         (session.Frame(page_w=297, page_h=210, inset=5, width=287, height=200), (8.5, 1)),  # the deck box
     ],
-    ids=["3x3", "4x2", "deck box"],
+    ids=["3x3", "deck box"],
 )
 def test_every_scan_starts_into_the_square_inside_the_area_searchs_window(frame, start):
     """TB123 catches the square with its top-left corner from 5 mm above the start to 30 mm below,

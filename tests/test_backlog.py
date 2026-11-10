@@ -198,7 +198,7 @@ def test_local_image_cards_round_trip_through_the_backlog(tmp_path):
 
 
 def test_cli_redo_and_backlog_build_reprint_local_images(tmp_path, monkeypatch):
-    monkeypatch.setattr("mtgproxy.cli._per_page", lambda paper, card, sheet_layout: 8)
+    monkeypatch.setattr("mtgproxy.cli._per_page", lambda: 8)
     cards = tmp_path / "cards"
     cards.mkdir()
     (cards / "counterspell.jpg").write_bytes(b"custom counterspell")
@@ -242,9 +242,9 @@ def test_cli_redo_and_backlog_build_reprint_local_images(tmp_path, monkeypatch):
 
 
 def test_cli_redo_and_backlog(tmp_path, monkeypatch):
-    monkeypatch.setattr("mtgproxy.cli._per_page", lambda paper, card, sheet_layout: 8)
+    monkeypatch.setattr("mtgproxy.cli._per_page", lambda: 8)
     r = runner.invoke(app, ["redo", "last", "--run", str(tmp_path / "nowhere")])
-    assert r.exit_code == 1 and "no run.json" in r.output and "Windows mirror" in r.output
+    assert r.exit_code == 1 and "no run.json" in r.output
     deck = tmp_path / "deck"
     deck.mkdir()
     sheets = {
@@ -314,7 +314,7 @@ def test_hand_written_lines_get_their_faces_resolved_once(tmp_path):
 
 
 def test_cli_backlog_resolves_faces_via_scryfall(tmp_path, monkeypatch):
-    monkeypatch.setattr("mtgproxy.cli._per_page", lambda paper, card, sheet_layout: 8)
+    monkeypatch.setattr("mtgproxy.cli._per_page", lambda: 8)
     monkeypatch.setattr("mtgproxy.cli.is_double_sided", lambda name, s, cn: name.startswith("Hallowed"))
     (tmp_path / "BACKLOG.txt").write_text("1 Hallowed Fountain // Hallowed Fountain (ECL) 347\n1 Sol Ring\n")
     r = runner.invoke(app, ["backlog", "-o", str(tmp_path)])
@@ -347,9 +347,8 @@ def test_front_marker_prints_a_dfc_as_a_single_sided_card(tmp_path, monkeypatch)
     ] == ["2Delver1.png"]
 
 
-def test_redo_and_the_backlog_count_sheets_of_the_runs_layout(tmp_path, monkeypatch):
-    per_page = {"4x2": 8, "3x3": 9}
-    monkeypatch.setattr("mtgproxy.cli._per_page", lambda paper, card, sheet_layout: per_page[sheet_layout])
+def test_redo_and_the_backlog_count_sheets_of_nine(tmp_path, monkeypatch):
+    monkeypatch.setattr("mtgproxy.cli._per_page", lambda: 9)
     deck = tmp_path / "deck"
     deck.mkdir()
     cards = [_card(f"Card {c}", "sta", str(i)) for i, c in enumerate("ABCDEFGHIJ", 1)]
@@ -363,15 +362,13 @@ def test_redo_and_the_backlog_count_sheets_of_the_runs_layout(tmp_path, monkeypa
     assert "ref=p2.1" in (tmp_path / "BACKLOG.txt").read_text()  # the tenth card is page 2's first
     assert "fronts: 10 → 1 full sheet(s) of 9 + 1 waiting" in r.output
     r = runner.invoke(app, ["backlog", "-o", str(tmp_path)])
-    assert "fronts: 10 → 1 full sheet(s) of 9 + 1 waiting" in r.output  # 3x3 unless told
-    r = runner.invoke(app, ["backlog", "-o", str(tmp_path), "--layout", "4x2"])
-    assert "fronts: 10 → 1 full sheet(s) of 8 + 2 waiting" in r.output
+    assert "fronts: 10 → 1 full sheet(s) of 9 + 1 waiting" in r.output
 
     built = []
     monkeypatch.setattr(build, "run_build", lambda opts: built.append(opts))
     r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--backs", "-n"])
     assert r.exit_code == 0 and "10 card(s) → " in r.output  # double-sided 3x3 sheets
-    r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--layout", "3x3", "--full-only", "-n"])
+    r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--full-only", "-n"])
     assert r.exit_code == 0 and "9 card(s) → " in r.output and ", 1 stay queued" in r.output
 
     # A double-faced card in the queue goes on the 3x3 build's duplex sheet.
@@ -384,13 +381,5 @@ def test_redo_and_the_backlog_count_sheets_of_the_runs_layout(tmp_path, monkeypa
     r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--name", "b"])
     assert r.exit_code == 0, r.output
     (opts,) = built
-    assert (opts.layout, opts.duplex_dfc, opts.fronts_only) == ("3x3", True, True)
+    assert (opts.duplex_dfc, opts.fronts_only) == (True, True)
     assert "1 Delver (SLD) 1" in Path(opts.deck).read_text()
-
-
-def test_the_backlog_refuses_a_layout_it_cant_count(tmp_path):
-    (tmp_path / "BACKLOG.txt").write_text("1 Sol Ring (CMM) 464  # deck=d single\n")
-    r = runner.invoke(app, ["backlog", "-o", str(tmp_path), "--layout", "5x5"])
-    assert r.exit_code == 1 and "unknown layout '5x5'" in r.output
-    r = runner.invoke(app, ["backlog", "show", "-o", str(tmp_path), "-p", "letter", "--layout", "3x3"])
-    assert r.exit_code == 1 and "A4 paper with standard cards only" in r.output

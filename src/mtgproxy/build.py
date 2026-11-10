@@ -10,14 +10,13 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from . import engine, freshness, layout, local, manifest, mirror, notes, printing, printings, trim
+from . import engine, freshness, layout, local, manifest, notes, printing, printings, trim
 from .backlog import Backlog, Entry
 from .cache import ImageCache
 from .decks import FetchedDeck, fetch_deck, is_deck_url
@@ -37,9 +36,6 @@ class BuildOptions:
     deck: str | None = None
     fmt: str = "mtga"
     out_parent: Path = field(default_factory=out_root)
-    paper: str = "a4"
-    card_size: str = "standard"
-    layout: str | None = None  # 3x3 | 4x2, see layout.py; None: layout.default for the paper and card
     board: str = "main"
     fronts_only: bool = True
     duplex_dfc: bool = True
@@ -83,8 +79,6 @@ class BuildResult:
     duplex_pdf: Path | None
     dfc_count: int
     cards: int
-    windows_path: str | None = None
-    mirror_failed: list[str] = field(default_factory=list)
     deferred: list[Entry] = field(default_factory=list)
     backlog: Path | None = None
 
@@ -106,20 +100,6 @@ class ResolvedDeck:
     fetched: FetchedDeck | None = None
 
 
-def _convert_windows_path(deck: str) -> Path | None:
-    """Accept absolute Windows paths (C:\\...) pasted from Explorer under WSL."""
-    if not shutil.which("wslpath"):
-        return None
-    try:
-        conv = subprocess.run(
-            ["wslpath", "-u", deck], capture_output=True, text=True, check=True
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    p = Path(conv)
-    return p if conv and p.is_file() else None
-
-
 def resolve_deck(opts: BuildOptions) -> ResolvedDeck:
     if opts.test_mode:
         return ResolvedDeck(TEST_SHEET_NAME, None, opts.fmt)
@@ -133,8 +113,6 @@ def resolve_deck(opts: BuildOptions) -> ResolvedDeck:
         # Written into the output folder by run_build once that folder exists.
         return ResolvedDeck(name, None, "mtga", fetched)
     path = Path(opts.deck)
-    if not path.is_file():
-        path = _convert_windows_path(opts.deck) or path
     if not path.is_file():
         raise BuildError(f"decklist not found: {opts.deck}")
     path = path.resolve()
@@ -203,7 +181,7 @@ def stage_images(opts: BuildOptions, deck: ResolvedDeck, cache: ImageCache | Non
         trim.reset_state()
         for f in engine.images_in(engine.BACK):
             f.unlink()
-        count = per_page(opts)  # one full sheet
+        count = per_page()  # one full sheet
         # Double-sided test sheet: number each back so you can see which front it
         # belongs to (verifies back-page ordering, not just the offset).
         write_test_cards(count, engine.FRONT, engine.BACK, None if opts.fronts_only else engine.DOUBLE_SIDED)
@@ -309,24 +287,17 @@ def stage_and_index(opts: BuildOptions) -> manifest.Recorder:
 
 
 # --- step 4: PDFs ------------------------------------------------------------
-def per_page(opts: BuildOptions) -> int:
-    """Cards on one sheet of this paper, card size and layout."""
+def per_page() -> int:
+    """Cards on one sheet."""
     try:
-        return manifest.cards_per_page(opts.paper, opts.card_size, opts.layout)
+        return manifest.cards_per_page()
     except layout.LayoutError as e:
         raise BuildError(str(e)) from e
 
 
-def pdf_base_args(opts: BuildOptions) -> list[str]:
-    # --extend_corners 3.5mm: Scryfall scans have rounded corners; this fills the
-    # corner bleed so cut cards don't get white corner slivers. Every sheet is 3-mark (cutting.py).
-    return [
-        "--card_size", opts.card_size,
-        "--paper_size", opts.paper,
-        "--registration", "3",
-        "--extend_corners", "3.5mm",
-        *layout.engine_flags(opts.layout),
-    ]  # fmt: skip
+# --extend_corners 3.5mm: Scryfall scans have rounded corners; this fills the corner bleed so cut
+# cards don't get white corner slivers. Every sheet is 3-mark (cutting.py).
+PDF_BASE_ARGS = [*layout.ENGINE_FLAGS, "--registration", "3", "--extend_corners", "3.5mm"]
 
 
 # Back pages carry no registration marks: the cut always scans the front, and turned over the long
@@ -373,13 +344,13 @@ def _view(parent: Path, name: str, files: list[Path]) -> Path:
 
 
 def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
-    base = pdf_base_args(opts)
+    base = PDF_BASE_ARGS
     offset = duplex_offset_args()
     game_pdf = engine.OUTPUT / "game.pdf"
     main, duplex = manifest.partition(opts.fronts_only, opts.duplex_dfc)
     deferred: list[Path] = []
     if opts.defer_partial:
-        n = per_page(opts)
+        n = per_page()
         main, d1 = _defer(main, n)
         duplex, d2 = _defer(duplex, n)
         deferred = d1 + d2
@@ -483,23 +454,11 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
 
 
 # --- the whole thing ---------------------------------------------------------
-def resolve_layout(opts: BuildOptions) -> BuildOptions:
-    """``opts`` with its layout settled (None: the default for the paper and card); raises
-    BuildError for a layout this paper or card size can't have."""
-    opts = replace(opts, layout=opts.layout or layout.default(opts.paper, opts.card_size))
-    try:
-        layout.check(opts.layout, opts.paper, opts.card_size)
-    except layout.LayoutError as e:
-        raise BuildError(str(e)) from e
-    return opts
-
-
 def run_build(opts: BuildOptions) -> BuildResult:
     if opts.tokens_only and opts.test_mode:
         raise BuildError("--tokens-only cannot be combined with --test")
     if opts.images and opts.test_mode:
         raise BuildError("--images cannot be combined with --test")
-    opts = resolve_layout(opts)
     engine.ensure_engine()
 
     deck = resolve_deck(opts)
@@ -511,13 +470,11 @@ def run_build(opts: BuildOptions) -> BuildResult:
         log(
             f"{deck.fetched.source}: {deck.fetched.name!r} [{deck.fetched.board}] — {len(deck.fetched.lines)} entries → {deck.path}"
         )
-    if opts.paper == "a3":
-        warn('NOTE: A3 sheets need the 12x24" cutting mat — the standard 12x12" mat is too short.')
 
     if opts.dry_run:
         split = local_split(opts, deck)
         log(
-            f"dry run: {name} → {out} (paper {opts.paper}, {opts.layout} layout of {per_page(opts)} cards, "
+            f"dry run: {name} → {out} (3x3 layout of {per_page()} cards, "
             f"format {deck.fmt}, fetch args {fetch_args_for(opts)}"
             f"{', alternate names allowed' if opts.alt_names else ''})"
         )
@@ -570,7 +527,7 @@ def run_build(opts: BuildOptions) -> BuildResult:
     deferred: list[Entry] = []
     if not opts.test_mode:
         rec = manifest.Recorder.load()
-        n = per_page(opts)
+        n = per_page()
         sheets[manifest.MAIN] = manifest.make_sheet(
             manifest.MAIN, pdfs.main, pdfs.pdf.name if pdfs.pdf else None, n, rec
         )
@@ -589,25 +546,19 @@ def run_build(opts: BuildOptions) -> BuildResult:
         notes.render(
             notes.NotesContext(
                 name=name,
-                paper=opts.paper,
-                card_size=opts.card_size,
                 cards=printed,
                 fronts_only=opts.fronts_only,
                 duplex_dfc=opts.duplex_dfc,
                 dfc_count=pdfs.dfc_count,
-                layout=opts.layout,
             )
         )
     )
     RunInfo(
         name=name,
-        paper=opts.paper,
-        card_size=opts.card_size,
         cards=printed,
         fronts_only=opts.fronts_only,
         generated=date.today().isoformat(),
-        layout=opts.layout,
-        proof_targets=bool(layout.proof_targets_mm(opts.paper, opts.card_size, opts.layout)[0]),
+        proof_targets=bool(layout.proof_targets_mm()[0]),
         pdf=pdfs.pdf.name if pdfs.pdf else None,
         duplex_pdf=pdfs.duplex_pdf.name if pdfs.duplex_pdf else None,
         dfc_count=pdfs.dfc_count,
@@ -620,7 +571,7 @@ def run_build(opts: BuildOptions) -> BuildResult:
         options=opts.recorded(),
         sheets={k: v.as_dict() for k, v in sheets.items()},
         code=freshness.versions(),
-        marks=layout.printed_marks(opts.paper, opts.card_size, opts.layout),
+        marks=layout.printed_marks(),
     ).write(out)
 
     result = BuildResult(name, out, pdfs.pdf, pdfs.duplex_pdf, pdfs.dfc_count, printed)
@@ -641,11 +592,6 @@ def run_build(opts: BuildOptions) -> BuildResult:
             log(
                 f"NOTE: {pdfs.duplex_pdf.name} not sent — print it by hand with manual duplex (long-edge flip)."
             )
-
-    win_out = mirror.windows_out_dir()
-    if win_out is not None and (win_out.parent.is_dir() or Path("/mnt/c/Users").is_dir()):
-        m = mirror.mirror(out, name, win_out)
-        result.windows_path, result.mirror_failed = m.windows_path, m.failed
     return result
 
 
@@ -674,12 +620,3 @@ def print_summary(r: BuildResult, opts: BuildOptions) -> None:
         log(f"  Cut:      cd {os.path.relpath(r.out)} && cut-proxies   (reads run.json)")
     if r.deferred:
         log(f"  Backlog:  {len(r.deferred)} card(s) deferred → {r.backlog}   (mtg-proxy backlog)")
-    if r.windows_path:
-        log(f"  Windows:  {r.windows_path}")
-    if r.mirror_failed:
-        log("")
-        log("  *** MIRROR INCOMPLETE — the Windows copy of these files is STALE (old run!):")
-        for f in r.mirror_failed:
-            log(f"  ***   {f}")
-        log("  *** Close the file on the Windows side (PDF viewer) and rerun,")
-        log("  *** or copy it manually from the WSL output path above. Do NOT print the stale copy.")

@@ -21,8 +21,6 @@ from .backlog import Backlog, BacklogError, Entry
 from .cache import ImageCache
 from .decks import DeckError, is_double_sided
 from .layout import NOMINAL_CARDS, LayoutError
-from .layout import check as check_layout
-from .layout import default as default_layout
 from .manifest import ManifestError
 from .paths import DEFAULT_BACK, NOTES_NAME, SCM, SIDECAR_NAME, cache_dir, out_root
 from .sidecar import RunInfo, find_run, find_sidecar, runs_parent
@@ -92,13 +90,6 @@ def parse_blade(value: str) -> tuple[int, int, int]:
     return force, speed, depth
 
 
-LAYOUT_HELP = (
-    "3x3 (the default on A4 with standard cards): 9 cards on portrait A4, marks 3.5 mm from the sides "
-    "and 9 mm from the top and bottom | 4x2: 8 cards on landscape A4, the engine's own "
-    "layout (the default on any other paper or card)"
-)
-
-
 def fail(msg: str, code: int = 1) -> None:
     typer.echo(f"error: {msg}", err=True)
     raise typer.Exit(code)
@@ -141,8 +132,6 @@ def make(
             file_okay=False,
         ),
     ] = None,
-    paper: Annotated[str, typer.Option("-p", "--paper", help="a4 | letter | a3 ...")] = "a4",
-    sheet_layout: Annotated[str | None, typer.Option("--layout", help=LAYOUT_HELP)] = None,
     board: Annotated[str, typer.Option(help="deck URL board: main | side | considering")] = "main",
     backs: Annotated[
         bool, typer.Option("--backs/--fronts-only", help="double-sided cards (default: fronts only)")
@@ -246,8 +235,6 @@ def make(
         deck=deck,
         fmt=fmt,
         out_parent=out or out_root(),
-        paper=paper,
-        layout=sheet_layout,
         board=board,
         fronts_only=not backs,
         duplex_dfc=not split_faces,
@@ -274,8 +261,6 @@ def make(
     if opts.dry_run:
         return
     build.print_summary(result, opts)
-    if result.mirror_failed:
-        raise typer.Exit(1)
 
 
 def _fresh(allow_stale: bool) -> None:
@@ -317,7 +302,7 @@ def notes_cmd(
 @app.command(
     help=(
         "Cut a printed sheet on the Cameo 5 Alpha. Reads run.json from the current directory (or --run) "
-        "for paper/card/layout; flags override. With no flags at a terminal, asks first "
+        "for the printed marks; flags override. With no flags at a terminal, asks first "
         "(Enter cuts this folder's run, else the newest in ~/Desktop/proxies)."
     ),
 )
@@ -325,14 +310,6 @@ def cut(
     ctx: typer.Context,
     run: Annotated[
         Path | None, typer.Option("--run", help="run.json, its folder, or a run name in ~/Desktop/proxies")
-    ] = None,
-    paper: Annotated[str | None, typer.Option("-p", "--paper")] = None,
-    card: Annotated[str | None, typer.Option("-c", "--card")] = None,
-    sheet_layout: Annotated[
-        str | None,
-        typer.Option(
-            "--layout", help="3x3 | 4x2 — MUST match the printed sheet (default: run.json's, else 3x3 on A4)"
-        ),
     ] = None,
     preset: Annotated[
         str,
@@ -401,14 +378,14 @@ def cut(
             "--reg-inset",
             min=3,
             max=30,
-            help="mark corners' distance from the paper edges in mm, all round (default: the layout's, "
-            "10; 3x3: 3.5 from the sides, 9 from the top and bottom)",
+            help="mark corners' distance from the paper edges in mm, all round (default: the 3x3's, "
+            "3.5 from the sides, 9 from the top and bottom; an --svg sheet must give it)",
         ),
     ] = None,
     reg_length: Annotated[
         float | None,
         typer.Option(
-            "--reg-length", help="printed mark leg length in mm (default: the layout's, 9.4; 3x3: 6)"
+            "--reg-length", help="printed mark leg length in mm (default: the 3x3's, 6; --svg: 9.4)"
         ),
     ] = None,
     reg_thickness: Annotated[
@@ -487,7 +464,7 @@ def cut(
             metavar="TOP,LEFT",
             help="where the mark search starts, mm from the loaded origin, used as given (--paper-at "
             "moves only the default); repeat to retry in order (default: 2 mm or more into the square, 6 mm "
-            "left of it or 1 mm from the paper's edge: 11,1 on a 3x3 sheet, 12,4 on a 4x2)",
+            "left of it or 1 mm from the paper's edge: 11,1 on a 3x3 sheet)",
         ),
     ] = None,
     paper_at: Annotated[
@@ -534,9 +511,7 @@ def cut(
                 f"{info.name} was printed with {info.registration}-mark registration ({sidecar}). "
                 "4-mark sheets are no longer supported: rebuild and reprint"
             )
-        typer.echo(
-            f"cut-proxies: using {sidecar} ({info.name}: {info.paper}/{info.card_size}, {info.layout})"
-        )
+        typer.echo(f"cut-proxies: using {sidecar} ({info.name})")
         if proof and not info.proof_targets and not proof_target:
             fail(
                 f"{info.name} was printed before its sheets carried proof targets ({sidecar}): rebuild and "
@@ -546,12 +521,7 @@ def cut(
         fail(f"no run.json at {run}")
     elif not plain:
         typer.echo("cut-proxies: no run.json in the current directory — using flags/defaults", err=True)
-    paper = paper or (info.paper if info else "a4")
-    card = card or (info.card_size if info else "standard")
     o = cutting.CutOptions(
-        paper=paper,
-        card_size=card,
-        layout=sheet_layout or (info.layout if info else default_layout(paper, card)),
         force=blade.force if force is None else force,
         speed=blade.speed if speed is None else speed,
         depth=blade.depth if depth is None else depth,
@@ -646,7 +616,7 @@ def _enter_within(seconds: float) -> bool:
         "Walk the Cameo's TB123 mark scan over a sheet's PDF and report, per pass, the dark runs it "
         "crosses and the nearest print that is not a mark; exits 1 when print sits where a pass "
         "walks. Needs no machine. Reads run.json from --run, the current directory, or the newest run for the "
-        "sheet's PDF, paper, card and layout; flags override (README, Sheet layouts)."
+        "sheet's PDF; flags override (README, Sheet layout)."
     ),
 )
 def simulate(
@@ -655,18 +625,12 @@ def simulate(
         Path | None,
         typer.Option("--run", help="run.json, its folder, or a run name (default: the newest run)"),
     ] = None,
-    paper: Annotated[str | None, typer.Option("-p", "--paper")] = None,
-    card: Annotated[str | None, typer.Option("-c", "--card")] = None,
-    sheet_layout: Annotated[
-        str | None,
-        typer.Option("--layout", help="3x3 | 4x2 (default: run.json's, else 3x3 on A4)"),
-    ] = None,
     reg_inset: Annotated[
         float | None,
         typer.Option("--reg-inset", min=3, max=30, help="as cut-proxies: marks MM from every paper edge"),
     ] = None,
     reg_length: Annotated[
-        float | None, typer.Option("--reg-length", help="printed leg length in mm (default: the layout's)")
+        float | None, typer.Option("--reg-length", help="printed leg length in mm (default: the 3x3's)")
     ] = None,
     reg_thickness: Annotated[float, typer.Option("--reg-thickness")] = 1.0,
     scan_start: Annotated[
@@ -694,20 +658,15 @@ def simulate(
         pdf = sidecar.parent / info.pdf
     if not pdf.is_file():
         fail(f"no PDF at {pdf}")
-    paper = paper or (info.paper if info else "a4")
-    card = card or (info.card_size if info else "standard")
-    name = sheet_layout or (info.layout if info else default_layout(paper, card))
     try:
-        check_layout(name, paper, card)
-        geom = layout.build_cut_svg(paper, card, None, name)
-        if reg_inset is not None:
-            geom = cutting.with_inset(geom, reg_inset)
-        frame = cutting.frame_of(geom, reg_length, reg_thickness)
         with (
             tempfile.TemporaryDirectory() as tmp
         ):  # the cut outlines, for the scan's run-ups as cut-proxies tells it
             svg = Path(tmp) / "cut.svg"
-            layout.build_cut_svg(paper, card, svg, name)
+            geom = layout.build_cut_svg(svg)
+            if reg_inset is not None:
+                geom = cutting.with_inset(geom, reg_inset)
+            frame = cutting.frame_of(geom, reg_length, reg_thickness)
             frame = replace(frame, run_up=driver.run_ups(frame, load_kinds(svg)[0]))
         report = sim.run(pdf, frame, page, parse_start(scan_start) if scan_start else None)
     except (LayoutError, engine.EngineMissing, sim.SimulationError, RuntimeError) as e:
@@ -715,7 +674,7 @@ def simulate(
     top, left = report.start
     down, across = frame.run_up
     typer.echo(
-        f"simulate: {pdf.name} page {page}, {name}, scan starts at ({top:g}, {left:g}) mm, "
+        f"simulate: {pdf.name} page {page}, scan starts at ({top:g}, {left:g}) mm, "
         f"run-ups {down:g} mm down and {across:g} mm across"
     )
     for line in report.lines():
@@ -785,10 +744,7 @@ def _load_run(run: Path | None) -> tuple[Path, RunInfo]:
     sidecar = find_run(run)
     if sidecar is None:
         where = run or runs_parent()
-        fail(
-            f"no run.json in {where} — point --run at a deck's output folder or name it "
-            "(the real folder, not the flat Windows mirror)"
-        )
+        fail(f"no run.json in {where} — point --run at a deck's output folder or name it")
     _say_implicit_run(run, sidecar)
     return sidecar.parent, RunInfo.read(sidecar)
 
@@ -864,18 +820,14 @@ def redo(
     bl.add(entries)
     bl.save()
     typer.echo(f"queued {len(entries)} card(s) → {bl.path}")
-    typer.echo(bl.summary(_per_page(info.paper, info.card_size, info.layout)))
+    typer.echo(bl.summary(_per_page()))
 
 
-def _per_page(paper: str, card_size: str, sheet_layout: str) -> int:
+def _per_page() -> int:
     try:
-        check_layout(sheet_layout, paper, card_size)
-    except LayoutError as e:
-        fail(str(e))
-    try:
-        return manifest.cards_per_page(paper, card_size, sheet_layout)
+        return manifest.cards_per_page()
     except (KeyError, LayoutError, engine.EngineMissing, OSError):
-        return NOMINAL_CARDS.get(sheet_layout, 8)
+        return NOMINAL_CARDS
 
 
 backlog_app = typer.Typer(
@@ -909,41 +861,26 @@ def _resolve_faces(bl: Backlog) -> None:
             )
 
 
-def _show_backlog(out: Path, paper: str, sheet_layout: str | None, card_size: str = "standard") -> Backlog:
-    sheet_layout = sheet_layout or default_layout(paper, card_size)
+def _show_backlog(out: Path) -> Backlog:
     bl = Backlog.at(out.resolve())
     if not bl.entries:
         typer.echo(f"backlog empty ({bl.path})")
         raise typer.Exit()
     _resolve_faces(bl)
-    typer.echo(bl.summary(_per_page(paper, card_size, sheet_layout)))
+    typer.echo(bl.summary(_per_page()))
     typer.echo(bl.listing())
     return bl
 
 
-SheetLayoutOpt = Annotated[
-    str | None, typer.Option("--layout", help="3x3 | 4x2: count sheets of this layout (default: 3x3 on A4)")
-]
-
-
 @backlog_app.callback()
-def backlog_main(
-    ctx: typer.Context,
-    out: OutOpt = None,
-    paper: Annotated[str, typer.Option("-p", "--paper")] = "a4",
-    sheet_layout: SheetLayoutOpt = None,
-) -> None:
+def backlog_main(ctx: typer.Context, out: OutOpt = None) -> None:
     if ctx.invoked_subcommand is None:
-        _show_backlog(out or runs_parent(), paper, sheet_layout)
+        _show_backlog(out or runs_parent())
 
 
 @backlog_app.command(name="show", help="List the queued cards and how many full sheets they make.")
-def backlog_show(
-    out: OutOpt = None,
-    paper: Annotated[str, typer.Option("-p", "--paper")] = "a4",
-    sheet_layout: SheetLayoutOpt = None,
-) -> None:
-    _show_backlog(out or runs_parent(), paper, sheet_layout)
+def backlog_show(out: OutOpt = None) -> None:
+    _show_backlog(out or runs_parent())
 
 
 @backlog_app.command(name="drop", help="Remove entries: by listed number or by (unique) card name.")
@@ -968,8 +905,6 @@ def backlog_drop(refs: Annotated[list[str], typer.Argument()], out: OutOpt = Non
 )
 def backlog_build(
     out: OutOpt = None,
-    paper: Annotated[str, typer.Option("-p", "--paper", help="a4 | letter | a3 ...")] = "a4",
-    sheet_layout: Annotated[str | None, typer.Option("--layout", help=LAYOUT_HELP)] = None,
     backs: Annotated[
         bool, typer.Option("--backs/--fronts-only", help="double-sided (default: fronts only)")
     ] = False,
@@ -997,13 +932,6 @@ def backlog_build(
     dry_run: Annotated[bool, typer.Option("-n", "--dry-run", help="show what would be built")] = False,
 ) -> None:
     out = (out or runs_parent()).resolve()
-    try:  # before anything is looked up or written; run_build checks the same
-        opts = build.resolve_layout(
-            build.BuildOptions(paper=paper, layout=sheet_layout, fronts_only=not backs)
-        )
-        sheet_layout = opts.layout
-    except build.BuildError as e:
-        fail(str(e))
     bl = Backlog.at(out)
     if not bl.entries:
         fail(f"backlog empty ({bl.path})")
@@ -1014,7 +942,7 @@ def backlog_build(
             fail(f"--front-only: nothing in the backlog matching {want!r}")
         for e in hits:
             e.front = True
-    per_page = _per_page(paper, "standard", sheet_layout)
+    per_page = _per_page()
     cards, keep = bl.take(per_page, full_only)
     if not cards:
         fail(f"no full sheet yet ({bl.summary(per_page)}) — drop --full-only to print a partial one")
@@ -1040,8 +968,6 @@ def backlog_build(
     opts = build.BuildOptions(
         deck=str(deck),
         out_parent=out,
-        paper=paper,
-        layout=sheet_layout,
         fronts_only=not backs,
         duplex_dfc=not split_faces,
         front_only=[c.name for c in cards if c.front],
@@ -1062,8 +988,6 @@ def backlog_build(
         if keep
         else f"  Queue:    empty ({bl.path.name} removed)"
     )
-    if result.mirror_failed:
-        raise typer.Exit(1)
 
 
 def _fresh_name(parent: Path, base: str) -> str:

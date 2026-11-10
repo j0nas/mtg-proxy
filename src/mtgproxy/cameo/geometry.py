@@ -58,6 +58,16 @@ def load_svg(path: Path) -> list[Polyline]:
     return [pl for pl, _ in _load(path)]
 
 
+def page_mm(path: Path) -> Point:
+    """The SVG's page, (width, height) mm, from the width and height on its ``<svg>``."""
+    from svgelements import SVG
+
+    svg = SVG.parse(str(path))
+    if svg.values.get("width") is None or svg.values.get("height") is None:
+        raise ValueError(f"{path.name} gives no page size: set width and height in mm on its <svg>")
+    return svg.width * MM_PER_PX, svg.height * MM_PER_PX
+
+
 def load_kinds(path: Path) -> tuple[list[Polyline], list[Polyline]]:
     """``load_svg``'s polylines by kind, (cuts, scores): a score is a shape stroked ``SCORE``, by its
     own stroke or its group's, in any spelling of the colour (#0f0, lime, rgb(0,255,0))."""

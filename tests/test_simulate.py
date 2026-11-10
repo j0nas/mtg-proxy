@@ -11,8 +11,8 @@ from mtgproxy.cli import app
 runner = CliRunner()
 
 
-def frame_of(name: str):
-    return cutting.frame_of(layout.build_cut_svg("a4", "standard", None, name))
+def frame_of():
+    return cutting.frame_of(layout.build_cut_svg(None))
 
 
 @pytest.fixture(scope="module")
@@ -21,8 +21,8 @@ def sheet_3x3(tmp_path_factory):
     from test_build_cli import _duplex_pages
 
     out = tmp_path_factory.mktemp("sheet")
-    _duplex_pages(out, "3x3", 9, ppi=300)
-    return out / "3x3.pdf"
+    _duplex_pages(out, ppi=300)
+    return out / "sheet.pdf"
 
 
 def paint(grey, x0, y0, x1, y1, value=0):
@@ -41,7 +41,7 @@ def failing(report):
 def test_the_default_3x3_sheet_is_clean(sheet_3x3):
     """Every pass finds its mark first and stays at least SPOT clear of the cards (simulated on the
     engine's own page, 2026-10-26); the page renders upright from its landscape PDF."""
-    f = frame_of("3x3")
+    f = frame_of()
     report = simulate.run(sheet_3x3, f)
     assert report.ok, report.lines()
     assert len(report.passes) == 7
@@ -58,7 +58,7 @@ def test_the_default_3x3_sheet_is_clean(sheet_3x3):
 def test_print_next_to_a_pass_is_flagged(sheet_3x3):
     """A patch 0.5 mm from the bottom-left L's vertical-leg pass (y 285 on a 3x3 sheet), and another
     sitting on the top-right L's pass, are named; the rest of the first stay clean."""
-    f = frame_of("3x3")
+    f = frame_of()
     grey = simulate.render(sheet_3x3, 1, f)
     beside = simulate.simulate(paint(grey, 4.3, 285.5, 5.3, 287.0), f)
     assert failing(beside) == {"bottom-left: left"}
@@ -76,7 +76,7 @@ def test_print_next_to_a_pass_is_flagged(sheet_3x3):
 def test_the_area_search_can_latch_onto_a_card(sheet_3x3):
     """A 5 mm dark block above the square, on a row before the one through it, is a run the firmware
     accepts: the search ends there, not at the square."""
-    f = frame_of("3x3")
+    f = frame_of()
     grey = simulate.render(sheet_3x3, 1, f)
     report = simulate.simulate(paint(grey, 12.0, 10.0, 17.0, 12.5), f, start=(9.0, 10.0))
     assert not report.ok and report.passes[0].caught == "other print"
@@ -89,7 +89,7 @@ def test_a_vector_pdf_renders_the_same_way(tmp_path):
     from matplotlib.figure import Figure
     from matplotlib.patches import Rectangle
 
-    f = frame_of("3x3")
+    f = frame_of()
     fig = Figure(figsize=(f.page_w / 25.4, f.page_h / 25.4))
     ax = fig.add_axes((0, 0, 1, 1))
     ax.set_xlim(0, f.page_w)
@@ -119,13 +119,13 @@ def test_a_page_of_the_wrong_size_is_refused(tmp_path):
     pdf = tmp_path / "small.pdf"
     Figure(figsize=(5, 5)).savefig(pdf)
     with pytest.raises(simulate.SimulationError, match="the layout's 210 x 297"):
-        simulate.run(pdf, frame_of("3x3"))
+        simulate.run(pdf, frame_of())
     with pytest.raises(simulate.SimulationError, match="page 2"):
-        simulate.run(pdf, frame_of("3x3"), page=2)
+        simulate.run(pdf, frame_of(), page=2)
 
 
 def test_a_blank_page_finds_nothing():
-    f = frame_of("3x3")
+    f = frame_of()
     blank = np.full((int(f.page_h * simulate.PPI / 25.4), int(f.page_w * simulate.PPI / 25.4)), 255, np.uint8)
     report = simulate.simulate(blank, f)
     assert not report.ok and len(report.passes) == 1 and report.passes[0].caught is None
@@ -139,5 +139,5 @@ def test_cli_simulate_reports_and_exits_by_the_verdict(sheet_3x3):
     assert "bottom-left: left" in ok.output
     wrong = runner.invoke(app, ["simulate", str(sheet_3x3), "--reg-inset", "10"])  # marks that aren't there
     assert wrong.exit_code == 1 and "FAIL" in wrong.output
-    bad = runner.invoke(app, ["simulate", str(sheet_3x3), "--layout", "5x5"])
-    assert bad.exit_code == 1 and "unknown layout" in bad.output
+    gone = runner.invoke(app, ["simulate", str(sheet_3x3), "--layout", "3x3"])
+    assert gone.exit_code == 2 and "No such option" in gone.output

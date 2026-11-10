@@ -47,8 +47,8 @@ def default_start(frame: Frame) -> tuple[float, float]:
     edge, or lower so the pass that measures the square starts EDGE_CLEAR inside the paper, and 6
     mm left of it, or as far left as LOWEST allows from the paper's edge, then moved with the paper
     (``Frame.on_mat``). (11, 1) on a 3x3 sheet (the square at 3.5-8.5 mm across, 9-14 mm down),
-    (12, 4) on a 4x2 sheet (10-15 mm both ways), (8.5, 1) on the 5 mm deck box, (11.5, 4) with its
-    pouch on the tack and the paper 3 mm in both ways.
+    (8.5, 1) on the 5 mm deck box, (11.5, 4) with its pouch on the tack and the paper 3 mm in both
+    ways.
 
     Once a search row catches the square, the head backs up BACKUP above that row and measures the
     square's middle down from there (cameo-re NOTES.md, "Locating it"). On 2026-10-26 the deck box
@@ -69,8 +69,7 @@ def default_start(frame: Frame) -> tuple[float, float]:
     On laminated 3x3 sheets (2026-10-25) a start 2 mm above the square, near the paper's edge,
     took the firmware's second try (28 s) and registered off the top of the sheet, while a start
     2 mm into it found the marks first time twice (13-14 s) and then registered four sheets cut in
-    a row. A 4x2 sheet's start follows that: (8, 4), 2 mm above its square, registered once, on
-    plain A4 (2026-10-24); (12, 4) has not been tried on the machine."""
+    a row."""
     top = max(frame.top + 2, min(BACKUP + EDGE_CLEAR, frame.top + proof.SQUARE - 1.5))
     return frame.on_mat(top, max(LOWEST, frame.inset - 6))
 

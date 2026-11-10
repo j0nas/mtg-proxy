@@ -26,13 +26,12 @@ mtg-proxy doctor    check engine and data files
 `mtg-proxy.sh` onto the whole CLI. Output lands in `~/Desktop/proxies`, one folder per deck, wherever the command
 runs from; `-o` or `MTG_PROXY_OUT` puts it elsewhere. `cut-proxies`, `redo`, `backlog`, `notes` and `simulate` look there
 too, unless you are standing in an older output folder (a deck folder, or the folder above one), which
-they use instead. `--run` takes a run's folder name: `cut-proxies --run mydeck`. Under WSL output is also mirrored flat into
-`%USERPROFILE%\Desktop\projects\mtg-proxy` (`MTG_PROXY_WIN_OUT` overrides).
+they use instead. `--run` takes a run's folder name: `cut-proxies --run mydeck`.
 
 ```
 src/mtgproxy/          engine.py (in-process engine), build.py (pipeline), decks.py (Moxfield/Archidekt),
                        local.py (--images),
-                       layout.py (sheet layouts, cut SVG), cutting.py (cut-proxies), cameo/ (the Cameo driver)
+                       layout.py (the sheet layout, cut SVG), cutting.py (cut-proxies), cameo/ (the Cameo driver)
 data/cut_offset.json   the machine's cut offset in mm, applied to every cut
 data/offset_data.json  printer duplex offset, applied to every double-sided PDF
 assets/back.png        default card back for --backs; replace with your own
@@ -62,7 +61,6 @@ them (docs/lessons.md).
 ```sh
 make-proxies --test                # ./test-sheet/test-sheet.pdf
 make-proxies --test --print        # and print it on the PC's plain-paper queue
-make-proxies --test --layout 4x2   # eight of them on landscape A4 (see Sheet layouts)
 ```
 
 One portrait A4 of nine gauge cards: exact 63x88 mm geometry, hairline art, almost no ink. The
@@ -98,7 +96,6 @@ make-proxies decks/mydeck.txt -f moxfield        # also mtgo, archidekt, decksta
 make-proxies https://moxfield.com/decks/<id>     # straight from Moxfield
 make-proxies https://archidekt.com/decks/<id>    # or Archidekt
 make-proxies <deck-url> --board considering      # main | side | considering
-make-proxies decks/mydeck.txt --layout 4x2       # eight to a sheet, landscape (see below)
 make-proxies decks/mydeck.txt --backs            # double-sided; default is fronts only
 make-proxies decks/mydeck.txt --basics           # include basic lands; skipped by default
 make-proxies decks/mydeck.txt --images cards/    # your own card images where you have them
@@ -137,7 +134,7 @@ replaces the outer 0.3 mm with the ring just inside first; `:0.5` sets the width
 every card.
 
 Every output folder gets a `CUT-NOTES.md` for that run and a `run.json` that `cut-proxies` reads,
-so the layout you printed is the one it cuts. `run.json` also holds the
+so it cuts the marks the sheet printed. `run.json` also holds the
 manifest: which printing sits on which page and slot of each PDF, which is what `redo` uses.
 
 ### Your own card images
@@ -166,10 +163,10 @@ make-proxies decks/aminatou.txt -f moxfield --images cards/ --dry-run   # how ma
   `-f mtga` reads both kinds.
 - A card from an image brings no tokens with `-t`, since it is never looked up.
 
-### Sheet layouts
+### Sheet layout
 
-An A4 sheet of standard cards holds nine unless told otherwise: the 3x3 layout, on portrait A4.
-It is the card-maker's tighter layout, with its marks set by the engine fork: 3.5 mm from the
+Every sheet is nine standard cards on portrait A4, the 3x3 layout. It is the card-maker's tighter
+layout, with its marks set by the engine fork: 3.5 mm from the
 paper's sides, 9 mm from the top and bottom (`inset_y`), legs 6 mm, and no page label. The
 firmware reads each L half a leg in from its corner and starts the bottom-left search 10 mm above
 it. With the card-maker's 3.5 mm all round and 10.5 mm legs, the bottom-left L read 1–2 mm left on
@@ -177,22 +174,20 @@ a laminated sheet, three scans out of three; at 7 mm its search began on the bot
 corner and once read that (2026-10-24). Now every pass stays 1.2–2.6 mm clear of the card print
 (simulated on a real sheet), and four laminated sheets registered and cut in a row (2026-10-25).
 
-Both A4 layouts also print four proof targets, the 3 mm black squares `cut-proxies --proof` traces
+The sheet also prints four proof targets, the 3 mm black squares `cut-proxies --proof` traces
 (see Cutting), in the strip between the top marks' row and the cards: 11.75 mm down at x 120, 142,
-164 and 186 mm on a 3x3 sheet, 12.9 mm down at x 165, 190, 215 and 240 mm on a 4x2 one
-(layouts.json `proof_targets`, which the engine prints from and `cut-proxies` cuts from). On a 3x3
-sheet that strip runs from the marks' line 9 mm down to the cards' print at 14.5 mm (the print
+164 and 186 mm (layouts.json `proof_targets`, which the engine prints from and `cut-proxies` cuts
+from). That strip runs from the marks' line 9 mm down to the cards' print at 14.5 mm (the print
 bleeds 0.7 mm past the cards' cut), and the bottom one, from 282.4 mm to 288, is the same height;
 the side strips are 5 mm wide and the gaps between cards 1.3 mm, filled with the cards' bleed. The
 top strip keeps the targets inside the mark frame and between the two marks the scan reads
 first, where the registration is best. They leave 1.25 mm of paper above and below, keep 6 mm and
 more from every mark, and stay out of the square's search area, the readings of the sensor check
-and the place a third of the way along where the firmware reads its light for a retry. Layouts on
-other paper and card sizes have none.
+and the place a third of the way along where the firmware reads its light for a retry.
 
 Check a new mark layout offline before printing it. `mtg-proxy simulate sheet.pdf` (inside a run
 folder, just `mtg-proxy simulate`) walks the scan's passes over the page's print: the area search,
-the two passes that measure the square, and two across each L. It takes `--layout`, `--reg-inset`,
+the two passes that measure the square, and two across each L. It takes `--reg-inset`,
 `--reg-length` and `--scan-start` like `cut-proxies`, and `--page` for a later page. Each line gives
 the dark runs the pass crosses and the nearest print that is not a mark. The firmware's detector is
 relative, so a pass fails when its first dark run is not a mark or print comes within 1 mm of it,
@@ -200,17 +195,15 @@ the width of the sensor's spot; the command then exits 1. It needs no machine. V
 well as the engine's raster ones. It does not model the firmware's retry after a failed search, nor
 the paper's edge.
 
-A 3x3 sheet's marks have their outer edges 3.0 mm from the paper's sides, and the ET-8550 prints
-to 2.96 mm from every edge, so the sheet must print at 100 %. The PDF page is landscape like every
-sheet's: print it upright (rotated a quarter turn, then portrait at 100 %) and put it on the mat
+The marks have their outer edges 3.0 mm from the paper's sides, and the ET-8550 prints to 2.96 mm
+from every edge, so the sheet must print at 100 %. The engine saves the PDF page landscape: print it
+upright (rotated a quarter turn, then portrait at 100 %) and put it on the mat
 portrait with the square at the top-left. The square sits 0.6 mm from the top-left card's print,
 beside its corner.
 
-A 3x3 sheet goes double-sided as a 4x2 one does: `--backs` prints the whole deck double-sided,
-and double-faced cards go to `<deck>-duplex.pdf` (`--split-faces` puts both faces on the main
-sheet instead). The engine saves every page landscape, so both sides print like a 4x2 sheet's,
-manual duplex with a long-edge flip, and the saved duplex offset moves the back pages the same
-way. On the engine's output each back sits behind its front, upright when the card is turned
+`--backs` prints the whole deck double-sided, and double-faced cards go to `<deck>-duplex.pdf`
+(`--split-faces` puts both faces on the main sheet instead). Both sides print manual duplex with a
+long-edge flip, and the saved duplex offset moves the back pages. On the engine's output each back sits behind its front, upright when the card is turned
 over side to side (checked at 300 ppi, and by the tests at 50 ppi). The back pages carry no
 registration marks (the engine fork's `--no_back_marks`): nothing scans them, and turned over the
 long edge a back's square lands right behind the front's top-right L, where on double-sided glossy
@@ -218,12 +211,6 @@ it showed through enough to make every TB123 misread that L (2026-10-26). The fi
 printed double-sided (2026-10-26) had its backs slightly off with the offset measured on the
 landscape calibration sheet; check against a light before laminating a batch
 (`make-proxies --test --backs` numbers each back), and remeasure the offset if it is off.
-
-`--layout 4x2` is the engine's own layout: eight cards on landscape A4, the marks 10 mm in. It is
-the default on every other paper and card size, since 3x3 is A4 with standard cards only.
-`run.json` records the layout, so `cut-proxies` scans the right frame and cuts the right outlines,
-and `redo` counts the run's sheets. `backlog` and `backlog build` count nine to a sheet unless
-given `--layout 4x2`.
 
 ## Reprints and leftovers
 
@@ -254,8 +241,7 @@ A card printed from `--images` is queued with its image path (`image=…` in the
 image has moved since, the build stops and names it.
 
 The dotfiles' `make-proxies` and `cut-proxies` functions find the clone (`$MTG_PROXY_DIR`, then
-`~/Desktop/projects/mtg-proxy`) and run the shims from any shell, including WSL with Windows
-paths.
+`~/Desktop/projects/code/mtg-proxy`) and run the shims from any shell.
 
 ## Cut offset
 
@@ -275,25 +261,25 @@ Once, for `--backs` decks and duplex sheets:
    Units are 300 PPI pixels, ~0.085 mm.
 3. `mtg-proxy offset -x <x> -y <y>` (`-a <deg>` for rotation).
 
-Stored in `data/offset_data.json`, tracked, applied to every double-sided PDF, 3x3 and 4x2 alike:
-both are landscape pages, and the engine shifts the back pages in the page's own pixels.
+Stored in `data/offset_data.json`, tracked, applied to every double-sided PDF: the engine shifts
+the back pages in the landscape page's own pixels.
 
 ## Cutting
 
 `cut-proxies` drives the Cameo over Bluetooth LE (`--usb` for the cable) with its own driver,
 `src/mtgproxy/cameo/`, and scans the 3-mark registration every sheet is printed with (see
-Registration). It follows the sheet's `run.json`, which holds the paper, card size and layout
-`make-proxies` printed.
+Registration). It follows the sheet's `run.json`, which holds the PDFs and marks `make-proxies`
+printed.
 
 Run bare at a terminal, `cut-proxies` asks first. Enter cuts the default: this folder's
-`run.json`, else the newest run in `~/Desktop/proxies`, or a plain A4 sheet (standard cards, the
-default layout) when there is none, with the laminate preset over Bluetooth LE. "Choose…" picks
+`run.json`, else the newest run in `~/Desktop/proxies`, or a plain 3x3 sheet when there is none,
+with the laminate preset over Bluetooth LE. "Choose…" picks
 another run, the preset, and
 cut, proof first, dry run or probe. `--usb` and `--ble-name` keep the menu; any other flag, or a
 pipe, skips it and cuts as told.
 
 ```sh
-cut-proxies                # menu; Enter cuts the newest run (paper, card size, layout from run.json)
+cut-proxies                # menu; Enter cuts the newest run (from its run.json)
 cut-proxies --run mydeck   # a named run in ~/Desktop/proxies, no menu
 cut-proxies --preset paper # plain paper instead of laminate
 cut-proxies --passes 4     # also --force/--speed/--depth, --x-off/--y-off
@@ -308,9 +294,8 @@ cut-proxies --sense        # scans, then reads each mark back with the sensor (T
 cut-proxies --no-check     # skips the sensor check of the marks before and after the scan
 cut-proxies --diagnose     # before any scan: where each mark sits and how it reads; cuts nothing
 cut-proxies --proof        # traces a printed proof target after the scan; y cuts, r rescans, q stops
-cut-proxies --layout 4x2   # a 4x2 sheet without its run.json (a plain sheet is 3x3)
 cut-proxies --paper-at 3   # expect the paper's corner 3 mm right of and below the grid's (see Placement)
-cut-proxies --svg job.svg --layout 4x2 --reg-inset 5   # any SVG the size of that layout's page
+cut-proxies --svg job.svg --reg-inset 5   # any SVG with its page size in mm, its marks 5 mm in
 ```
 
 Settings, AutoBlade only (the Kraft blade can't turn the 3 mm corners):
@@ -375,8 +360,8 @@ The job follows Silhouette Studio's own conversation with this machine, recorded
 Registration:
 
 - Every sheet has 3-mark registration: a filled 5 mm square top-left and L marks top-right and
-  bottom-left, scanned with `TB123`. `--reg-length` / `--reg-thickness` (mm, default the layout's:
-  6 × 1 on the 3x3, 9.4 × 1 on the 4x2) describe the L marks before the scan. Older sheets printed
+  bottom-left, scanned with `TB123`. `--reg-length` / `--reg-thickness` (mm, default
+  6 × 1 on the 3x3, 9.4 × 1 on an `--svg` sheet) describe the L marks before the scan. Older sheets printed
   with 4-mark registration are refused (their `run.json` says so): rebuild and reprint them.
 - `TB123` finds the square by an area search: rows 3 mm apart from the start to 30 mm below it,
   each sweeping 30 mm to its right, for a dark run 3.5–9 mm long. It then measures the square
@@ -386,20 +371,19 @@ Registration:
   engine fork's cd4166a; at 6 mm the machine found it, its sideways pass ran past it and the scan
   failed (`-1`) from every start.
 - The search starts 2 mm below the square's top edge and 6 mm left of it, or 1 mm from the paper's
-  edge: (11, 1) mm on a 3x3 sheet (the square 3.5–8.5 mm across, 9–14 mm down), (12, 4) on a 4x2
-  (10–15 mm both ways). The first row runs through the square, and the sweep crosses its left
+  edge: (11, 1) mm on a 3x3 sheet (the square 3.5–8.5 mm across, 9–14 mm down). The first row runs through the square, and the sweep crosses its left
   edge from white paper. On laminated 3x3 sheets a start 2 mm above the square, near the paper's
   edge, took the firmware's retry and registered off the sheet, while 2 mm into it registered
-  first time (2026-10-25). On plain A4, starts on or past the square never found it (`1`). A 4x2
-  sheet registered once from (8, 4), 2 mm above its square (2026-10-24); (12, 4) follows the 3x3
-  sheets and hasn't been tried. `--scan-start TOP,LEFT` (repeatable) replaces the start with
+  first time (2026-10-25). On plain A4, starts on or past the square never found it (`1`).
+  `--scan-start TOP,LEFT` (repeatable) replaces the start with
   exactly those; `--paper-at` moves only the default start, and the check moves any start to where it
   finds the square (see Placement). Coordinates are from
   the job's own origin, which the job's first command (`TG1`) moves 16.5 mm in once per mat load:
   anything that measures positions on the machine must send it first.
-- `--reg-inset MM` puts the expected marks MM from every paper edge instead of the layout's
-  (3.5 mm from the sides and 9 mm from the top and bottom on a 3x3 sheet, 10 mm on a 4x2). The
-  deck box prints its marks 5 mm in. It must match the printed marks.
+- `--reg-inset MM` puts the expected marks MM from every paper edge instead of the 3x3's
+  (3.5 mm from the sides and 9 mm from the top and bottom). An `--svg` sheet must give it, and
+  takes its page from the SVG's own width and height; the deck box prints its marks 5 mm in. It
+  must match the printed marks.
 - Cuts may reach above or left of the top-left mark, as long as they stay on the paper: the
   cutting area then starts past them (`\\-y,-x`); every other job sends Studio's `\\0,0`.
   First used on the deck box's round 4 (2026-09-28). Keep 6 mm around every mark free of print
@@ -435,7 +419,7 @@ way, nearest first, and measures its top and left edges from the first reading t
 right of each hit first skips ink that isn't the square (the pouch's band along the paper's top
 edge, paper lifting off the mat) for one reading instead of the measure's eleven.
 
-A landscape sheet (4x2, the deck box) comes out of the printer portrait with its square top-right,
+A landscape sheet (the deck box) comes out of the printer portrait with its square top-right,
 and goes on the mat landscape with the square top-left. When the square is found nowhere on a
 landscape sheet, the head reads once more where the square lies on a sheet loaded as printed, and
 ink there stops the run with "the sheet lies portrait, as it leaves the printer: turn it a quarter
@@ -513,7 +497,7 @@ A misread can also be caught by eye. With `--proof` the blade traces the edge of
 and crosses it with an X corner to corner after the scan, in one light pass at force 10, speed 5, depth 2 (`--proof-blade FORCE,SPEED,DEPTH`
 changes it), then sets the job's own blade again and waits. The targets are 3 mm filled black
 squares printed with the marks, inside the mark frame and clear of the marks and the job: four on
-every sheet the engine prints (see Sheet layouts), or one `--proof-target X,Y` for each on a sheet
+every sheet the engine prints (see Sheet layout), or one `--proof-target X,Y` for each on a sheet
 it didn't, such as the paper deck box (their centres in page mm, `--proof-target-size` if they
 aren't 3 mm). Lift the lid and look at the target. The groove along the edge is hard to see on its
 own; the X's, across the black, shows as light lines. Registered right, the cut runs along the edge
@@ -564,8 +548,6 @@ where its cut logs found them, 5.5 mm right and 2.75 mm down.
 
 Finish: cut cards can delaminate at the edges. Run them through the laminator again. Cloudy
 lamination is too cold (run 80 µm pouches on the 5 mil setting); wavy cards are too hot.
-
-A3 works on the ET-8550 (18 cards a sheet) but needs the 12x24" mat.
 
 ## Development
 

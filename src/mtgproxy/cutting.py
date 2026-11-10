@@ -58,8 +58,6 @@ SCORE_DEPTH = 3
 
 @dataclass
 class CutOptions:
-    paper: str = "a4"
-    card_size: str = "standard"
     force: int = PRESETS["laminate"].force
     speed: int = PRESETS["laminate"].speed
     depth: int = PRESETS["laminate"].depth
@@ -70,15 +68,11 @@ class CutOptions:
     ble_name: str = "CAMEO 5 ALPHA"
     svg: Path | None = None
     dry_run: bool = False
-    layout: str = (
-        layout.DEFAULT
-    )  # 3x3 | 4x2 (layout.py): which of the engine's layouts the sheet was printed in
-    # The printed marks (mm). Leg length None = the layout's: 9.4 on the card-maker's 4x2 A4 (and
-    # deckbox's), 6 on its 3x3.
+    # The printed marks (mm). Leg length None = the sheet's: 6 on the 3x3, 9.4 on an --svg sheet.
     reg_length: float | None = None
     reg_thickness: float = 1.0
-    # Mark corners' distance from the paper edges (mm). None = the layout's (10 for the card-maker's
-    # 4x2 A4; 3.5 from the sides and 9 from the top and bottom on its 3x3).
+    # Mark corners' distance from the paper edges (mm). None = the 3x3's, 3.5 from the sides and 9
+    # from the top and bottom; an --svg sheet must give it.
     reg_inset: float | None = None
     out_dir: Path = field(default_factory=lambda: ROOT / "output" / "cut")
     label: str | None = None  # deck name, for log/transcript file names
@@ -138,6 +132,25 @@ def with_inset(geom: layout.Geometry, inset: float) -> layout.Geometry:
         reg_x_mm=round(geom.page_w_mm - 2 * inset, 3),
         reg_y_mm=round(geom.page_h_mm - 2 * inset, 3),
         reg_inset_y_mm=None,
+    )
+
+
+def svg_geometry(svg: Path) -> layout.Geometry:
+    """An --svg sheet's page, the SVG's own size; ``with_inset`` puts its marks where --reg-inset says."""
+    from .cameo import geometry
+
+    try:
+        w, h = (round(v, 3) for v in geometry.page_mm(svg))
+    except ValueError as e:
+        raise CutError(str(e)) from e
+    return layout.Geometry(
+        cards=0,
+        page_w_mm=w,
+        page_h_mm=h,
+        reg_inset_mm=0.0,
+        reg_x_mm=w,
+        reg_y_mm=h,
+        cut_bbox_mm=(0.0, 0.0, w, h),
     )
 
 
@@ -222,7 +235,7 @@ def no_targets(o: CutOptions, geom: layout.Geometry) -> str:
             f"{o.svg.name} has no proof targets: give each one printed on the sheet as --proof-target X,Y "
             "(its centre, page mm from the top-left corner), or cut without --proof"
         )
-    return f"the {o.layout} layout on {o.paper} prints no proof targets: cut without --proof"
+    return "this checkout's 3x3 layout prints no proof targets: cut without --proof"
 
 
 def ble_scan() -> int:
@@ -236,12 +249,11 @@ def ble_scan() -> int:
 
 
 def check(o: CutOptions) -> None:
-    """Refuse options that can't describe a printed sheet: an unknown layout, or one with marks or
-    paper it never prints."""
-    try:
-        layout.check(o.layout, o.paper, o.card_size)
-    except layout.LayoutError as e:
-        raise CutError(str(e)) from e
+    """Refuse options that can't describe a printed sheet: an --svg sheet says where its marks are."""
+    if o.svg is not None and o.reg_inset is None:
+        raise CutError(
+            f"--svg {o.svg.name} needs --reg-inset: its marks' distance from the paper edges in mm"
+        )
 
 
 def run_cut(o: CutOptions) -> int:
@@ -253,14 +265,14 @@ def run_cut(o: CutOptions) -> int:
 
     # 1. Cut geometry from the card-maker's own layout engine (same source as the PDF).
     if o.svg is None:
-        name = o.label or f"{o.paper}-{o.card_size}-{o.layout}"
+        name = o.label or "3x3"
         svg = o.out_dir / f"{name}.svg"
-        geom = layout.build_cut_svg(o.paper, o.card_size, svg, o.layout)
+        geom = layout.build_cut_svg(svg)
     else:
         if not o.svg.is_file():
             raise CutError(f"SVG not found: {o.svg}")
         svg, name = o.svg, o.svg.stem
-        geom = layout.build_cut_svg(o.paper, o.card_size, None, o.layout)
+        geom = svg_geometry(svg)
     if o.reg_inset is not None:
         geom = with_inset(geom, o.reg_inset)
     elif o.printed_marks:
@@ -286,7 +298,7 @@ def run_cut(o: CutOptions) -> int:
     except (ValueError, session.CutError) as e:
         raise CutError(str(e)) from e
     starts, origin = scan_starts(o, frame)
-    what = f"{geom.cards} cards ({geom.layout})" if o.svg is None else svg.name
+    what = f"{geom.cards} cards (3x3)" if o.svg is None else svg.name
     via = "nothing (dry run)" if o.dry_run else o.connection
     print(
         f"cut-proxies: {name} — {what}, 3-mark registration "

@@ -130,8 +130,8 @@ def test_cli_notes_and_cut_errors(tmp_path):
 
 def test_cli_cut_takes_geometry_from_sidecar(tmp_path, monkeypatch):
     (tmp_path / "run.json").write_text(json.dumps({
-        "name": "orah", "paper": "letter", "card_size": "standard", "registration": "3",
-        "cards": 8, "fronts_only": True, "generated": "2026-09-17",
+        "name": "orah", "paper": "a4", "card_size": "standard", "layout": "3x3", "registration": "3",
+        "cards": 9, "fronts_only": True, "generated": "2026-09-17",
     }))  # fmt: skip
     captured = {}
 
@@ -144,14 +144,7 @@ def test_cli_cut_takes_geometry_from_sidecar(tmp_path, monkeypatch):
     monkeypatch.setattr(cutting, "run_cut", fake_run_cut)
     r = runner.invoke(app, ["cut", "--run", str(tmp_path), "--passes", "4"])
     assert r.exit_code == 0, r.output
-    assert (captured["paper"], captured["layout"], captured["label"], captured["passes"]) == (
-        "letter",
-        "4x2",  # run.json from before layouts
-        "orah",
-        4,
-    )
-    r = runner.invoke(app, ["cut", "--run", str(tmp_path), "-p", "a4"])
-    assert captured["paper"] == "a4"  # explicit flag wins
+    assert (captured["label"], captured["passes"]) == ("orah", 4)  # run.json's older fields are ignored
     assert isinstance(captured["out_dir"], Path)
     assert captured["connection"] == "ble"  # Bluetooth unless asked otherwise
     r = runner.invoke(app, ["cut", "--run", str(tmp_path), "--usb"])
@@ -185,32 +178,18 @@ def test_move_tokens_last_reindexes_by_token_name(tmp_path, monkeypatch):
     assert build.prune_to_tokens() == 2  # --tokens-only still recognises the renamed files
 
 
-def test_cli_make_3x3_refuses_what_it_cant_print(decklist):
-    r = runner.invoke(app, ["make", str(decklist), "--layout", "3x3", "-p", "letter", "--dry-run"])
-    assert r.exit_code == 1 and "A4 paper with standard cards only, not letter" in r.output
-    r = runner.invoke(app, ["make", str(decklist), "--layout", "5x5", "--dry-run"])
-    assert r.exit_code == 1 and "unknown layout '5x5' (known: 3x3, 4x2)" in r.output
-
-
 @needs_engine
-def test_cli_make_is_nine_a_sheet_unless_told(decklist, tmp_path):
+def test_cli_make_is_nine_a_sheet(decklist, tmp_path):
     r = runner.invoke(app, ["make", str(decklist), "-o", str(tmp_path), "--dry-run"])
     assert r.exit_code == 0, r.output
-    assert "(paper a4, 3x3 layout of 9 cards, format" in r.output
-    r = runner.invoke(app, ["make", str(decklist), "-o", str(tmp_path), "--layout", "4x2", "--dry-run"])
-    assert "(paper a4, 4x2 layout of 8 cards, format" in r.output
-    r = runner.invoke(app, ["make", str(decklist), "-o", str(tmp_path), "-p", "letter", "--dry-run"])
-    assert "(paper letter, 4x2 layout of 8 cards, format" in r.output  # 3x3 is A4 only
+    assert "(3x3 layout of 9 cards, format" in r.output
 
 
-def test_every_sheet_is_3_mark_and_3x3_takes_the_engines_tighter_layout():
-    three = build.pdf_base_args(build.resolve_layout(BuildOptions(layout="3x3")))
-    assert three[three.index("--registration") + 1] == "3"
-    assert three[-3:] == ["--borderless", "--label", ""]
-    four = build.pdf_base_args(build.resolve_layout(BuildOptions(layout="4x2")))
-    assert four[four.index("--registration") + 1] == "3" and "--borderless" not in four
-    assert build.resolve_layout(BuildOptions()).layout == "3x3"
-    assert build.resolve_layout(BuildOptions(paper="letter")).layout == "4x2"
+def test_every_sheet_is_3_mark_3x3_in_the_engines_tighter_layout_without_a_label():
+    args = build.PDF_BASE_ARGS
+    assert args[args.index("--registration") + 1] == "3"
+    assert args[args.index("--paper_size") + 1] == "a4" and args[args.index("--card_size") + 1] == "standard"
+    assert "--borderless" in args and args[args.index("--label") + 1] == ""
 
 
 @pytest.fixture
@@ -240,9 +219,9 @@ def game(tmp_path, monkeypatch):
 
 
 @needs_engine
-def test_a_3x3_run_records_its_layout_for_cut_proxies(tmp_path, monkeypatch, game):
-    """The 3x3 test sheet through the whole build (the engine's PDF step stood in): the engine is
-    asked for its tighter layout with 3 marks, one sheet holds 9, and run.json and the notes say so."""
+def test_a_run_records_its_marks_for_cut_proxies(tmp_path, monkeypatch, game):
+    """The test sheet through the whole build (the engine's PDF step stood in): the engine is asked
+    for its tighter layout with 3 marks, one sheet holds 9, and run.json and the notes say so."""
     from mtgproxy.sidecar import RunInfo
 
     monkeypatch.setattr(
@@ -252,15 +231,15 @@ def test_a_3x3_run_records_its_layout_for_cut_proxies(tmp_path, monkeypatch, gam
     )
     out = tmp_path / "out"
     out.mkdir()
-    result = build.run_build(BuildOptions(test_mode=True, layout="3x3", out_parent=out))
+    result = build.run_build(BuildOptions(test_mode=True, out_parent=out))
     assert result.cards == 9  # one full sheet of gauges
     args = game[0]
     assert "--borderless" in args and args[args.index("--registration") + 1] == "3"
     info = RunInfo.read(result.out / "run.json")
-    assert (info.layout, info.registration, info.cards, info.paper) == ("3x3", "3", 9, "a4")
+    assert (info.registration, info.cards) == ("3", 9)
+    assert info.marks == {"inset": 3.5, "inset_y": 9.0, "length": 6.0}
     notes = (result.out / NOTES_NAME).read_text()
-    assert "| layout: 3x3 | registration: 3-mark | cards: 9" in notes
-    assert "`cut-proxies --layout 3x3`" in notes
+    assert "| 3x3 on A4 | registration: 3-mark | cards: 9" in notes
 
 
 @needs_engine
@@ -271,15 +250,15 @@ def test_a_3x3_deck_gets_pages_of_nine_and_a_duplex_sheet(tmp_path, monkeypatch,
     for i in range(1, 11):
         (engine.FRONT / f"{i}Card{chr(64 + i)}1.png").write_bytes(b"x")  # 1CardA1.png ..
     files, _ = manifest.partition(fronts_only=True, duplex_dfc=True)  # in the engine's order
-    per_page = build.per_page(BuildOptions(layout="3x3"))
+    per_page = build.per_page()
     sheet = manifest.make_sheet(manifest.MAIN, files, "d.pdf", per_page, manifest.Recorder())
     assert (sheet.per_page, sheet.pages, len(sheet.page(2))) == (9, 2, 1)
     assert manifest.locate(sheet.cards[9], {manifest.MAIN: sheet}) == "p2.1"  # slot numbers per 9
     assert sheet.cards[9].name == "CardJ"
     assert build._defer(files, 9)[1] == files[9:]  # --defer-partial leaves the tenth for the backlog
 
-    # A double-faced card goes on a 3x3 duplex sheet, asked of the engine as a 4x2 one is: pages
-    # front and back (no --only_fronts) with the saved duplex offset, in the tighter layout.
+    # A double-faced card goes on a 3x3 duplex sheet: pages front and back (no --only_fronts) with
+    # the saved duplex offset, in the tighter layout.
     monkeypatch.setattr(build, "duplex_offset_args", lambda: ["--load_offset"])
     (engine.DOUBLE_SIDED / files[0].name).write_bytes(b"back")
     deck = tmp_path / "deck.txt"
@@ -291,7 +270,7 @@ def test_a_3x3_deck_gets_pages_of_nine_and_a_duplex_sheet(tmp_path, monkeypatch,
     assert duplex[duplex.index("--registration") + 1] == "3" and "--borderless" in duplex
     assert (result.cards, result.dfc_count, result.duplex_pdf.name) == (10, 1, "deck-duplex.pdf")
     info = RunInfo.read(result.out / "run.json")
-    assert (info.layout, info.sheets["duplex"]["per_page"], info.duplex_pdf) == ("3x3", 9, "deck-duplex.pdf")
+    assert (info.sheets["duplex"]["per_page"], info.duplex_pdf) == (9, "deck-duplex.pdf")
 
     game.clear()  # --backs: the whole deck double-sided, on 3x3 sheets
     both = build.run_build(
@@ -304,13 +283,13 @@ def test_a_3x3_deck_gets_pages_of_nine_and_a_duplex_sheet(tmp_path, monkeypatch,
 
     game.clear()
     split = build.run_build(
-        BuildOptions(deck=str(deck), layout="3x3", skip_fetch=True, out_parent=tmp_path, duplex_dfc=False)
+        BuildOptions(deck=str(deck), skip_fetch=True, out_parent=tmp_path, duplex_dfc=False)
     )
     assert split.cards == 11 and len(game) == 1  # --split-faces: both faces on the 3x3 sheet
 
 
-def _duplex_pages(tmp_path, sheet_layout: str, n: int, extra: tuple[str, ...] = (), ppi: int = 50):
-    """The engine's real duplex PDF for ``n`` flat-coloured cards in ``sheet_layout`` at 50 ppi: a
+def _duplex_pages(tmp_path, extra: tuple[str, ...] = (), ppi: int = 50):
+    """The engine's real duplex PDF (``tmp_path``/sheet.pdf) for 9 flat-coloured cards at 50 ppi: a
     front's own top-right carries a white square, a back's own top-left a black one. Returns the
     two pages (landscape, as the engine saves every sheet) and the colours."""
     import numpy as np
@@ -318,8 +297,8 @@ def _duplex_pages(tmp_path, sheet_layout: str, n: int, extra: tuple[str, ...] = 
     from pypdf import PdfReader
 
     colours = [(230, 25, 75), (60, 180, 75), (0, 130, 200), (245, 130, 48), (145, 30, 180),
-               (70, 240, 240), (240, 50, 230), (210, 245, 60), (128, 128, 0)][:n]  # fmt: skip
-    dirs = {d: tmp_path / sheet_layout / d for d in ("front", "back", "ds")}
+               (70, 240, 240), (240, 50, 230), (210, 245, 60), (128, 128, 0)]  # fmt: skip
+    dirs = {d: tmp_path / d for d in ("front", "back", "ds")}
     for d in dirs.values():
         d.mkdir(parents=True)
     for i, c in enumerate(colours, 1):
@@ -328,10 +307,9 @@ def _duplex_pages(tmp_path, sheet_layout: str, n: int, extra: tuple[str, ...] = 
             ImageDraw.Draw(im).rectangle([x0, 16, x0 + 30, 46], fill=fill)
             im.save(dirs[side] / f"{i}Card{i}1.png")
     Image.new("RGB", (126, 176), (128, 128, 128)).save(dirs["back"] / "back.png")
-    out = tmp_path / f"{sheet_layout}.pdf"
-    base = build.pdf_base_args(build.resolve_layout(BuildOptions(layout=sheet_layout)))
+    out = tmp_path / "sheet.pdf"
     engine.create_pdf([
-        *base, "--front_dir_path", str(dirs["front"]), "--double_sided_dir_path", str(dirs["ds"]),
+        *build.PDF_BASE_ARGS, "--front_dir_path", str(dirs["front"]), "--double_sided_dir_path", str(dirs["ds"]),
         "--back_dir_path", str(dirs["back"]), "--output_path", str(out), "--ppi", str(ppi), *extra,
     ])  # fmt: skip
     pages = [np.asarray(p.images[0].image.convert("RGB")).astype(int) for p in PdfReader(out).pages]
@@ -352,16 +330,14 @@ def _card(page, colour, marker):
 
 
 @needs_engine
-@pytest.mark.parametrize("sheet_layout, n", [("3x3", 9), ("4x2", 8)])
-def test_each_back_sits_behind_its_front_for_a_long_edge_flip(tmp_path, sheet_layout, n):
+def test_each_back_sits_behind_its_front_for_a_long_edge_flip(tmp_path):
     """Both pages are landscape, so a long-edge flip mirrors the page top to bottom: a front at
     (x, y) is backed by the back page's (x, h - y). Each back's box is its front's, mirrored, and its
     own top-left (the black square) sits behind its front's top-right (the white one), so the back
-    reads upright once the card is turned over side to side. A 4x2 sheet follows the same rule, so
-    a 3x3 sheet prints double-sided the same way. At 300 ppi (2026-10-25) each 3x3 back sat within
-    0 px of its mirrored front, and the saved duplex offset moved the back pages alone, by
-    (-2, +2) px, in both layouts."""
-    (front, back), colours = _duplex_pages(tmp_path, sheet_layout, n)
+    reads upright once the card is turned over side to side. At 300 ppi (2026-10-25) each back sat
+    within 0 px of its mirrored front, and the saved duplex offset moved the back pages alone, by
+    (-2, +2) px."""
+    (front, back), colours = _duplex_pages(tmp_path)
     h = front.shape[0]
     for c in colours:  # within 2 px, 1 mm at 50 ppi (JPEG edges); a wrong flip is a card off
         (fx0, fy0, fx1, fy1), white = _card(front, c, "white")
@@ -385,8 +361,8 @@ def test_back_pages_carry_no_registration_marks(tmp_path):
             cards[max(0, y0 - 2) : y1 + 3, max(0, x0 - 2) : x1 + 3] = True  # JPEG fringes at the edges
         return int(((page.sum(axis=2) < 150) & ~cards).sum())
 
-    (_, marked), colours = _duplex_pages(tmp_path / "marked", "3x3", 9)
-    (_, plain), _ = _duplex_pages(tmp_path / "plain", "3x3", 9, extra=tuple(build.BACK_PAGES))
+    (_, marked), colours = _duplex_pages(tmp_path / "marked")
+    (_, plain), _ = _duplex_pages(tmp_path / "plain", extra=tuple(build.BACK_PAGES))
     assert stray_ink(marked, colours) > 20 and stray_ink(plain, colours) == 0
 
 

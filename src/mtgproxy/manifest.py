@@ -100,8 +100,8 @@ def sheets_from_dict(raw: dict | None) -> dict[str, Sheet]:
     return {k: Sheet.from_dict(k, v) for k, v in (raw or {}).items()}
 
 
-def cards_per_page(paper: str, card_size: str, layout: str) -> int:
-    d = layout_def(paper, card_size, layout)
+def cards_per_page() -> int:
+    d = layout_def()
     return int(d["num_rows"]) * int(d["num_cols"])
 
 
@@ -289,8 +289,6 @@ def rebuild(run_dir: Path, info) -> dict[str, Sheet]:
     opts = build.BuildOptions(
         deck=str(deck),
         fmt=o.get("fmt", "mtga"),
-        paper=info.paper,
-        card_size=info.card_size,
         fronts_only=info.fronts_only,
         duplex_dfc=o.get("duplex_dfc", True),
         fancy_art=o.get("fancy_art", True),
@@ -310,7 +308,7 @@ def rebuild(run_dir: Path, info) -> dict[str, Sheet]:
             f"rebuilt {total} card(s) but the run had {expected} — the decklist or the build "
             "options differ from the original run; pass the -t N / --basics it was built with"
         )
-    per_page = cards_per_page(info.paper, info.card_size, info.layout)
+    per_page = cards_per_page()
     sheets = {MAIN: make_sheet(MAIN, main, info.pdf, per_page, rec)}
     if duplex:
         sheets[DUPLEX] = make_sheet(DUPLEX, duplex, info.duplex_pdf, per_page, rec)
