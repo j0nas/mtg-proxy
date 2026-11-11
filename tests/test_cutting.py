@@ -141,6 +141,15 @@ def test_scored_lines_get_their_own_light_blade_unless_told_otherwise(monkeypatc
     assert (o.scores, o.pass_by_pass, o.passes) == (False, True, 2)
 
 
+def test_an_svg_sheet_reaches_the_cut_as_a_path(monkeypatch, tmp_path):
+    """2026-11-11: the wizard's cut handed cut_flow Click's raw str for --svg, and every --svg cut
+    stopped at `'str' object has no attribute 'is_file'`."""
+    monkeypatch.chdir(tmp_path)
+    svg = tmp_path / "deck-window.svg"
+    o = cut_options(monkeypatch, "--svg", str(svg), "--reg-inset", "5", "--preset", "paper")
+    assert isinstance(o.svg, Path) and o.svg == svg
+
+
 def test_an_unknown_preset_is_refused(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(cli.app, ["cut", "--preset", "cardstock"])

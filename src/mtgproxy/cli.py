@@ -502,6 +502,9 @@ def cut(
         ),
     ] = False,
 ) -> None:
+    # The options as Typer converted them, for cut_flow: ctx.params holds Click's raw values, a str
+    # where the option is a Path (--svg, --run).
+    given = dict(locals())
     if scan:
         raise typer.Exit(cutting.ble_scan())
     _fresh(allow_stale)
@@ -517,7 +520,7 @@ def cut(
             raise typer.Exit()
         run, plain, preset = picked.run, picked.run is None, picked.preset
         dry_run, proof, probe = (picked.mode == m for m in ("dry-run", "proof", "probe"))
-    params = {k: v for k, v in ctx.params.items() if k not in ("scan", "allow_stale")}
+    params = {k: v for k, v in given.items() if k not in ("ctx", "scan", "allow_stale")}
     cut_flow(
         **{
             **params,

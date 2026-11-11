@@ -124,6 +124,24 @@ with GitHub before they run, and stop when either is behind (`freshness.py`, `--
 overrides it); run.json records both versions and the printed marks, which `cut-proxies` checks
 against its layout; every cut's session log records the versions that cut it.
 
+## 2026-11-11: the wizard's cut handed on --svg as a string
+
+The paper deck box's window cut (`cut-proxies --svg … --reg-inset 5 --preset paper …`) stopped
+before reaching the Cameo, with `AttributeError: 'str' object has no attribute 'is_file'` in
+`run_cut`. First thought, on the deck box's side: its change the evening before, which dropped `-p`
+and `--layout` from its flags. Actual cause: feed974 split `cut` into the command and `cut_flow`, so
+the wizard could call the flow, and the command forwarded `ctx.params`. Typer calls the command with
+converted values (a `Path` for `--svg` and `--run`), while `ctx.params` keeps Click's raw ones, a
+str. Every `--svg` cut failed. The cut's tests stub `run_cut` and none of them passed `--svg`, and
+the wizard's tests stub `cut_flow`, so all of them stayed green.
+
+The lesson: when a refactor changes how a command hands its options on, test it through the real
+entry point with each kind of value it converts, a path among them. Two copies of the same input
+that differ in type are a trap; hand on the one the function was given.
+
+What changed: `cut` forwards its own arguments as Typer gave them, and `test_cutting.py` sends
+`--svg` through the CLI and checks that `run_cut` gets a `Path`.
+
 ## 2026-11-10: the PC's engine clone fell behind again
 
 `make-proxies` on the PC (WSL) stopped at the duplex PDF with `create_pdf: No such option
