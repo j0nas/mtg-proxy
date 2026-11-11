@@ -62,7 +62,7 @@ def test_tb63_stores_into_slots_one_to_four_only_and_replies_parse_as_numbers():
 
 def test_a_cut_reads_the_square_and_both_legs_of_each_l():
     c = sensing.checks(FRAME)
-    assert len(c) == 9 and sum(x.ink for x in c) == 5
+    assert len(c) == 17 and sum(x.ink for x in c) == 5  # then 8 paper points beside the legs
     square = {x.what: (x.x, x.y) for x in c if x.mark == "top-left"}
     assert square["the square"] == (6.0, 11.5) and square["left of the square"] == (2.25, 11.5)
     assert square["below the square"] == (6.0, 15.25)  # 1.25 mm below its bottom edge

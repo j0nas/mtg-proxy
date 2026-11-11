@@ -331,3 +331,55 @@ def test_a_sheet_lifting_by_the_square_stops_after_one_scan_and_says_so():
         "use its other side. Reload and rerun: nothing was cut"
     )
     assert sheet.sent.count(b"TB123") == 1 and b"D" not in sheet.sent.replace(b"TB", b"")
+
+
+class OffPaperSheet(Sheet):
+    """After the scan, everything round the top-right L reads as dark as ink: the scan registered that
+    L off the paper (2026-11-11: a retried scan put it too far out, on the pouch's border), so a leg's
+    own ink reading proves nothing."""
+
+    def write(self, data: bytes) -> None:
+        super().write(data)
+        if self.scanned and any(cmd.startswith(b"TB63") for cmd in data.split(b"\x03")):
+            y, x = self.head
+            px, py = x + FRAME.inset, y + FRAME.top
+            if px > FRAME.inset + FRAME.width - 8 and py < FRAME.top + 14:
+                self.pending[-1] = b"  255\x03"
+
+
+def test_legs_that_read_ink_with_ink_either_side_stop_the_cut_before_the_blade_goes_down():
+    sheet = OffPaperSheet()
+    said_ = []
+
+    class Log(session.SessionLog):
+        def say(self, message):
+            said_.append(message)
+
+    j = job()
+    with pytest.raises(session.CutError, match=r"found no top-right L within 7 mm.*nothing was cut"):
+        driver.cut(j, sheet, Log(None), [driver.default_start(j.frame)], check=True)
+    assert any(
+        m.startswith("check: top-right, right of the vertical leg: read 255 (ink) where paper should be")
+        for m in said_
+    )
+    assert b"D" not in sheet.sent.replace(b"TB", b"")
+
+
+def test_a_scan_that_took_its_retry_is_logged_with_its_duration(monkeypatch):
+    monkeypatch.setattr(
+        session.time, "monotonic", iter([0.0, 0.0, 0.0, 24.0, 24.0, 24.0, 24.0, 24.0]).__next__
+    )
+    sheet = Sheet()
+    events, said_ = [], []
+
+    class Log(session.SessionLog):
+        def __call__(self, event, **fields):
+            events.append((event, fields))
+
+        def say(self, message):
+            said_.append(message)
+
+    s = session.Session(sheet, Log(None))
+    s.register(FRAME, [(8.0, 1.0)])
+    assert ("slow_scan", {"seconds": 24.0, "usual": "11-12 s"}) in events
+    assert any(m.startswith("WARNING: the scan took 24 s, not the usual 11-12 s") for m in said_)

@@ -28,8 +28,16 @@ def su(mm: float) -> int:
     return round(mm * 20)
 
 
+LOWERCASE = re.compile(r"[a-z]")
+
+
 def cmd(*parts: str) -> bytes:
-    """ETX-terminate each command (bare escape sequences go through ``raw``)."""
+    """ETX-terminate each command (bare escape sequences go through ``raw``). Nothing here may hold a
+    lowercase letter: once the firmware's debug set is open (``UNLOCK``) every lowercase byte is a
+    debug command, and two of them (``q``, ``m``) never return. Debug commands go through ``debug``."""
+    for part in parts:
+        if LOWERCASE.search(part):
+            raise ValueError(f"{part!r} has a lowercase letter: only protocol.debug sends those")
     return "".join(p + ETX for p in parts).encode("ascii")
 
 
@@ -175,6 +183,39 @@ def sense(slot: int) -> str:
     if not 1 <= slot <= 4:
         raise ValueError(f"TB63 stores into slots 1-4, not {slot}")
     return f"TB63,{slot}"
+
+
+# The firmware's hidden debug set (V1.04 only; cameo-re NOTES.md, "The debug set opens from the host").
+# Sending UNLOCK opens it until power-off, and from then on every lowercase byte is a debug command, two
+# of which (q, m) never return. So the only lowercase this driver sends are the commands below, through
+# ``debug``, which refuses anything else; ``cmd`` refuses lowercase altogether.
+UNLOCK = "FPGRFCC1"
+DEBUG_FIRMWARE = "V1.04"
+SENSOR_ON = "a0"  # the light on (TB63 switches it off when it ends)
+SENSOR_READ = "a2"  # one reading of the sensor, "  581": more reflected light reads higher (60 ms)
+SENSOR_OFF = "a4"
+DEBUG_COMMAND = re.compile(r"^(a[0124]|a1,\d{1,3}|g9,-?\d+,-?\d+)$")
+
+
+def sensor_level(n: int) -> str:
+    """a1: the light's level, 0-255 (``TB61`` sets it too, but from a stored slot)."""
+    if not 0 <= n <= 255:
+        raise ValueError(f"the light's level is 0-255, not {n}")
+    return f"a1,{n}"
+
+
+def head_to(y_mm: float, x_mm: float) -> str:
+    """g9: move the head like ``M``, but not held inside the cutting area, and short by 0.7 % along
+    the feed and 1.2 % across the carriage: send it at (1.0068 y, 1.0118 x) to land where ``M`` does."""
+    return f"g9,{su(y_mm)},{su(x_mm)}"
+
+
+def debug(*parts: str) -> bytes:
+    """ETX-terminate debug commands (``a0`` ``a1,n`` ``a2`` ``a4`` ``g9,y,x``), and nothing else."""
+    for part in parts:
+        if not DEBUG_COMMAND.match(part):
+            raise ValueError(f"{part!r} is not one of the debug commands this driver sends")
+    return "".join(p + ETX for p in parts).encode("ascii")
 
 
 NUMBER_REPLY = re.compile(r"^\s*(-?\d+)\s*$")

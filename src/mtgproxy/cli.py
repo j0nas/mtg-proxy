@@ -429,6 +429,15 @@ def cut(
             "the scan then starts where the sheet should be",
         ),
     ] = False,
+    register: Annotated[
+        str | None,
+        typer.Option(
+            "--register",
+            help="how the marks are registered: 'sensor' (this driver finds each mark with the Cameo's "
+            "debug sensor and cuts through its own fit, no scan; needs firmware V1.04; the default) or "
+            "'scan' (the Cameo's own scan, TB123, the fallback; the default with --no-check)",
+        ),
+    ] = None,
     sense: Annotated[
         bool,
         typer.Option(
@@ -559,6 +568,7 @@ def cut_flow(
     probe: bool = False,
     diagnose: bool = False,
     no_check: bool = False,
+    register: str | None = None,
     sense: bool = False,
     proof: bool = False,
     proof_target: list[str] | None = None,
@@ -602,7 +612,7 @@ def cut_flow(
         svg=svg, dry_run=dry_run,
         reg_length=reg_length, reg_thickness=reg_thickness, reg_inset=reg_inset,
         label=info.name if info else None,
-        probe=probe, sense=sense, diagnose=diagnose, check=not no_check, proof=proof, scan_starts=[parse_start(v) for v in scan_start or []] or None,
+        probe=probe, sense=sense, diagnose=diagnose, check=not no_check, register=register or ("scan" if no_check else "sensor"), proof=proof, scan_starts=[parse_start(v) for v in scan_start or []] or None,
         proof_targets=[parse_target(v) for v in proof_target] if proof_target else None,
         proof_target_size=proof_target_size, proof_from=proof_from,
         proof_blade=parse_blade(proof_blade) if proof_blade else None,

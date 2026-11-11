@@ -174,6 +174,8 @@ class Sheet:
     where FRAME expects it: ``ink`` inside, ``beside`` on the paper past its right and bottom edges
     (and round it), ``above`` more than 2 mm above it, blended linearly across each edge."""
 
+    sensor = None  # TB63 readings, as the session's
+
     def __init__(self, off, ink=255, beside=110, above=110, near=None, reach=0.0):
         self.off, self.ink, self.beside, self.above = off, ink, beside, above
         self.near, self.reach = near, reach  # ``near`` within ``reach`` mm of the square: a lifting corner

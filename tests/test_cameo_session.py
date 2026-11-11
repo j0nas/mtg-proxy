@@ -193,7 +193,10 @@ def test_sensing_refuses_when_the_scan_restores_its_light_from_the_slot_it_would
 
 INK, PAPER = b"  255\x03", b"  180\x03"
 SQUARE_OK = [INK, PAPER, PAPER, PAPER, PAPER]  # its middle, then left, right, above, below it
-MARKS_OK = SQUARE_OK + [INK] * 4  # then the top-right L's two legs' centre lines, then the bottom-left's
+LEG_PAPER = [PAPER] * 8  # then blank paper either side of each L's two legs, 2.0 mm out
+MARKS_OK = (
+    SQUARE_OK + [INK] * 4 + LEG_PAPER
+)  # then the top-right L's two legs' centre lines, then the bottom-left's
 # Before the scan: the square's middle, blank paper 6 mm right of it, then its right edge halved three
 # times and its bottom edge four down to where the frame puts them (driver.locate: 3 mm out paper,
 # 1.5 ink, 2.25 ink, then 2.625 paper).
@@ -214,11 +217,11 @@ def test_a_frame_the_print_agrees_with_is_cut_after_nine_readings_and_nothing_is
     t = checked([*PLACED, *FLAT, *MARKS_OK])  # the placement first, then the blank paper
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t)
-    assert out.count("TB63,4") == len(PLACED) + 4 + 9 and out.count("TB123") == 1
+    assert out.count("TB63,4") == len(PLACED) + 4 + 17 and out.count("TB123") == 1
     assert out.index("TB60") < out.index("TB63,4") < out.index("TB123")  # slot, placement, scan
-    assert "\\-35,-35\x03" in out  # the area reaches the paper points 1.25 mm left of and above the square
+    assert "\\-60,-60\x03" in out  # the area reaches the paper points 2.5 mm left of and above the legs
     first_cut = out.index("D")
-    assert out[:first_cut].count("TB63,4") == len(PLACED) + 4 + 9  # every reading before the first cut
+    assert out[:first_cut].count("TB63,4") == len(PLACED) + 4 + 17  # every reading before the first cut
     assert "TB63,4" not in out[first_cut:]  # the cut done, nothing is left to guard
 
 
@@ -241,7 +244,7 @@ def test_a_sheet_without_ink_under_the_square_is_never_scanned():
 
 def test_a_leg_centre_that_misses_by_a_hair_is_read_a_quarter_mm_either_side():
     nudged = [b"  240\x03", INK]  # the centre in between, the first nudge on ink
-    t = checked([*PLACED, *FLAT, *SQUARE_OK, *nudged, INK, INK, INK])
+    t = checked([*PLACED, *FLAT, *SQUARE_OK, *nudged, INK, INK, INK, *LEG_PAPER])
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     out = sent(t).replace("\x1b\x05", "")
     assert "M94,5735\x03TB63,4" in out  # the top-right vertical leg, 0.25 mm left of its centre line
@@ -278,7 +281,7 @@ FAINT = [b"  189\x03", b"  177\x03", b"  168\x03", b"  130\x03", b"  125\x03"]  
 
 def test_a_faint_leg_passes_when_it_is_darker_than_the_paper_on_both_sides():
     t = checked(
-        [*PLACED, *FLAT, *SQUARE_OK, INK, INK, *FAINT, INK]
+        [*PLACED, *FLAT, *SQUARE_OK, INK, INK, *FAINT, INK, *LEG_PAPER]
     )  # the bottom-left vertical leg on 2026-10-26
     driver.cut(job(), t, log(), [driver.default_start(FRAME)], check=True)
     assert "D" in sent(t).replace("TB", "")
@@ -648,7 +651,7 @@ def scored_job():
 
 
 def test_a_scored_job_reads_the_marks_after_the_blade_change_before_it_cuts():
-    t = checked([*PLACED, *FLAT, *MARKS_OK])  # every reading after the check reads ink too
+    t = checked([*PLACED, *FLAT, *MARKS_OK, INK])  # every reading after the check reads ink
     said = []
     driver.cut(
         scored_job(), t, session.SessionLog(None, echo=said.append), [driver.default_start(FRAME)], check=True
@@ -695,7 +698,7 @@ def steps(out: str, marks: dict[str, str]) -> list[str]:
 
 def test_a_proofed_scored_job_proves_then_scores_then_cuts_reading_the_marks_after_each():
     targeted = replace(scored_job(), frame=replace(FRAME, targets=proof.targets([(100, 80), (120, 80)])))
-    t, asked = checked([*PLACED, *FLAT, *MARKS_OK]), []
+    t, asked = checked([*PLACED, *FLAT, *MARKS_OK, INK]), []
     driver.cut(
         targeted, t, log(), [driver.default_start(FRAME)], lambda *a: asked.append(a) or "y", check=True
     )
@@ -712,7 +715,7 @@ def test_a_proofed_scored_job_proves_then_scores_then_cuts_reading_the_marks_aft
         f"{len(PLACED) + 4} readings",  # the square's placement and blank paper beside the marks
         "scan",
         "blade at depth 5",
-        "9 readings",  # the check: every mark where the scan put it
+        "17 readings",  # the check: every mark where the scan put it
         "blade at depth 2",  # proof.BLADE
         "proof cut",
         "blade at depth 5",  # the job's own blade again

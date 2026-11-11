@@ -17,11 +17,15 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import protocol as p
 from .geometry import Polyline, bbox
 from .proof import Target
 from .transport import Transport
+
+if TYPE_CHECKING:
+    from .reading import DebugSensor
 
 
 class CutError(Exception):
@@ -29,6 +33,8 @@ class CutError(Exception):
 
 
 SCAN_TIMEOUT_S = 90.0  # a whole scan, the firmware's own second try included (28 s on 2026-10-25)
+SLOW_SCAN_S = 16.0  # a scan this long is the firmware's retry (17 s and up; 11-12 s otherwise)
+USUAL_SCAN_S = "11-12 s"
 CHUNK_BYTES = 1024
 CHUNK_TIMEOUT_S = 180.0
 # s between status polls while the head moves to a reading: at 0.5 s every reading waited 0.25 s
@@ -239,10 +245,18 @@ class Session:
     t: Transport
     log: SessionLog
     touched: bool = field(default=False)  # sent anything that moves the machine
+    # The debug sensor (``reading.DebugSensor``) once the firmware's debug set is open and it answered;
+    # the readings before the scan then use it, and without it they use TB63 (``sense``).
+    sensor: DebugSensor | None = None
 
     def send(self, *commands: str) -> None:
         self.touched = True
         self.t.write(p.cmd(*commands))
+
+    def send_debug(self, *commands: str) -> None:
+        """Debug commands (``protocol.debug``), the only lowercase the machine is ever sent."""
+        self.touched = True
+        self.t.write(p.debug(*commands))
 
     def query(self, raw: bytes, timeout: float = 5.0) -> bytes | None:
         stale = self.t.drain()
@@ -334,6 +348,16 @@ class Session:
             took = time.monotonic() - t0
             self.log("scan", command=scan[0], result=result, seconds=round(took, 2), other_replies=others)
             if result == "found":
+                if took > SLOW_SCAN_S:
+                    # The firmware's retry: it recalibrates the light, searches again from a third of a
+                    # frame away and still answers "found". 2026-11-11: 24 s against 11-12 s, and the
+                    # top-right L registered too far out.
+                    self.log("slow_scan", seconds=round(took, 2), usual=USUAL_SCAN_S)
+                    self.log.say(
+                        f"WARNING: the scan took {took:.0f} s, not the usual {USUAL_SCAN_S}: the firmware retried it, "
+                        "and a retried scan has registered the far marks off the paper before. The marks are "
+                        "checked closely"
+                    )
                 self.log.say(f"marks found in {took:.0f} s (scan start {top:g}, {left:g} mm)")
                 return top, left
             self.log.say(

@@ -68,6 +68,27 @@ THROUGH_SCAN = (3.0, 0.05)
 
 
 @dataclass(frozen=True)
+class Mode:
+    """How a survey reads: which scale (``sensing.Scale``) and how fine it looks. TB63 takes 1.7-4.1 s
+    a reading, so it looks coarsely; the debug sensor's a2 takes 0.19 s with its move, so it steps
+    finer and gives up later, and still gives up (``blind``)."""
+
+    scale: sensing.Scale = sensing.TB63
+    step: float = STEP
+    blind: int = BLIND
+    leg_halvings: int = LEG_HALVINGS
+    square_halvings: int = SQUARE_HALVINGS
+    far_halvings: int = FAR_HALVINGS
+
+
+TB63_MODE = Mode()
+# a2: legs read 1.1-1.25 mm wide at half level, so readings 0.5 mm apart always land on one; each leg
+# edge to 0.19 mm by halving, the square's far edge to 0.16 mm (2026-11-11: edges are sharp, repeating
+# within 0.005 mm). Eight readings with no paper round a mark and it is given up: 1.5 s.
+A2_MODE = Mode(sensing.A2_SCALE, step=0.5, blind=8, leg_halvings=3, square_halvings=5, far_halvings=3)
+
+
+@dataclass(frozen=True)
 class Line:
     """A mark's line found across one axis: its centre and width, mm, along that axis."""
 
@@ -75,13 +96,13 @@ class Line:
     width: float
 
 
-def hit(level: int | None, paper: int | None) -> bool:
+def hit(level: int | None, paper: int | None, mode: Mode = TB63_MODE) -> bool:
     """A reading that stands out as ink against ``paper``: ink by ``sensing.thresholds``, or a
-    narrow line's blur at least CONTRAST above the paper."""
+    narrow line's blur at least CONTRAST above the paper (on a2: between ink and paper)."""
     if level is None:
         return False
-    ink, _ = sensing.thresholds(paper)
-    return level >= ink or (paper is not None and level >= paper + sensing.CONTRAST)
+    sc = mode.scale
+    return sc.reads(level, paper) is True or sc.dim(level, paper)
 
 
 def edge(
@@ -92,6 +113,7 @@ def edge(
     paper: int,
     cut: float,
     halvings: int,
+    mode: Mode = TB63_MODE,
 ) -> float | None:
     """Where the level crosses ``cut`` between ink reading ``ink`` at ``ink_t`` and paper taken to
     read ``paper`` at ``paper_t`` (not read): halved ``halvings`` times, then interpolated between
@@ -103,13 +125,13 @@ def edge(
         level = read(mid)
         if level is None:
             return None
-        if level >= cut:
+        if mode.scale.inkward(level, cut):
             ink_t, li = mid, level
         else:
             paper_t, lp, bounded = mid, level, True
     if not bounded:
         return None
-    if li <= lp:
+    if li == lp or not mode.scale.inkward(li, lp):
         return (ink_t + paper_t) / 2
     f = min(1.0, max(0.0, (li - cut) / (li - lp)))
     return ink_t + f * (paper_t - ink_t)
@@ -122,23 +144,25 @@ def line(
     paper: int,
     reach: float,
     halvings: int,
+    mode: Mode = TB63_MODE,
 ) -> Line | None:
     """Both edges of the line that reads ``level`` at ``t``, each looked for within ``reach``, where
     the level crosses halfway from ``paper`` to full ink. A reading short of halfway is the line's
     blurred edge: the reading half a STEP to either side that passes it stands in, and with none,
     None. A side whose readings never reach paper gives the line the whole reach on that side and
     an infinite width, so it is passed over as too wide."""
-    cut = (sensing.FULL + paper) / 2
-    if level < cut:
-        for t2 in (t - STEP / 2, t + STEP / 2):
+    sc = mode.scale
+    cut = sc.halfway(paper)
+    if not sc.inkward(level, cut):
+        for t2 in (t - mode.step / 2, t + mode.step / 2):
             l2 = read(t2)
-            if l2 is not None and l2 >= cut:
+            if l2 is not None and sc.inkward(l2, cut):
                 t, level = t2, l2
                 break
         else:
             return None
-    lo = edge(read, t, level, t - reach, paper, cut, halvings)
-    hi = edge(read, t, level, t + reach, paper, cut, halvings)
+    lo = edge(read, t, level, t - reach, paper, cut, halvings, mode)
+    hi = edge(read, t, level, t + reach, paper, cut, halvings, mode)
     if lo is None or hi is None:
         a, b = t - reach if lo is None else lo, t + reach if hi is None else hi
         return Line((a + b) / 2, math.inf)
@@ -153,14 +177,16 @@ def search(
     width: tuple[float, float],
     edge_reach: float,
     halvings: int,
+    mode: Mode = TB63_MODE,
 ) -> Line | None:
-    """The first line of ``width`` within ``reach`` of ``guess``, readings STEP apart from the guess
-    outwards, nearest first; a line of the wrong width is passed over."""
-    n = math.floor(reach / STEP + 1e-9)
-    order = [0.0, *(k * s * STEP for k in range(1, n + 1) for s in (1, -1))]
+    """The first line of ``width`` within ``reach`` of ``guess``, readings ``mode.step`` apart from the
+    guess outwards, nearest first; a line of the wrong width is passed over."""
+    sc = mode.scale
+    n = math.floor(reach / mode.step + 1e-9)
+    order = [0.0, *(k * s * mode.step for k in range(1, n + 1) for s in (1, -1))]
     passed: list[tuple[float, float]] = []
-    base = sensing.PAPER if paper is None else paper
-    cut = (sensing.FULL + base) / 2
+    base = sc.nominal_paper if paper is None else paper
+    cut = sc.halfway(base)
     levels: list[int | None] = []
 
     def tracked(t: float) -> int | None:
@@ -169,16 +195,16 @@ def search(
         return level
 
     for off in order:
-        if len(levels) >= BLIND and not any(v is not None and v < cut for v in levels):
+        if len(levels) >= mode.blind and not any(v is not None and not sc.inkward(v, cut) for v in levels):
             return None  # nothing here reads as paper: no line can be told from it
         t = guess + off
         if any(a <= t <= b for a, b in passed):
             continue
         level = tracked(t)
-        if not hit(level, paper):
+        if not hit(level, paper, mode):
             continue
         assert level is not None
-        found = line(tracked, t, level, min(base, level - sensing.CONTRAST), edge_reach, halvings)
+        found = line(tracked, t, level, sc.paper_under(base, level), edge_reach, halvings, mode)
         if found is None:
             continue
         if width[0] <= found.width <= width[1]:
@@ -246,21 +272,23 @@ def judge(
     return None
 
 
-def square_side(read: Callable[[float], int | None], t: float, level: int, paper: int) -> float | None:
+def square_side(
+    read: Callable[[float], int | None], t: float, level: int, paper: int, mode: Mode = TB63_MODE
+) -> float | None:
     """The square's middle along one axis, from ``t`` inside it: its far edge (right, or bottom),
     past which only blank paper lies on every sheet, then its near one within FAR_EDGE of where
     the 5 mm square puts it. Past the near edge lies the paper's own edge, which a pouch reads as
     dark as ink, as close as 3.5 mm on the first 3x3 layout: when no reading there comes out
     paper, the near edge is taken from the square's size. None when the far edge isn't found
     (the ink runs on: a pouch's band, a card), or the near one isn't where the size says."""
-    cut = (sensing.FULL + paper) / 2
-    if level < cut:
+    cut = mode.scale.halfway(paper)
+    if not mode.scale.inkward(level, cut):
         return None
-    far = edge(read, t, level, t + SQUARE_EDGE, paper, cut, SQUARE_HALVINGS)
+    far = edge(read, t, level, t + SQUARE_EDGE, paper, cut, mode.square_halvings, mode)
     if far is None:
         return None
     guess = far - proof.SQUARE
-    near = edge(read, guess + FAR_EDGE, level, guess - FAR_EDGE, paper, cut, FAR_HALVINGS)
+    near = edge(read, guess + FAR_EDGE, level, guess - FAR_EDGE, paper, cut, mode.far_halvings, mode)
     return (guess + far) / 2 if near is None else (near + far) / 2
 
 
@@ -271,10 +299,11 @@ def survey(
     log: SessionLog,
     paper: Callable[[str], int | None] = lambda mark: None,
     limits: tuple[float, float] = (SQUARENESS, STRETCH),
+    mode: Mode = TB63_MODE,
 ) -> Fit:
     """Find the square and both edges of each L's legs with the sensor, starting where ``where``
     expects each, and fit the page to them. ``paper(mark)`` is blank paper's level beside that mark
-    (``sensing.Flatness.paper_at``). Raises CutError naming the mark it couldn't find, or the fit's
+    (``sensing.Flatness.paper_at``, or ``paper_here`` for a2). Raises CutError naming the mark it couldn't find, or the fit's
     flaw (``judge``)."""
     count = [0]
 
@@ -306,7 +335,8 @@ def survey(
     # as it did before the scan (2026-11-01: Gisa's paper beside the square read 135-141 before it
     # and 197-224 after, the 125 µm pouch lifted), and no square can be told from it.
     seen: list[int | None] = []
-    blank_below = (sensing.FULL + (sensing.PAPER if sq_paper is None else sq_paper)) / 2
+    sc = mode.scale
+    blank_below = sc.halfway(sc.nominal_paper if sq_paper is None else sq_paper)
 
     def sq(what: str, axis: str, fixed: float) -> Callable[[float], int | None]:
         read = at("top-left", what, axis, fixed)
@@ -322,7 +352,9 @@ def survey(
         ((a * SQUARE_HUNT, b * SQUARE_HUNT) for a in (-1, 0, 1) for b in (-1, 0, 1)),
         key=lambda d: (math.hypot(*d), d[1], d[0]),
     ):
-        if len(seen) >= BLIND and not any(v is not None and v < blank_below for v in seen):
+        if len(seen) >= mode.blind and not any(
+            v is not None and not sc.inkward(v, blank_below) for v in seen
+        ):
             raise CutError(
                 sensing.press_down(
                     ["top-left"],
@@ -333,14 +365,14 @@ def survey(
             )
         hy, hx = gy + dy, gx + dx
         level = sq("the square", "x", hy)(hx)
-        if not hit(level, sq_paper):
+        if not hit(level, sq_paper, mode):
             continue
         assert level is not None
-        base = sensing.PAPER if sq_paper is None else min(sq_paper, level - sensing.CONTRAST)
-        across = square_side(sq("the square across", "x", hy), hx, level, base)
+        base = sc.nominal_paper if sq_paper is None else sc.paper_under(sq_paper, level)
+        across = square_side(sq("the square across", "x", hy), hx, level, base, mode)
         if across is None:
             continue
-        down = square_side(sq("the square down", "y", across), hy, level, base)
+        down = square_side(sq("the square down", "y", across), hy, level, base, mode)
         if down is None:
             continue
         found = (across, hy, down)
@@ -363,13 +395,27 @@ def survey(
 
     def upright(mark: str, row: float, x: float, reach: float) -> tuple[float, float] | None:
         got = search(
-            at(mark, "upright leg", "x", row), x, reach, paper(mark), LEG_WIDTH, LEG_EDGE, LEG_HALVINGS
+            at(mark, "upright leg", "x", row),
+            x,
+            reach,
+            paper(mark),
+            LEG_WIDTH,
+            LEG_EDGE,
+            mode.leg_halvings,
+            mode,
         )
         return None if got is None else (got.centre, row)
 
     def level(mark: str, col: float, y: float, reach: float) -> tuple[float, float] | None:
         got = search(
-            at(mark, "level leg", "y", col), y, reach, paper(mark), LEG_WIDTH, LEG_EDGE, LEG_HALVINGS
+            at(mark, "level leg", "y", col),
+            y,
+            reach,
+            paper(mark),
+            LEG_WIDTH,
+            LEG_EDGE,
+            mode.leg_halvings,
+            mode,
         )
         return None if got is None else (col, got.centre)
 

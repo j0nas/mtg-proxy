@@ -641,3 +641,24 @@ def test_an_svg_sheet_says_where_its_marks_are_and_how_big_its_page_is(tmp_path)
     unsized.write_text(BOX_SVG.replace(' width="297mm" height="210mm"', ""))
     with pytest.raises(cutting.CutError, match=r"unsized\.svg gives no page size"):
         cutting.svg_geometry(unsized)
+
+
+def test_register_defaults_to_the_sensor_and_the_scan_is_the_fallback(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    assert cut_options(monkeypatch).register == "sensor"
+    assert cut_options(monkeypatch, "--register", "scan").register == "scan"
+    assert cut_options(monkeypatch, "--no-check").register == "scan"
+
+
+@pytest.mark.parametrize(
+    "args, want",
+    [
+        (["--register", "laser"], "--register wants 'scan' or 'sensor', got 'laser'"),
+        (["--register", "sensor", "--no-check"], "can't go with --no-check"),
+    ],
+)
+def test_register_refuses_what_cant_work(monkeypatch, tmp_path, args, want):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cutting, "run_cut", lambda o: pytest.fail("cut"))
+    result = CliRunner().invoke(cli.app, ["cut", *args])
+    assert result.exit_code == 1 and want in result.output

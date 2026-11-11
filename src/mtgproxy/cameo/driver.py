@@ -14,10 +14,11 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from functools import partial
+from functools import partial, reduce
 from pathlib import Path
 
 from . import geometry, proof, protocol, sensing, survey
+from .reading import DebugSensor
 from .session import CutError, Frame, Job, Session, SessionLog, check_bounds, far_corner, low_corner
 from .transport import BleTransport, RecordingTransport, Transport, UsbTransport
 
@@ -25,6 +26,7 @@ FIRMWARE = b"CAMEO 5 ALPHA V1.04    \x03"
 DRY_ANSWERS = {
     b"\x1b\x05": b"0\x03",  # ready
     b"FG": FIRMWARE,
+    b"a2": b"  580\x03",  # the debug sensor: blank paper (the unlock, a0, a1 and a4 get no reply)
     b"TB123": b"    0\x03",  # marks found (a scan result is padded to five characters)
     b"TB60": b"    0\x03",  # the scan's light slot
     b"TB62": b"  120\x03",
@@ -146,6 +148,7 @@ def cut(
     check: bool = False,
     proof_blade: protocol.Blade = proof.BLADE,
     on_target: Callable[[proof.Target], None] | None = None,
+    register: str = "scan",
 ) -> Result:
     """The whole job. Once anything moved the machine, it always ends back at the origin.
 
@@ -159,7 +162,9 @@ def cut(
     readings show it (``sensing.press_down``). With ``confirm``, each proof round traces the next of
     the frame's proof targets with ``proof_blade`` between the registration and the cut
     (``prove``), and nothing else is cut until the operator says so; ``on_target`` hears of each
-    target as it is cut. A rescan returns to the origin and repeats a fresh run's start."""
+    target as it is cut. With ``register="sensor"`` (and ``check``) no scan is sent: the sensor's own
+    readings of every mark are fitted and checked (``sensor_registered``) and the cut goes through that
+    fit, in the mat's own frame. A rescan returns to the origin and repeats a fresh run's start."""
     s = Session(t, log)
     try:
         if check:
@@ -183,36 +188,52 @@ def cut(
             s.prepare()
             try:
                 if check and attempt == 0:
+                    t_pre = time.monotonic()
+                    s.sensor = DebugSensor.open(s, firmware)
+                    if register == "sensor" and s.sensor is None:
+                        raise CutError(
+                            "--register sensor needs the Cameo's debug sensor (firmware V1.04, answering a2), "
+                            "which isn't there: rerun with --register scan to register by the Cameo's own scan"
+                        )
                     placed = check_placement(s, job.frame, log)
                     starts = follow(starts, job.frame, placed)  # the square sits off: so does the sheet
                     job = replace(job, frame=placed)
                     flat = check_flat(s, job.frame, log)
+                    log("prescan", seconds=round(time.monotonic() - t_pre, 2), sensor=bool(s.sensor))
             except CutError:
-                s.send(protocol.select_light(slot))  # the next job's scan, checked or not, gets its light
+                lights_back(s, slot)  # the next job's scan, checked or not, gets its light
                 raise
-            if check:  # the readings leave the light wherever their ramp stopped: back to the scan's level
-                s.send(protocol.select_light(slot))
+            if check:  # the readings leave the light wherever they put it: back to the scan's level
+                lights_back(s, slot)
             job = replace(job, frame=replace(job.frame, fit=None))  # each round registers afresh
             extent, reach, low = reach_of(job, targets, check)
             where: survey.Where | None = None  # where the survey looks first, when it must
             start = starts[0]
             scanned = False  # the scan found marks, and installed its frame
+            by_sensor = check and register == "sensor"
             try:
-                start = s.register(job.frame, starts)
-                scanned = True
+                if by_sensor:
+                    job = sensor_registered(s, job, log, flat, slot)
+                    extent, reach, low = reach_of(job, targets, False)
+                    s.setup(job.blade, job.frame, low)
+                else:
+                    start = s.register(job.frame, starts)
+                    scanned = True
             except CutError as e:
+                if by_sensor:
+                    raise
                 if not check:
                     raise
                 log.say(f"{e.args[0].split('. ')[0]}: finding the marks with the sensor instead")
                 where = partial(_on_mat, job.frame)
-            if where is None:
+            if where is None and not by_sensor:
                 if low != (0.0, 0.0) and attempt == 0:
                     log.say(
                         f"cut reaches {max(0.0, -reach[1]):.2f} mm above / {max(0.0, -reach[0]):.2f} mm left "
                         f"of the top-left mark: cutting area widened to {low[0]:g}, {low[1]:g} mm"
                     )
                 s.setup(job.blade, job.frame, low)
-            if check and where is None:
+            if check and where is None and not by_sensor:
                 seen: dict[tuple[str, str], int | None] = {}
                 failed = check_marks(s, job.frame, log, flat, seen=seen)
                 s.send(protocol.select_light(slot))  # for the rescan, or the next sheet's scan
@@ -220,7 +241,10 @@ def cut(
                     for line in failed:
                         log.say(f"check: {line}")
                     beside = {what: level for (mark, what), level in seen.items() if mark == "top-left"}
-                    if sensing.lifts_by_square(beside, flat.reference):
+                    reference = (
+                        flat.reference if flat.scale is sensing.TB63 else top_margin(s, job.frame, log)
+                    )
+                    if sensing.lifts_by_square(beside, reference):
                         sides = ("to its left", "to its right", "above it", "below it")
                         *each, last = (
                             f"{beside.get(w)} {at}"
@@ -230,7 +254,7 @@ def cut(
                             sensing.press_down(
                                 ["top-left"],
                                 f"blank paper beside the square reads {', '.join(each)} and {last}, against "
-                                f"{flat.reference} in the middle of the top margin",
+                                f"{reference} in the middle of the top margin",
                             )
                         )
                     log.say(
@@ -385,6 +409,74 @@ def surveyed(
     return replace(job, frame=replace(f, fit=fit))
 
 
+def sensor_registered(s: Session, job: Job, log: SessionLog, flat: sensing.Flatness, slot: int) -> Job:
+    """Register the sheet from the sensor's own a2 readings instead of the scan (``--register sensor``):
+    survey every mark in the mat's own frame (``survey.survey`` in ``survey.A2_MODE``), fit the page to
+    them (refused unless the fit is square and the marks as far apart as printed), then read the marks
+    again through the fit (``check_marks``): ink in the square with paper on its four sides, ink on
+    each leg's centre line with paper either side. The job then goes through the fit: no TB123 runs, so
+    no transform is installed under the cut's moves, and the fit's coordinates are the plain mat frame
+    that ``reading.DebugSensor`` reads in (``Frame.machine``'s fit branch, with the cut offset
+    ``job.bias`` added, as the scan path adds it: data/cut_offset.json was measured against TB123's
+    frame, so the acceptance cut against the test sheet's printed gauges decides whether it carries
+    over, and ``reading.SENSOR_RIGHT`` too). Raises a CutError, nothing cut, on anything unlike the
+    print."""
+    sensor = s.sensor
+    assert sensor is not None
+    f = job.frame
+    t0 = time.monotonic()
+    sensor.on()
+    reads0 = sensor.reads
+    try:
+        fit = survey.survey(
+            f,
+            lambda y, x: sensor.sense(y, x)[0] if sensor.reaches(x) else None,  # None: out of reach
+            partial(_on_mat, f),
+            log,
+            flat.paper_here,
+            mode=survey.A2_MODE,
+        )
+        found = replace(f, fit=fit)
+        t1 = time.monotonic()
+        width = math.hypot(*fit.across) * f.width
+        height = math.hypot(*fit.down) * f.height
+        log(
+            "sensor_fit",
+            width=round(width, 3),
+            height=round(height, 3),
+            turn=round(fit.turn(), 3),
+            origin=[round(v, 3) for v in fit.origin],
+            printed=[f.width, f.height],
+            readings=sensor.reads - reads0,
+            seconds=round(t1 - t0, 2),
+        )
+        log.say(
+            f"the sensor found every mark ({sensor.reads - reads0} readings, {t1 - t0:.1f} s): {width:.2f} x "
+            f"{height:.2f} mm apart against {f.width:g} x {f.height:g} printed, the sheet turned {fit.turn():.2f}°"
+        )
+        failed = check_marks(s, found, log, flat, scale=sensing.A2_SCALE)
+        log(
+            "sensor_check",
+            readings=sensor.reads - reads0,
+            failed=failed,
+            seconds=round(time.monotonic() - t1, 2),
+        )
+    finally:
+        lights_back(s, slot)
+    if failed:
+        for line in failed:
+            log.say(f"check: {line}")
+        raise CutError(
+            "the marks don't read where the sensor's own fit puts them ("
+            + "; ".join(failed)
+            + "): nothing was "
+            "cut. Check the sheet lies flat and the marks are clean; cut-proxies --diagnose shows what the "
+            "sensor sees at each mark"
+        )
+    log.say(f"check: every mark reads where the sensor put it ({len(sensing.checks(found))} readings)")
+    return replace(job, frame=found)
+
+
 def proof_targets(job: Job, log: SessionLog) -> list[proof.Target]:
     """The frame's proof targets the rounds can take, in order: one whose cut would touch the job is
     left out, and said so. With none left the job stops before the machine moves."""
@@ -458,10 +550,32 @@ def check_light_slot(s: Session, log: SessionLog) -> int:
     return slot
 
 
+def lights_back(s: Session, slot: int) -> None:
+    """After the readings before the scan: the debug sensor's light off, and the scan's own level
+    selected, which TB123 starts from as it finds it."""
+    if s.sensor:
+        s.sensor.off()
+    s.send(protocol.select_light(slot))
+
+
+def palest(sc: sensing.Scale, levels: list[int]) -> int | None:
+    """The reading that reads most like paper, None without any."""
+    return reduce(sc.paler, levels) if levels else None
+
+
+def scale_of(s: Session) -> sensing.Scale:
+    """How the readings before the scan read: the debug sensor's a2 when it is open, else TB63."""
+    return sensing.A2_SCALE if s.sensor else sensing.TB63
+
+
 def read_loaded(s: Session, frame: Frame, pt: sensing.Point | sensing.Check) -> tuple[int | None, str | None]:
-    """A reading before the scan, at page point ``pt`` moved onto the loaded mat (``Frame.on_mat``).
-    Every reading before the scan goes through here; after it, ``sensing.registered``."""
-    return s.sense(*frame.on_mat(pt.y, pt.x), SENSE_SLOT)
+    """A reading before the scan, at page point ``pt`` moved onto the loaded mat (``Frame.on_mat``):
+    the debug sensor's a2 when it is open (``reading``), else TB63. Every reading before the scan
+    goes through here; after it, ``sensing.registered`` and TB63."""
+    y, x = frame.on_mat(pt.y, pt.x)
+    if s.sensor:
+        return s.sensor.sense(y, x)
+    return s.sense(y, x, SENSE_SLOT)
 
 
 def moved(frame: Frame, off: tuple[float, float]) -> Frame:
@@ -497,22 +611,23 @@ def check_placement(s: Session, frame: Frame, log: SessionLog) -> Frame:
 
     On 2026-10-26 a laminated deck box went on the mat as it came out of the printer, its square
     top-right. The millimetres in the stop are where the head read, on the mat."""
+    sc = scale_of(s)
     c = sensing.placement(frame)
     level, reply = read_loaded(s, frame, c)
     log("placement", x=c.x, y=c.y, level=level, reply=reply)
     side = sensing.beside(frame)
     paper, reply = read_loaded(s, frame, side)
     log("placement paper", x=side.x, y=side.y, level=paper, reply=reply)
-    local = paper if sensing.blank(paper) else None
-    ink = level if c.reads(level, local) is True else None
+    local = paper if sc.blank(paper) else None
+    ink = level if c.reads(level, local, sc) is True else None
     # Single readings inside the square swing (238-255 on the deck box's sheet): a dim one gets a
     # second try either side. A middle that reads like the paper beside it is off the square, and
     # a try at its edge would pass a sheet lying 2.5 mm off (2026-10-26): that one is looked for.
-    dim = ink is None and level is not None and local is not None and level >= local + sensing.CONTRAST
+    dim = ink is None and sc.dim(level, local)
     for k in (-1, 1) if dim else ():
         nl, reply = read_loaded(s, frame, c.nudged(k * sensing.NUDGE))
         log("placement", x=c.x + k * sensing.NUDGE, y=c.y, level=nl, reply=reply)
-        if c.reads(nl, local) is True:
+        if c.reads(nl, local, sc) is True:
             ink = nl
             break
     if ink is not None:
@@ -524,13 +639,13 @@ def check_placement(s: Session, frame: Frame, log: SessionLog) -> Frame:
     else:
         # The middle missed the square, so it may be the paper, and the point right of it the square's
         # own dim ink (238-249 passes as blank) when the sheet lies 3.5 mm or more right: the paler.
-        found = hunt(s, frame, log, min((v for v in (level, paper) if sensing.blank(v)), default=None))
+        found = hunt(s, frame, log, palest(sc, [v for v in (level, paper) if sc.blank(v)]))
     if found is None:
         t = sensing.turned(frame)
         if t is not None:
             t_level, t_reply = read_loaded(s, frame, t)
             log("placement_turned", x=t.x, y=t.y, level=t_level, reply=t_reply)
-            if t.reads(t_level) is True:
+            if t.reads(t_level, None, sc) is True:
                 raise CutError(
                     "the sheet lies portrait, as it leaves the printer: turn it a quarter anticlockwise so "
                     "the square is top-left, reload and rerun"
@@ -581,6 +696,7 @@ def hunt(s: Session, frame: Frame, log: SessionLog, paper: int | None) -> tuple[
     It replaced rows of readings a millimetre apart, 64 of them at about 4 s each, which took over
     four minutes on 2026-10-26 for a sheet lying 3 mm right: the grid finds a square that far off
     in a few readings, and measuring it takes nine."""
+    sc = scale_of(s)
     c = sensing.placement(frame)
     lo, hi = HUNT_RANGE
     steps = [round(lo + i * HUNT_STEP, 4) for i in range(round((hi - lo) / HUNT_STEP) + 1)]
@@ -593,15 +709,17 @@ def hunt(s: Session, frame: Frame, log: SessionLog, paper: int | None) -> tuple[
         pt = replace(c, x=c.x + dx, y=c.y + dy)
         level, reply = read_loaded(s, frame, pt)
         log("hunt", x=pt.x, y=pt.y, dx=dx, dy=dy, level=level, reply=reply)
-        base = paper if paper is not None else (min(seen) if seen else None)
+        base = paper if paper is not None else palest(sc, seen)
         if level is not None:
             seen.append(level)
-        if level is None or c.reads(level, base) is not True:
+        if level is None or c.reads(level, base, sc) is not True:
             continue
         side = replace(pt, x=pt.x + proof.SQUARE + BESIDE_HIT)
         beside, reply = read_loaded(s, frame, side)
         log("hunt", x=side.x, y=side.y, dx=dx, dy=dy, level=beside, reply=reply, beside=True)
-        if beside is not None and beside >= (level + (sensing.PAPER if base is None else base)) / 2:
+        if beside is not None and sc.inkward(
+            beside, (level + (sc.nominal_paper if base is None else base)) / 2
+        ):
             continue
         right, down = frame.paper_at
         there = replace(frame, paper_at=(right + dx, down + dy))  # its middle on the ink just read
@@ -623,12 +741,13 @@ def measure(s: Session, frame: Frame, log: SessionLog, paper: int | None) -> tup
     than ``paper``'s. Eleven readings, about 45 s. None when the middle isn't ink against the paper,
     or an edge's readings never reach paper (no edge in that span: the pouch's dark band past the
     paper's edge reads so, which is why a hit is measured from this side and not ``locate``'s)."""
+    sc = scale_of(s)
     c = sensing.placement(frame)
     ink, reply = read_loaded(s, frame, c)
     log("measure", edge="middle", x=c.x, y=c.y, level=ink, reply=reply)
-    if ink is None or c.reads(ink, paper) is not True:
+    if ink is None or c.reads(ink, paper, sc) is not True:
         return None
-    base = sensing.PAPER if paper is None else paper
+    base = sc.nominal_paper if paper is None else paper
     cut = (ink + base) / 2
 
     def edge(axis: str) -> float | None:
@@ -638,7 +757,7 @@ def measure(s: Session, frame: Frame, log: SessionLog, paper: int | None) -> tup
             pt = replace(c, x=c.x + mid) if axis == "x" else replace(c, y=c.y + mid)
             level, reply = read_loaded(s, frame, pt)
             log("measure", edge=axis, x=pt.x, y=pt.y, level=level, reply=reply)
-            if level is not None and level >= cut:
+            if level is not None and sc.inkward(level, cut):
                 hi = mid
             else:
                 lo = mid
@@ -691,6 +810,7 @@ def locate(
     that reads like ink, LOCATE_SPAN right of its middle or out to an edge more than LIFTED_EDGE past
     the 5 mm a square with ink under its middle can reach, is the sheet lifting off the mat there,
     and the job stops before the scan (``sensing.press_down``)."""
+    sc = scale_of(s)
     c = sensing.placement(frame)
     if ink is None:
         ink, reply = read_loaded(s, frame, c)
@@ -699,9 +819,9 @@ def locate(
         side = sensing.beside(frame)
         beside, reply = read_loaded(s, frame, side)
         log("locate", edge="beside", x=side.x, y=side.y, level=beside, reply=reply)
-    if ink is None or c.reads(ink, beside if sensing.blank(beside) else None) is not True:
+    if ink is None or c.reads(ink, beside if sc.blank(beside) else None, sc) is not True:
         return None
-    if beside is not None and not sensing.blank(beside):
+    if beside is not None and not sc.blank(beside):
         raise CutError(
             sensing.press_down(
                 ["top-left"],
@@ -711,7 +831,7 @@ def locate(
     # Halfway between the paper and full ink (sensing.FULL), not the middle's own reading: a middle
     # near an edge of the square (the sheet up to 2.5 mm off) reads dim, and halfway to that would put
     # the other edge up to 0.3 mm out. The paper is the palest read beside the square so far.
-    pale = [sensing.PAPER if beside is None else beside]
+    pale = [sc.nominal_paper if beside is None else beside]
 
     def edge(axis: str, n: int) -> float:
         lo, hi = 0.0, LOCATE_SPAN  # offsets from the middle: ink at lo, paper at hi
@@ -723,8 +843,8 @@ def locate(
             log("locate", edge=axis, x=pt.x, y=pt.y, level=level, reply=reply)
             levels.append("no reading" if level is None else str(level))
             if level is not None:
-                pale[0] = min(pale[0], level)
-            if level is not None and level >= (sensing.FULL + pale[0]) / 2:
+                pale[0] = sc.paler(pale[0], level)
+            if level is not None and sc.inkward(level, sc.halfway(pale[0])):
                 lo = mid
             else:
                 hi = mid
@@ -758,7 +878,7 @@ def read_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
         log("quiet", mark=c.mark, what=c.what, x=c.x, y=c.y, level=level, reply=reply)
         readings.append((c, level))
     (_, mid), rest = readings[1], [readings[0], *readings[2:]]
-    return sensing.Flatness(tuple(rest), mid)
+    return sensing.Flatness(tuple(rest), mid, scale_of(s))
 
 
 def check_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
@@ -775,6 +895,19 @@ def check_flat(s: Session, frame: Frame, log: SessionLog) -> sensing.Flatness:
     return flat
 
 
+def top_margin(s: Session, frame: Frame, log: SessionLog) -> int | None:
+    """What blank paper in the middle of the top margin reads on TB63, after the scan, through the
+    registered frame: the reference ``sensing.lifts_by_square`` judges the readings beside the
+    square against, which the flatness check read on a2 can't give (another scale). The cutting area
+    opens first to hold the point, which lies above the square's check points."""
+    c = sensing.reference(frame)
+    y, x = sensing.registered(frame, c)
+    s.send(*protocol.cutting_area(*far_corner(frame), min(0.0, y - 0.5), 0.0))
+    level = s.sense(y, x, SENSE_SLOT)[0]
+    log("top_margin", x=c.x, y=c.y, level=level)
+    return level
+
+
 def check_marks(
     s: Session,
     frame: Frame,
@@ -782,6 +915,7 @@ def check_marks(
     flat: sensing.Flatness,
     checks: list[sensing.Check] | None = None,
     seen: dict[tuple[str, str], int | None] | None = None,
+    scale: sensing.Scale = sensing.TB63,
 ) -> list[str]:
     """After the scan, every ``sensing.checks`` reading (or ``checks``) through the registered frame:
     what failed, one line each, or nothing when the print agrees with the frame; each reading goes
@@ -789,26 +923,40 @@ def check_marks(
     still not ink, SIDE either side: it passes as a faint leg when its darkest reading beats the
     paper on both sides by CONTRAST. Ink counts only on a mark whose blank paper read as paper before
     the scan (``flat``): where paper reads like ink, so does every spot, and an ink reading proves
-    nothing."""
+    nothing. Every leg also has blank paper read either side of it (``sensing.leg_paper_offset``).
+    The readings are TB63's (``scale``) after the scan's frame, or ``reading.DebugSensor``'s a2
+    through a fit (``sensor_registered``), where a leg needs no faint-line fallback."""
     failed = []
+    local: dict[str, int] = {}  # the paper read beside each mark here, when ``flat`` has none on this scale
 
     def read(c: sensing.Check) -> int | None:
-        return s.sense(*sensing.registered(frame, c), SENSE_SLOT)[0]
+        y, x = sensing.registered(frame, c)
+        if scale is sensing.TB63:
+            return s.sense(y, x, SENSE_SLOT)[0]
+        assert s.sensor is not None
+        return s.sensor.sense(y, x)[0]
 
-    for c in sensing.checks(frame) if checks is None else checks:
-        paper = flat.paper_at(c.mark)  # dim ink is judged against its own paper (sensing.thresholds)
+    todo = sensing.checks(frame) if checks is None else checks
+    mine = flat.scale is scale  # ``flat``'s levels are on this scale
+    if not mine:  # the paper beside a mark first: it sets what its ink reads as
+        todo = sorted(todo, key=lambda c: c.ink)
+    for c in todo:
+        # dim ink is judged against its own paper (sensing.thresholds)
+        paper = (flat.paper_here(c.mark) if mine else None) or local.get(c.mark)
         level = read(c)
+        if not c.ink and scale.blank(level):
+            local[c.mark] = scale.paler(level, local.get(c.mark, level))
         if seen is not None:
             seen[(c.mark, c.what)] = level
-        seen_as, nudged, sides = c.reads(level, paper), [], []
+        seen_as, nudged, sides = c.reads(level, paper, scale), [], []
         if c.ink and seen_as is not True and c.nudge:
             for k in (-1, 1):
                 nl = read(c.nudged(k * sensing.NUDGE))
                 nudged.append(nl)
-                if c.reads(nl, paper) is True:
+                if c.reads(nl, paper, scale) is True:
                     seen_as = True
                     break
-            if seen_as is not True and c.line:
+            if seen_as is not True and c.line and scale is sensing.TB63:
                 sides = [read(c.nudged(k * sensing.SIDE)) for k in (-1, 1)]
                 peak = max((v for v in (level, *nudged) if v is not None), default=None)
                 if (

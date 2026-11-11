@@ -411,7 +411,7 @@ where it lies, without a word on the terminal: the session log has it ("square f
 … up of where it should be"). It reads the square's middle where the sheet is expected
 (`--paper-at`, below) and blank paper 6 mm right of it. Ink there, and it halves its way to the
 square's right edge (three readings) and bottom edge (four), which pins the square to 0.4 mm across
-and 0.2 mm down, about 25 s.
+and 0.2 mm down, about 25 s on TB63 (a couple of seconds on a2, below).
 The right and bottom edges because only blank paper lies past them on every sheet; past the top and
 left lies the paper's edge, which a pouch reads as dark as ink. The scan then starts 3.5 mm into the
 square wherever it is: the deck box's start has about a millimetre to spare. Until 2026-10-28 a
@@ -421,7 +421,7 @@ deck boxes 1.5-2.3 mm right had every scan start off the paper and miss (43 s ea
 
 When the square's middle reads no ink, the head hunts for it on a 3 mm grid out to 4.5 mm either
 way, nearest first, and measures its top and left edges from the first reading that lands on it
-(`driver.hunt`, then `measure`): a sheet 3 mm off is found in about a minute. One reading past the
+(`driver.hunt`, then `measure`): a sheet 3 mm off is found in about a minute on TB63. One reading past the
 right of each hit first skips ink that isn't the square (the pouch's band along the paper's top
 edge, paper lifting off the mat) for one reading instead of the measure's eleven.
 
@@ -445,6 +445,37 @@ and the check after it catches a misread. Sheets that registered read 95-223 bes
 Each reading stores a light level in the machine's slot 4, which the scan never uses (it checks
 that first, and gives the scan its own light back afterwards: TB63 leaves the light where its ramp
 stopped, and TB123 starts with the light as it finds it).
+
+Those readings before the scan (the placement, its hunt, the flatness check) go through the
+firmware's debug sensor read, not TB63 (`cameo/reading.py`). `FPGRFCC1` opens a hidden set of lowercase
+commands until power-off (`protocol.UNLOCK`), of which the driver sends only `a0` (light on), `a1,120`
+(its level), `a2` (one reading, 60 ms; 0.19 s with a move) and `a4` (off), plus `g9` to move the head
+without the cutting area's clamp, which the square needs with the sensor 19.2 mm right of the blade.
+`protocol.cmd` refuses any lowercase, `protocol.debug` accepts only those commands: two of the set
+(`q`, `m`) never return. `a2` reads the other way round from TB63: paper 545-615, black ink 65-160
+(the pouch's border 616, saturated), so its thresholds are relative to the paper read beside the mark:
+ink is under half of it, paper at least three quarters (`sensing.A2`). Placed right, the placement and
+the flatness check take 5.5 s (13 readings) against 41 s on TB63; a sheet 3 mm off is hunted and found
+in 7-8 s (19-22 readings). Everything after the scan is still TB63. On another firmware than V1.04, or
+when `a2` doesn't answer with a number, the whole thing runs on TB63 as before, and the terminal says
+so. The a2 lifting thresholds are not validated: no a2 reading of a lifted sheet exists yet.
+
+After the scan every L leg also has blank paper read 2.5 mm either side of it (2.0 mm on the 3x3):
+one ink reading on a leg proved nothing where the pouch's border and the mat read as dark as ink,
+and on 2026-11-11 a scan that took the firmware's retry (24 s against 11-12 s) put the top-right L
+too far out and a sheet miscut with every check green. A scan over 16 s is logged and warned about
+(`slow_scan`); the leg check decides, there is no stop for the duration alone.
+
+Every cut registers with the debug sensor (`--register sensor`, the default since 2026-11-11);
+`--register scan` keeps the Cameo's own scan as the fallback, and `--no-check` uses it too. After the placement and flatness check it finds every mark (`survey.py` in a2 mode, about
+46 readings, 12 s), fits the page to them, refuses a fit that isn't square or whose marks are not as
+far apart as printed, and reads every mark again through the fit. No TB123 runs; the cut goes through
+the fit in the mat's own frame, with the cut offset added. On the test sheet it is ready to cut 30 s
+after connecting, and the fitted frame repeats to 0.01 mm. It stops, with nothing cut, on firmware
+other than V1.04 and where a mark can't be found. The test sheet's gauges cut true with it on
+2026-11-11, with the sensor 19.2 mm right of the blade (`reading.SENSOR_RIGHT`) and the cut offset
+measured against the scan; the bottom row came out a fraction of a millimetre low (the fit reads
+the marks 279.46 mm apart, the print measures 279.13).
 
 A sheet lifting off the mat is named as soon as the readings show it, before any rescan. Before the
 scan, paper right of or below the square that reads like its ink stops the run. After it, when the

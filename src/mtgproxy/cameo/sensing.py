@@ -65,6 +65,124 @@ def thresholds(paper: int | None) -> tuple[int, int]:
     return ink, min(PAPER, ink - 1)
 
 
+# --- two scales: TB63 (ink high, 0-255) and the debug sensor's a2 (ink low, paper ~580) ------------
+#
+# The readings before the scan go through a ``Scale`` so that one body of logic (the placement, its
+# hunt, the flatness check) serves both. TB63's judgments are the absolute numbers above. a2's are
+# relative to the blank paper read beside the mark where there is one (paper reads 545-615 at the
+# light level in ``reading``, black ink 65-160, the bare mat 140), since paper's level moves with the
+# light and the sheet.
+
+
+class Tb63:
+    """TB63 readings: ink 250-255, paper to 245 (the constants above)."""
+
+    name = "TB63"
+    nominal_paper = PAPER
+
+    def blank(self, level: int | None) -> bool:
+        """Reads as paper."""
+        return level is not None and level <= PAPER
+
+    def reads(self, level: int | None, paper: int | None = None) -> bool | None:
+        """True ink, False paper, None neither (between, or no reading); ``paper`` is what blank paper
+        beside the mark read (``thresholds``)."""
+        if level is None:
+            return None
+        ink, blank_ = thresholds(paper)
+        return True if level >= ink else False if level <= blank_ else None
+
+    def dim(self, level: int | None, paper: int | None) -> bool:
+        """Stands out from the paper but isn't ink: a dim square's reading, worth a second try."""
+        return level is not None and paper is not None and level >= paper + CONTRAST
+
+    def halfway(self, paper: int) -> float:
+        """The level halfway from paper to full ink: an edge lies where readings cross it."""
+        return (FULL + paper) / 2
+
+    def inkward(self, level: int, cut: float) -> bool:
+        """``level`` lies on the ink side of ``cut``."""
+        return level >= cut
+
+    def paler(self, a: int, b: int) -> int:
+        """The one that reads more like paper."""
+        return min(a, b)
+
+    def paper_under(self, paper: int, level: int) -> int:
+        """The paper level to judge a dim ``level`` against: below it, so it stands out."""
+        return min(paper, level - CONTRAST)
+
+    def lifted(self, level: int | None, reference: int | None) -> bool:
+        """Blank paper beside a mark that reads like ink: the sheet lifts there."""
+        return not self.blank(level) or (level is not None and level > UNREADABLE)
+
+    def low_contrast(self, level: int | None, reference: int | None) -> bool:
+        return self.blank(level) and level is not None and level > LOW_CONTRAST
+
+
+# a2: higher is more light back, so paper is HIGH. Constants measured on a laminated glossy sheet at
+# the light level in ``reading`` (2026-11-11, output/cut/a2-test3, a2-test4, g9-scale): blank paper
+# 545-615, black ink and the 1 mm legs 65-160, the bare mat beside the pouch about 140, the pouch's
+# border above the paper 616 (saturated), the ADC's top near 616. An edge goes from paper to ink in
+# about a millimetre.
+A2_PAPER = 550  # what paper reads when none was read beside the mark
+A2_INK = 100  # what black ink reads: the square's and legs' own level, for the halfway to an edge
+A2_PAPER_MIN = 300  # a reading below this isn't blank paper: ink reads under 160 and the mat 140
+A2_INK_FRACTION = 0.5  # ink: under this fraction of the paper read beside it (ink reads under 0.3 of it)
+A2_PAPER_FRACTION = 0.75  # paper: at least this fraction of the reference (blank paper read 0.88 or more)
+# NOT validated on a lifted or wavy sheet: no a2 reading of one exists. On TB63 such a sheet read ink-like
+# on blank paper (the glossy film mirrors the light off the sensor), which on a2 should read low, so a
+# quiet point under A2_INK_FRACTION of the reference is taken as lifted, as the TB63 stop did.
+
+
+class A2:
+    """Debug-sensor readings: paper high (about 580), ink low (65-160)."""
+
+    name = "a2"
+    nominal_paper = A2_PAPER
+
+    def blank(self, level: int | None) -> bool:
+        return level is not None and level >= A2_PAPER_MIN
+
+    def reads(self, level: int | None, paper: int | None = None) -> bool | None:
+        if level is None:
+            return None
+        ref = paper if paper is not None and self.blank(paper) else A2_PAPER
+        return True if level < A2_INK_FRACTION * ref else False if level >= A2_PAPER_FRACTION * ref else None
+
+    def dim(self, level: int | None, paper: int | None) -> bool:
+        """Between ink and paper against the paper beside it: the square's edge under the spot."""
+        return level is not None and paper is not None and self.reads(level, paper) is None
+
+    def halfway(self, paper: int) -> float:
+        return (A2_INK + paper) / 2
+
+    def inkward(self, level: int, cut: float) -> bool:
+        return level <= cut
+
+    def paler(self, a: int, b: int) -> int:
+        return max(a, b)
+
+    def paper_under(self, paper: int, level: int) -> int:
+        return paper
+
+    def lifted(self, level: int | None, reference: int | None) -> bool:
+        if level is None:
+            return True
+        ref = reference if reference is not None and self.blank(reference) else A2_PAPER
+        return level < A2_INK_FRACTION * ref
+
+    def low_contrast(self, level: int | None, reference: int | None) -> bool:
+        if level is None or self.lifted(level, reference):
+            return False
+        ref = reference if reference is not None and self.blank(reference) else A2_PAPER
+        return level < A2_PAPER_FRACTION * ref
+
+
+Scale = Tb63 | A2
+TB63, A2_SCALE = Tb63(), A2()
+
+
 @dataclass(frozen=True)
 class Point:
     """One reading's place: page mm, and how far along its profile it sits from the line it
@@ -127,13 +245,10 @@ class Check:
         assert self.nudge is not None
         return replace(self, x=self.x + k * self.nudge[0], y=self.y + k * self.nudge[1])
 
-    def reads(self, level: int | None, paper: int | None = None) -> bool | None:
+    def reads(self, level: int | None, paper: int | None = None, scale: Scale = TB63) -> bool | None:
         """True ink, False paper, None neither (a reading between the two, or none); ``paper`` is
-        what blank paper beside the mark read (``thresholds``)."""
-        if level is None:
-            return None
-        ink, blank_ = thresholds(paper)
-        return True if level >= ink else False if level <= blank_ else None
+        what blank paper beside the mark read (``thresholds``), on ``scale``."""
+        return scale.reads(level, paper)
 
 
 def placement(frame: Frame) -> Check:
@@ -174,9 +289,23 @@ def turned(frame: Frame) -> Check | None:
     return replace(c, what="the square, on a sheet loaded portrait", x=frame.page_h - c.y, y=c.x)
 
 
+LEG_PAPER = 2.5  # mm from a leg's centre line to the blank paper read beside it: a 1 mm leg reads
+# about 1.2 mm wide at half level, so this is 1.3 mm clear of it
+LEG_PAPER_MIN = 1.75  # ... and no nearer, where the paper's edge is near
+PAGE_EDGE_CLEAR = 1.5  # mm those points keep inside the paper's edge (the pouch's border reads as ink)
+
+
+def leg_paper_offset(to_edge: float) -> float:
+    """How far from a leg's centre line its paper points lie, ``to_edge`` mm from the leg to the page's
+    edge on that side: LEG_PAPER, less where that would leave them under PAGE_EDGE_CLEAR from the edge
+    (the 3x3 sheet's marks are 3.5 mm in: 2.0)."""
+    return max(LEG_PAPER_MIN, min(LEG_PAPER, to_edge - PAGE_EDGE_CLEAR))
+
+
 def checks(frame: Frame) -> list[Check]:
     """The readings a cut takes after the scan, page mm: the square's middle and a paper point
-    OUTSIDE_SQUARE beyond each of its edges, then each L leg's centre line halfway along it."""
+    OUTSIDE_SQUARE beyond each of its edges, then each L leg's centre line halfway along it, then
+    blank paper either side of every leg (``leg_paper_offset``)."""
     x0, y0 = frame.inset, frame.top
     mid, far = SQUARE / 2, SQUARE + OUTSIDE_SQUARE
     out = [
@@ -192,6 +321,20 @@ def checks(frame: Frame) -> list[Check]:
         out += [
             Check(name, "the vertical leg", cx, cy + sy * half, True, nudge=(1, 0), line=True),
             Check(name, "the horizontal leg", cx + sx * half, cy, True, nudge=(0, 1), line=True),
+        ]
+    # Then blank paper either side of every leg: a leg is a thin line with paper beside it. One ink
+    # reading on a leg proves nothing where everything off the paper (the pouch's border, the mat)
+    # reads as dark as ink: on 2026-11-11 a scan that took its retry registered the top-right L too
+    # far out, every leg reading passed, and the sheet miscut.
+    for name, (i, j), (sx, sy) in L_MARKS:
+        cx, cy = frame.inset + i * frame.width, frame.top + j * frame.height
+        ox = leg_paper_offset(min(cx, frame.page_w - cx))
+        oy = leg_paper_offset(min(cy, frame.page_h - cy))
+        out += [
+            Check(name, "left of the vertical leg", cx - ox, cy + sy * half, False),
+            Check(name, "right of the vertical leg", cx + ox, cy + sy * half, False),
+            Check(name, "above the horizontal leg", cx + sx * half, cy - oy, False),
+            Check(name, "below the horizontal leg", cx + sx * half, cy + oy, False),
         ]
     return out
 
@@ -308,19 +451,30 @@ def press_down(names: list[str], why: str) -> str:
 
 @dataclass(frozen=True)
 class Flatness:
-    """The quiet points' readings, each with its Check, and the reference's."""
+    """The quiet points' readings, each with its Check, and the reference's, on ``scale``."""
 
     readings: tuple[tuple[Check, int | None], ...]
     reference: int | None
+    scale: Scale = TB63
+
+    def _lifted(self, level: int | None) -> bool:
+        return self.scale.lifted(level, self.reference)
 
     def paper_beside(self, mark: str) -> bool:
         """Blank paper beside ``mark`` read as paper, so an ink reading on that mark means ink. A
         mark without a quiet point has nothing to compare with: False."""
-        return any(c.mark == mark and blank(level) for c, level in self.readings)
+        return any(c.mark == mark and not self._lifted(level) for c, level in self.readings)
+
+    def paper_here(self, mark: str) -> int | None:
+        """What blank paper beside ``mark`` read, on this flatness's own scale, when it read as paper."""
+        return next((level for c, level in self.readings if c.mark == mark and not self._lifted(level)), None)
 
     def paper_at(self, mark: str) -> int | None:
         """What blank paper beside ``mark`` read, when it read as paper: the level its ink and paper
-        readings are judged against (``Check.reads``)."""
+        readings are judged against (``Check.reads``). TB63 levels only: the checks after the scan
+        read TB63, so a flatness read on a2 has none to give (the callers' defaults then stand)."""
+        if self.scale is not TB63:
+            return None
         return next((level for c, level in self.readings if c.mark == mark and blank(level)), None)
 
     def _mid(self) -> str:
@@ -329,8 +483,13 @@ class Flatness:
     def stop(self) -> str | None:
         """Why the scan can't be trusted, when blank paper beside a mark doesn't read as paper: the
         sheet lifts off the mat at that mark's corner (``press_down``)."""
-        dark = [(c, level) for c, level in self.readings if not blank(level) or level > UNREADABLE]
+        dark = [(c, level) for c, level in self.readings if self._lifted(level)]
         if not dark:
+            if self.scale is not TB63 and self.reference is not None and not self.scale.blank(self.reference):
+                return (
+                    f"the paper in the middle of the top margin reads {self.reference}, too dark to tell "
+                    "from ink: check the sheet lies flat and the light is clear, reload and rerun: nothing was cut"
+                )
             return None
         (c0, l0), *rest = [(c.what, "nothing" if level is None else str(level)) for c, level in dark]
         why = " and ".join([f"blank paper {c0} reads {l0}", *(f"{c} {lv}" for c, lv in rest)])
@@ -341,7 +500,7 @@ class Flatness:
         return [
             f"low contrast {c.what} (blank paper: {level}, {self._mid()}): the scan may misread"
             for c, level in self.readings
-            if blank(level) and level is not None and level > LOW_CONTRAST
+            if self.scale.low_contrast(level, self.reference)
         ]
 
     def lines(self) -> list[str]:

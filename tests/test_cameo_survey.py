@@ -7,7 +7,7 @@ from dataclasses import replace
 
 import pytest
 
-from mtgproxy.cameo import driver, geometry, proof, protocol, session, survey
+from mtgproxy.cameo import driver, geometry, proof, protocol, reading, session, survey
 from mtgproxy.cameo.transport import RecordingTransport
 
 # a4-standard-3x3: portrait A4, the square 3.5 mm in and 9 mm down, 6 mm legs, nine cards.
@@ -265,3 +265,101 @@ def test_a_square_whose_paper_no_longer_reads_as_paper_stops_in_a_few_readings()
     ):
         survey.survey(FRAME, read, lambda x, y: (y, x), session.SessionLog(None), lambda mark: 135)
     assert len(n) <= survey.BLIND + 2 * survey.SQUARE_HALVINGS + 2
+
+
+# --- registering with the debug sensor (a2) instead of the scan: ``cut --register sensor`` ----------
+
+
+class A2Mat(Mat):
+    """``Mat`` whose pre-scan readings are a2 (paper 580, ink 100, from ``level``'s 150-255): the head's
+    place (``g9``, short by the firmware's calibration) plus the sensor's 19.2 mm. Moves, draws and the
+    TB63 after a scan are Mat's. Nothing here installs a frame: a cut in sensor mode is in the mat's own."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.g9 = (0.0, 0.0)
+        self.unlocked = self.light = False
+
+    def write(self, data: bytes) -> None:
+        super().write(data)
+        for cmd in data.split(b"\x03"):
+            text = cmd.decode("latin1")
+            if text == protocol.UNLOCK:
+                self.unlocked = True
+            elif text in ("a0", "a4"):
+                self.light = text == "a0"
+            elif text.startswith("g9,"):
+                y, x = (int(v) / 20 for v in text[3:].split(","))
+                self.g9 = (y / reading.G9_ALONG, x / reading.G9_ACROSS)
+            elif text == "a2" and self.unlocked:
+                y, x = self.g9
+                lvl = self.level(x + reading.SENSOR_RIGHT, y)
+                a2 = round(580 - (lvl - PAPER) / (INK - PAPER) * 480)
+                self.pending.append(f"{a2 if self.light else 2:5d}\x03".encode())
+
+
+LAID = (3.6, 0.0)  # where the test sheet lies on the mat, about: the sensor can't reach left of 1.7 mm
+
+
+def cut_by_sensor(mat: A2Mat, at=LAID):
+    events, log = record()
+    j = card_job(at)
+    driver.cut(j, mat, log, [driver.default_start(j.frame)], check=True, register="sensor")
+    return events
+
+
+def test_the_sensor_registers_a_straight_sheet_without_a_scan_and_cuts_on_the_line():
+    mat = A2Mat(at=LAID)
+    events = cut_by_sensor(mat)
+    assert b"TB123" not in mat.sent and b"TB122" not in mat.sent
+    (fit,) = [f for e, f in events if e == "sensor_fit"]
+    assert (fit["width"], fit["height"]) == (pytest.approx(203, abs=0.1), pytest.approx(279, abs=0.1))
+    assert fit["turn"] == pytest.approx(0.0, abs=0.03) and fit["readings"] < 140
+    assert "check: every mark reads where the sensor put it (17 readings)" in said(events)
+    landed(mat, 0.15)
+    out = bytes(mat.sent)
+    assert out.rindex(b"a4") < out.index(b"D")  # the light off and the scan's level back before the cut
+
+
+@pytest.mark.parametrize("kw", [{"turn": 0.5}, {"turn": -0.5, "stretch": (1.002, 0.998)}, {"at": (6.6, 3.0)}])
+def test_the_sensor_registers_a_sheet_turned_or_lying_off_and_cuts_on_the_line(kw):
+    mat = A2Mat(**{"at": LAID, **kw})
+    events = cut_by_sensor(mat)  # told the paper is at LAID, as every cut is
+    (fit,) = [f for e, f in events if e == "sensor_fit"]
+    assert fit["turn"] == pytest.approx(kw.get("turn", 0.0), abs=0.05)
+    assert b"TB123" not in mat.sent
+    landed(mat, 0.15)
+
+
+def test_a_leg_read_off_where_the_others_put_it_is_refused_with_nothing_cut():
+    mat = A2Mat(at=LAID)
+    # the bottom-left L's two legs printed 2.2 mm left of the square's column: the fit comes out 0.45°
+    # off square, which the scan's frame would have taken as it came
+    mat.boxes = [
+        (x0 - 2.2, y0, x1 - 2.2, y1) if (x0 < 10 and y0 > 270) else (x0, y0, x1, y1)
+        for x0, y0, x1, y1 in mat.boxes
+    ]
+    with pytest.raises(
+        session.CutError, match=r"don't fit together: its left edge comes out .*° off square.*Nothing was cut"
+    ):
+        cut_by_sensor(mat)
+    assert not mat.drawn and mat.light is False
+
+
+def test_a_sheet_with_a_leg_missing_stops_in_plain_words():
+    mat = A2Mat()
+    mat.boxes = [
+        b for b in mat.boxes if not (b[0] > 200 and b[1] < 20 and b[3] - b[1] > 3)
+    ]  # top-right upright leg
+    with pytest.raises(session.CutError, match=r"found no top-right L's upright leg within"):
+        cut_by_sensor(mat)
+    assert not mat.drawn
+
+
+def test_the_sensor_mode_without_the_debug_sensor_says_so_before_reading_anything():
+    mat = Mat()  # answers no a2
+    _, log = record()
+    j = card_job()
+    with pytest.raises(session.CutError, match="--register sensor needs the Cameo's debug sensor"):
+        driver.cut(j, mat, log, [driver.default_start(j.frame)], check=True, register="sensor")
+    assert b"TB63" not in mat.sent and not mat.drawn

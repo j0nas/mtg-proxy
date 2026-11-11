@@ -33,7 +33,10 @@ freshness check before every build and cut is the first line.
 "Blank paper above the square reads like ink" was reported as "the sheet lifts off the mat"; it was
 the square sitting 5.5 mm higher than the layout said, so the reading landed on the pouch's edge. A
 message that names one cause sends the operator to fix the wrong thing. The boring cause (the
-sheet isn't what we think it is) is the one to rule out before the interesting one.
+sheet isn't what we think it is) is the one to rule out before the interesting one. The same goes
+for a check: one that passes on any dark reading passes on the paper's edge, the pouch and a card's
+print as well as on the mark (2026-11-11). A check needs a reading that would come out differently
+if the failure it guards against had happened.
 
 **Every search gets a budget and fails with a reason.** The sensor survey once spent 4.5 minutes
 searching a corner where no reading came out as paper. A search now gives up after five readings
@@ -141,6 +144,105 @@ that differ in type are a trap; hand on the one the function was given.
 
 What changed: `cut` forwards its own arguments as Typer gave them, and `test_cutting.py` sends
 `--svg` through the CLI and checks that `run_cut` gets a `Path`.
+
+## 2026-11-11: a scan the firmware had to retry passed every check and miscut
+
+The last of seven cuts of the Tatty DFC sheet (`output/cut/tatty-dfcs-and-staple-mdfcs.20261111-125454`)
+came out right at the top-left and far out on the right. The scan answered "found", all nine
+readings after it passed, and the cut went ahead.
+
+Two things in its log set it apart from the six before it. The scan took 24 s against 11 s for the
+others (one took 17 s): that is the firmware's retry, which recalibrates the light, searches again
+from a third of a frame away, and still answers "found". And the readings after the scan test each
+L with one point on each leg and accept any dark reading, where the square also gets blank paper on
+all four sides. The paper ends 3.5 mm right of the top-right L, and the pouch's sealed border and
+the mat beyond it read as dark as ink, so a corner registered out there reads 255 on both legs. The
+likely mechanism, not yet measured on the sheet: on the retry, the top-right pass (it starts 4 mm
+inside the leg and sweeps outward) missed the leg and fired on the paper's edge, and the pass up the
+horizontal leg then ran past that leg's end. The firmware's only check on its fit is a turn under 5°.
+
+The first question was how the checks let it through, and the answer was already in the code:
+`sensing.py` records that on 2026-10-26 the top-right leg readings passed "only because everything
+there read 255". The gap was noted and left open.
+
+The lesson: a check proves only what it could have failed on. Dark at one point can't fail for a
+frame registered onto the paper's edge, the pouch or a card's print, which are the misregistrations
+that happen. Behind it is a larger pattern: every check so far tests the consequences of a fit the
+firmware computes and won't show, and each failure has added another indirect test.
+
+What changed: after the scan, every L leg now also has blank paper read 2.5 mm either side of it
+(2.0 mm on the 3x3, whose marks lie 3.5 mm from the paper's edge), judged against the paper level the
+square's checks use, so a leg must be a thin line with paper beside it; `held` still reads only
+ink, since a cut groove beside a mark reads dark. A scan over 16 s (the retry; 11-12 s otherwise) is
+logged as `slow_scan` with its duration and says so on the terminal, and the stricter check decides;
+no stop for the duration alone. A test has everything round the top-right L read as ink after the
+scan and the cut stop before the blade goes down. On the good test sheet the new points read paper
+(96-113) and the legs 255 (`output/cut/stepC-scan-*`). The other fix on the table, registering from
+our own readings, is `--register sensor` (see the debug-sensor entry above). The root, that the
+firmware reports neither its sensor nor the marks it found, is being looked at as a firmware patch in
+cameo-re.
+
+## 2026-11-11: the firmware's debug sensor read, in the dark and in the wrong place
+
+Looking for a flash patch turned up a command that needs none: `FPGRFCC1` opens the firmware's
+debug set, whose `a2` reads the sensor once in 60 ms (cameo-re NOTES.md). Two of its first three
+runs on a laminated test sheet read nonsense. The first read 0-4 everywhere. First thought: `a2`
+reads another channel. Actual cause: TB63, which the placement had just used, switches the light
+off when it ends, and TB61 only sets its level. The second read paper on the square and dark
+everywhere at the top-right. Actual cause: the sensor sits 19.2 mm right of the blade, and TB63
+moves the head by that before it reads, so no reading so far had shown it. With the light on and
+the head shifted, all three marks read crisply (paper 550-615, ink 65-160). The left marks then
+needed a move the cutting area doesn't clamp (`g9`), which travels 1.2% short across the carriage
+and 0.7% along the feed: a fixed calibration that normal moves apply and `g9` skips, measured
+after a power cycle.
+
+The lesson: a command lifted out of the firmware's own routines comes without what its callers do
+around it (here, switching the light on and moving the sensor over the spot). Read the callers
+before the first try, and make that first try a row across a known feature: both mistakes showed
+in one run each because every run read profiles, never single points.
+
+What changed: the readings before the scan (the placement and its hunt, the flatness check) now
+use `a2` through `cameo/reading.py`, and the scripts that worked were cameo-re's
+`scripts/debug_sensor_sweeps.py` and `scripts/debug_sensor_g9.py` (logs: `output/cut/a2-test*.session.jsonl`).
+The helper opens the set once per connection and does what the callers did around TB63: light on
+(`a0`, `a1,120`) and off, the head 19.2 mm left of the point, `g9` at 1.0068 and 1.0118 times the
+distance. The safety rule is in the code: `protocol.cmd` raises on any lowercase letter,
+`protocol.debug` takes only `a0`, `a1,n`, `a2`, `a4` and `g9`, and a test sends a whole cut through a
+fake machine and checks that nothing else lowercase left the driver. On other firmware than V1.04, or
+when `a2` doesn't answer with a number, the run falls back to TB63 and says so on the terminal.
+`sensing.py` judges both scales (`Tb63`, `A2`): on a2, ink is a reading under half the blank paper
+read beside the mark, paper at least three quarters of it, and blank paper under half of the top
+margin's reads as a lifted sheet. That last threshold is a guess from the TB63 behaviour (a mirroring
+film took light away from the sensor); no a2 reading of a lifted or wavy sheet exists. The checks
+after the scan are still TB63, which needs the paper beside the square on its own scale: they now read
+the four paper points before the square's middle, and the "lifts" test reads one TB63 reading of the
+top margin when it needs it. Measured on the test sheet (`output/cut/stepB-*.session.jsonl`): the
+placement and flatness check took 5.5 s placed right and 7-8 s with the sheet 3 mm off, against 41 s on
+TB63; a2 puts the square's bottom edge 0.3-0.4 mm higher than TB63 does (TB63 saturates at 255 over a
+spot half on the ink, which makes the square look bigger), not yet checked against the scan.
+
+A second step made the sensor register the sheet itself (`cut --register sensor`, off by default).
+`survey.py`, which did this on TB63 only as a fallback after a failed scan, now takes a mode
+(`survey.A2_MODE`: readings 0.5 mm apart, edges halved to under 0.2 mm, given up after eight readings
+with no paper) and runs on the debug sensor: after the placement and flatness check every mark is
+surveyed, the page fitted, the fit refused unless square and as wide and tall as printed, and the
+marks read again through the fit (the square with paper on four sides, every leg with paper either
+side). No TB123 runs, so no transform sits under the cut's moves; the fit is in the mat's own frame,
+which the `g9` moves read in. On the test sheet, three runs and one from a start 3 mm off: 46
+readings, 12.4 s for the survey and 30-32 s from connect to ready to cut (against 76 s for the scan
+path, readings included), marks 203.01-203.02 x 279.45-279.46 mm apart against 203 x 279 printed,
+turned 0.03°, the fit's origin repeating within 0.01 mm. The acceptance cut, the same evening on the
+same test sheet: every gauge card came out with its margin within a fraction of a millimetre of
+1.0 mm on all four sides, so the sensor's 19.2 mm is the offset in `M`'s terms and
+`data/cut_offset.json` carries over. The top of the bottom-right card came out a little closer to
+its frame, which fits the fit's height: 279.46 mm against 279.13 for the print, measured with `M`
+over the cards' hairlines. A likely cause is backlash along the feed: the survey halves in on each
+edge from both sides, where the hairline readings all came from one side. Approaching every reading
+from the same side would test it. With that, the sensor's registration became the default
+(`--register sensor`); `--register scan` keeps the Cameo's own scan as the fallback until more
+sheets have cut through the new flow, and `--no-check` uses it too. The sensor
+cannot reach left of 1.7 mm on the mat, so a sheet laid much further left than the test sheet's
+3.6 mm stops with a plain message.
 
 ## 2026-11-10: the PC's engine clone fell behind again
 

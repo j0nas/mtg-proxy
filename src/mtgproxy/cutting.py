@@ -79,6 +79,8 @@ class CutOptions:
     probe: bool = False  # scan and query the machine, cut nothing (see cameo.driver.probe)
     sense: bool = False  # scan, then read the marks back with the sensor; cut nothing (cameo.sensing)
     check: bool = True  # read the marks with the sensor before and after the scan; stop on a misread
+    # "sensor": the driver's own a2 survey, no scan (cameo.driver.cut); "scan": TB123, the fallback
+    register: str = "sensor"
     diagnose: bool = False  # read across every mark before any scan and say what they show; cut nothing
     proof: bool = False  # a proof cut around a printed target after the scan; the job waits for y / r / q
     # The sheet's proof targets' centres (page mm, y down) and side: None = the layout's, which an
@@ -254,6 +256,10 @@ def check(o: CutOptions) -> None:
         raise CutError(
             f"--svg {o.svg.name} needs --reg-inset: its marks' distance from the paper edges in mm"
         )
+    if o.register not in ("scan", "sensor"):
+        raise CutError(f"--register wants 'scan' or 'sensor', got {o.register!r}")
+    if o.register == "sensor" and not o.check:
+        raise CutError("--register sensor reads the marks with the sensor, so it can't go with --no-check")
 
 
 def run_cut(o: CutOptions) -> int:
@@ -364,6 +370,10 @@ def run_cut(o: CutOptions) -> int:
             confirm = dry_confirm if o.dry_run else ask_operator
         if o.check and o.dry_run:
             print("cut-proxies: dry run: the mark check is skipped (it needs the machine's sensor)")
+        if o.register == "sensor" and o.dry_run:
+            print(
+                "cut-proxies: dry run: the sensor's registration is skipped too; the transcript is the scan's"
+            )
         start_from = o.proof_from
 
         def cut_target(target) -> None:  # a retry on this sheet takes the next one
@@ -376,6 +386,7 @@ def run_cut(o: CutOptions) -> int:
             starts,
             confirm,
             check=o.check and not o.dry_run,
+            register="scan" if o.dry_run else o.register,
             proof_blade=proof_blade,
             on_target=cut_target,
         )
