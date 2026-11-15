@@ -16,7 +16,7 @@ runner = CliRunner()
 
 def write_run(folder: Path, name: str, mtime: float | None = None) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
-    p = RunInfo(name, cards=1, fronts_only=True, generated="2026-10-26").write(folder)
+    p = RunInfo(name, cards=1, generated="2026-10-26").write(folder)
     if mtime is not None:
         os.utime(p, (mtime, mtime))
     return p

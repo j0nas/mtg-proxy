@@ -275,7 +275,6 @@ def write_run(where, name, registration="3", proof_targets=True):
     info = RunInfo(
         name,
         cards=9,
-        fronts_only=True,
         generated="2026-10-01",
         registration=registration,
         proof_targets=proof_targets,

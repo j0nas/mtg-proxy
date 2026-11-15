@@ -7,6 +7,7 @@ import os
 
 import pytest
 import typer
+from pypdf import PdfWriter
 from typer.testing import CliRunner
 
 from mtgproxy import build, cli, cutmenu, printing, wizard
@@ -49,16 +50,22 @@ def script(monkeypatch, *answers) -> Asked:
     return asked
 
 
-def make_run(parent, name="mydeck", duplex=False):
+def _pdf(path, pages=1):
+    w = PdfWriter()
+    for _ in range(pages):
+        w.add_blank_page(842, 595)  # A4 landscape, as the engine saves a sheet
+    w.write(path)
+
+
+def make_run(parent, name="mydeck", duplex=False, pages=1):
     folder = parent / name
     folder.mkdir(parents=True)
-    (folder / f"{name}.pdf").write_bytes(b"%PDF")
+    _pdf(folder / f"{name}.pdf", pages)
     if duplex:
-        (folder / f"{name}-duplex.pdf").write_bytes(b"%PDF")
+        _pdf(folder / f"{name}-duplex.pdf")
     info = RunInfo(
         name,
         cards=9,
-        fronts_only=not duplex,
         generated="2026-10-01",
         proof_targets=True,
         pdf=f"{name}.pdf",
@@ -94,10 +101,8 @@ def built(monkeypatch, proxies_root):
     def run_build(opts):
         seen.append(opts)
         name = build.TEST_SHEET_NAME if opts.test_mode else "newdeck"
-        sidecar = make_run(proxies_root, name, duplex=not opts.fronts_only)
-        pdf = sidecar.parent / f"{name}.pdf"
-        dup = sidecar.parent / f"{name}-duplex.pdf" if not opts.fronts_only else None
-        return build.BuildResult(name, sidecar.parent, pdf, dup, 2 if dup else 0, 9)
+        sidecar = make_run(proxies_root, name, pages=2)
+        return build.BuildResult(name, sidecar.parent, sidecar.parent / f"{name}.pdf", None, 0, 9)
 
     monkeypatch.setattr(build, "run_build", run_build)
     return seen
@@ -122,9 +127,15 @@ def test_make_flows_into_print_and_cut_with_the_run_carried_along(
     )  # fmt: skip
     start()
     opts = built[0]
-    assert (opts.deck, opts.include_basics, opts.fancy_art, opts.fronts_only, opts.test_mode) == (
-        "https://moxfield.com/decks/abc", True, False, True, False,
+    assert (opts.deck, opts.include_basics, opts.fancy_art, opts.test_mode) == (
+        "https://moxfield.com/decks/abc", True, False, False,
     )  # fmt: skip
+    # No card backs to tick (2026-11-15, docs/lessons.md), and the print question says how much prints.
+    options = next(titles for kind, _, titles in asked if kind == "checkbox")
+    assert options and not any("back" in t.lower() for t in options)
+    assert (
+        "Print newdeck.pdf (2 pages) on the glossy queue ('Glossy photo paper proxies')?" in asked.messages()
+    )
     assert printed == [("newdeck.pdf", "glossy")]
     assert len(cuts) == 1
     assert cuts[0]["run"] == proxies_root / "newdeck" / "run.json" and cuts[0]["preset"] == "laminate"
@@ -201,7 +212,7 @@ def test_print_picks_a_run_newest_first_and_sends_it_once_on_glossy(monkeypatch,
     start()
     assert asked[1][2] == ["new: 9 cards", "old: 9 cards"]
     assert printed == [("new.pdf", "glossy")] and cuts == []
-    assert "Print new.pdf on the glossy queue ('Glossy photo paper proxies')?" in asked.messages()
+    assert "Print new.pdf (1 page) on the glossy queue ('Glossy photo paper proxies')?" in asked.messages()
 
 
 def test_the_duplex_choice_appears_only_when_the_run_has_one(
@@ -285,9 +296,11 @@ def test_the_backlog_sheet_asks_its_options_and_flows_into_print(monkeypatch, pr
 
     monkeypatch.setattr(cli, "_show_backlog", lambda out: None)
     monkeypatch.setattr(cli, "build_backlog", build_backlog)
-    script(monkeypatch, "backlog", ["full_only"], True, True, False, "quit")
+    asked = script(monkeypatch, "backlog", ["full_only"], True, True, False, "quit")
     start()
-    assert seen == [{"backs": False, "full_only": True}]
+    assert seen == [{"full_only": True}]
+    options = next(titles for kind, _, titles in asked if kind == "checkbox")
+    assert not any("back" in t.lower() for t in options)
     assert printed == [("backlog-2026-11-10.pdf", "glossy")]
 
 

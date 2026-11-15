@@ -227,7 +227,7 @@ def test_a_run_records_its_marks_for_cut_proxies(tmp_path, monkeypatch, game):
     monkeypatch.setattr(
         build,
         "write_test_cards",
-        lambda n, front, back, ds: [(front / f"test_{i:02d}.png").write_bytes(b"x") for i in range(1, n + 1)],
+        lambda n, front: [(front / f"test_{i:02d}.png").write_bytes(b"x") for i in range(1, n + 1)],
     )
     out = tmp_path / "out"
     out.mkdir()
@@ -249,7 +249,7 @@ def test_a_3x3_deck_gets_pages_of_nine_and_a_duplex_sheet(tmp_path, monkeypatch,
 
     for i in range(1, 11):
         (engine.FRONT / f"{i}Card{chr(64 + i)}1.png").write_bytes(b"x")  # 1CardA1.png ..
-    files, _ = manifest.partition(fronts_only=True, duplex_dfc=True)  # in the engine's order
+    files, _ = manifest.partition(duplex_dfc=True)  # in the engine's order
     per_page = build.per_page()
     sheet = manifest.make_sheet(manifest.MAIN, files, "d.pdf", per_page, manifest.Recorder())
     assert (sheet.per_page, sheet.pages, len(sheet.page(2))) == (9, 2, 1)
@@ -271,15 +271,6 @@ def test_a_3x3_deck_gets_pages_of_nine_and_a_duplex_sheet(tmp_path, monkeypatch,
     assert (result.cards, result.dfc_count, result.duplex_pdf.name) == (10, 1, "deck-duplex.pdf")
     info = RunInfo.read(result.out / "run.json")
     assert (info.sheets["duplex"]["per_page"], info.duplex_pdf) == (9, "deck-duplex.pdf")
-
-    game.clear()  # --backs: the whole deck double-sided, on 3x3 sheets
-    both = build.run_build(
-        BuildOptions(deck=str(deck), skip_fetch=True, out_parent=tmp_path, fronts_only=False)
-    )
-    (args,) = game
-    assert "--only_fronts" not in args and "--load_offset" in args and "--borderless" in args
-    assert "--no_back_marks" in args
-    assert both.cards == 10 and both.duplex_pdf is None
 
     game.clear()
     split = build.run_build(
@@ -306,7 +297,7 @@ def _duplex_pages(tmp_path, extra: tuple[str, ...] = (), ppi: int = 50):
             im = Image.new("RGB", (126, 176), c)
             ImageDraw.Draw(im).rectangle([x0, 16, x0 + 30, 46], fill=fill)
             im.save(dirs[side] / f"{i}Card{i}1.png")
-    Image.new("RGB", (126, 176), (128, 128, 128)).save(dirs["back"] / "back.png")
+    # The back folder stays empty, as the build leaves game/back: a duplex card's back is its own face.
     out = tmp_path / "sheet.pdf"
     engine.create_pdf([
         *build.PDF_BASE_ARGS, "--front_dir_path", str(dirs["front"]), "--double_sided_dir_path", str(dirs["ds"]),
@@ -364,6 +355,15 @@ def test_back_pages_carry_no_registration_marks(tmp_path):
     (_, marked), colours = _duplex_pages(tmp_path / "marked")
     (_, plain), _ = _duplex_pages(tmp_path / "plain", extra=tuple(build.BACK_PAGES))
     assert stray_ink(marked, colours) > 20 and stray_ink(plain, colours) == 0
+
+
+def test_there_is_no_card_back_option():
+    """Every sheet is fronts only: a card back behind every card printed 12 sheets of nothing but
+    backs on 2026-11-15, from a wizard box labelled as something else (docs/lessons.md)."""
+    for args in (["make", "x.txt", "--backs", "--dry-run"], ["make", "x.txt", "--back", "b.png", "--dry-run"],
+                 ["backlog", "build", "--backs", "-n"], ["make-back"]):  # fmt: skip
+        r = runner.invoke(app, args)
+        assert r.exit_code == 2 and ("No such option" in r.output or "No such command" in r.output), args
 
 
 def test_cli_trim_parsing():

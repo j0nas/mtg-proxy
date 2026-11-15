@@ -24,6 +24,14 @@ whether the fix would still be needed if the class were fixed. A guard only prot
 that have it: on 2026-11-10 the class came back on a checkout older than the check, and what ended
 it was running everything on one machine.
 
+**A wrapper must not offer more than the commands it wraps, and every option it shows must do what
+its label says.** The wizard's make and backlog menus carried a box worded as one thing (the backs
+of double-faced cards, in a separate PDF, which happens anyway) that set another (a generic back
+behind every card, interleaved into the main PDF). A label written apart from the code it drives
+drifts from it; a test that ticks each box and checks the build it produces would have caught it.
+And an irreversible step that spends material (a print) should say what it will produce, page
+count included, before it asks.
+
 **Make artifacts carry their contract, and check it where they meet.** A sheet's run.json now
 records the code that built it and the marks it printed, and `cut-proxies` refuses a sheet whose
 marks differ from its own layout's. A sheet cut without its run.json carries no such check, so the
@@ -60,6 +68,29 @@ problem. Measure first; then build for what was measured.
 **Fix the fail-fast before rerunning a slow failure.** Editing the code while a run is in progress
 is safe (the process has already loaded it), so the fix that makes the next failure cost seconds
 goes in first, and a run that is going to fail is stopped and restarted on it.
+
+## 2026-11-15: a wizard box printed twelve sheets of card backs
+
+Seen: the kotis deck (106 cards, no double-faced ones) built from the wizard printed 24 pages on
+glossy instead of 12: every second sheet was the generic "PROXY" card back. The job had left the
+PC's queue before it could be paused, and it was cancelled at the printer partway through.
+
+First thought: the wizard had changed a default. It hadn't: every other choice it passes matches
+`mtg-proxy make`'s defaults. kotis/run.json said `fronts_only: false`, so the wizard's box "print
+double-sided cards' backs (separate duplex PDF)" had been ticked. That label describes the default
+duplex PDF for double-faced cards; the box actually set `fronts_only=False`, the old `--backs` mode,
+which puts the card back behind every card in the main PDF. The print question said only "Print
+kotis.pdf on the glossy queue?", so nothing showed 24 pages before the job went.
+
+Lesson: see the general lesson on wrappers above. Sheets here are always fronts only, so the option
+had no reason to exist anywhere.
+
+Changed: the card-back option is gone altogether: the wizard boxes, `make --backs/--back`,
+`backlog build --backs`, `make-back`, assets/back.png, the double-sided build path and the numbered
+test backs. The build empties the engine's game/back, so no generic back can reach a PDF. run.json
+no longer records `fronts_only` (older files still read). The wizard's print question now gives the
+page count. tests/test_wizard.py checks no wizard box mentions backs, and test_build_cli.py that
+the options are refused.
 
 ## 2026-10-31 to 11-01: eight sheets printed by a stale checkout
 

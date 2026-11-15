@@ -13,6 +13,7 @@ from pathlib import Path
 
 import questionary
 import typer
+from pypdf import PdfReader
 from questionary import Choice
 
 from . import build, cli, cutmenu, printing
@@ -74,7 +75,6 @@ def make() -> None:
             choices=[
                 Choice("include basic lands", "basics"),
                 Choice("plain frames (default prefers showcase, extended and full art)", "plain"),
-                Choice("print double-sided cards' backs (separate duplex PDF)", "backs"),
                 Choice("test gauge sheet instead of a deck (no Scryfall)", "test"),
             ],
         )
@@ -90,7 +90,6 @@ def make() -> None:
     result = cli.build_and_report(
         build.BuildOptions(
             deck=deck,
-            fronts_only="backs" not in picked,
             fancy_art="plain" not in picked,
             include_basics="basics" in picked,
             test_mode="test" in picked,
@@ -132,7 +131,8 @@ def print_sheet(run: Path | None = None) -> None:
     queue = printing.QUEUES[paper]
     if pdf.name == info.duplex_pdf:
         typer.echo("This is the duplex sheet: print it with manual duplex, long-edge flip.")
-    if _yes(f"Print {pdf.name} on the {paper} queue ('{queue}')?"):
+    pages = len(PdfReader(pdf).pages)
+    if _yes(f"Print {pdf.name} ({pages} page{'s' if pages != 1 else ''}) on the {paper} queue ('{queue}')?"):
         try:  # once, never retried (printing.print_pdf says why)
             printing.print_pdf(pdf, paper, say=typer.echo)
         except printing.PrintError as e:
@@ -186,12 +186,11 @@ def backlog_sheet() -> None:
         questionary.checkbox(
             "Sheet options (space ticks, Enter builds):",
             choices=[
-                Choice("print double-sided cards' backs (separate duplex PDF)", "backs"),
                 Choice("full sheets only, a partial last page stays queued", "full_only"),
             ],
         )
     )
-    result = cli.build_backlog(out, backs="backs" in picked, full_only="full_only" in picked)
+    result = cli.build_backlog(out, full_only="full_only" in picked)
     if result is not None:
         _after_build(result)
 

@@ -12,7 +12,6 @@ import contextlib
 import importlib
 import io
 import os
-import shutil
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -75,17 +74,13 @@ def images_in(directory: Path) -> list[Path]:
 
 
 def clean_images() -> None:
-    """Empty game/front and game/double_sided (the engine's clean_up.py, in-process)."""
+    """Empty game/front and game/double_sided (the engine's clean_up.py, in-process), and game/back:
+    sheets are fronts only, and the duplex sheet's backs are the cards' own faces."""
     ensure_game_dirs()
     with in_engine():
         module("clean_up").delete_files()
-
-
-def set_back(back: Path) -> None:
-    ensure_game_dirs()
     for f in images_in(BACK):
         f.unlink()
-    shutil.copyfile(back, BACK / f"back{back.suffix.lower()}")
 
 
 def _run_click(cmd, name: str, args: list[str]) -> None:

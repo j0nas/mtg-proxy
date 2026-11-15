@@ -176,23 +176,19 @@ class Recorder:
 
 
 # --- sheets --------------------------------------------------------------------
-def partition(fronts_only: bool, duplex_dfc: bool) -> tuple[list[Path], list[Path]]:
+def partition(duplex_dfc: bool) -> tuple[list[Path], list[Path]]:
     """(main files, duplex files) in the order the engine lays them out.
 
-    Fronts-only with duplex DFCs: double-faced cards go to their own sheet. Every
-    other mode is one sheet — the engine puts single-sided cards first, then
-    double-sided ones, each group in natural order.
+    With duplex DFCs, double-faced cards go to their own sheet; with --split-faces each back
+    face is its own plain card on the main sheet, named <front>-back next to its front (a
+    virtual path; see view_target).
     """
     fronts = engine.images_in(engine.FRONT)
     is_dfc = {f: (engine.DOUBLE_SIDED / f.name).is_file() for f in fronts}
-    if fronts_only and duplex_dfc:
+    if duplex_dfc:
         return _nat([f for f in fronts if not is_dfc[f]]), _nat([f for f in fronts if is_dfc[f]])
-    if fronts_only:
-        # --split-faces: each back face is its own plain card, named <front>-back next to its
-        # front (a virtual path; see view_target).
-        backs = [f.with_name(f"{f.stem}-back{f.suffix}") for f in fronts if is_dfc[f]]
-        return _nat(fronts + backs), []
-    return _nat([f for f in fronts if not is_dfc[f]]) + _nat([f for f in fronts if is_dfc[f]]), []
+    backs = [f.with_name(f"{f.stem}-back{f.suffix}") for f in fronts if is_dfc[f]]
+    return _nat(fronts + backs), []
 
 
 def _nat(files: list[Path]) -> list[Path]:
@@ -289,7 +285,6 @@ def rebuild(run_dir: Path, info) -> dict[str, Sheet]:
     opts = build.BuildOptions(
         deck=str(deck),
         fmt=o.get("fmt", "mtga"),
-        fronts_only=info.fronts_only,
         duplex_dfc=o.get("duplex_dfc", True),
         fancy_art=o.get("fancy_art", True),
         alt_names=o.get("alt_names", False),
@@ -300,7 +295,7 @@ def rebuild(run_dir: Path, info) -> dict[str, Sheet]:
         images=Path(o["images"]) if o.get("images") else None,
     )
     rec = build.stage_and_index(opts)
-    main, duplex = partition(opts.fronts_only, opts.duplex_dfc)
+    main, duplex = partition(opts.duplex_dfc)
     total = len(main) + len(duplex)
     expected = info.cards + info.deferred
     if total != expected:

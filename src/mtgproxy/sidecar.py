@@ -19,7 +19,6 @@ from .paths import SIDECAR_NAME, out_root
 class RunInfo:
     name: str
     cards: int
-    fronts_only: bool
     generated: str
     # Always 3 now; run.json files from before 3-mark only may say 4, and cut refuses those sheets.
     registration: str = "3"
@@ -48,7 +47,7 @@ class RunInfo:
 
     @classmethod
     def read(cls, path: Path) -> RunInfo:
-        raw = json.loads(path.read_text())
+        raw = json.loads(path.read_text())  # unknown keys (fronts_only, from before 2026-11-15) drop out
         known = {k: v for k, v in raw.items() if k in cls.__dataclass_fields__}
         return cls(**known)
 

@@ -17,7 +17,6 @@ from .paths import NOTES_NAME
 class NotesContext:
     name: str
     cards: int
-    fronts_only: bool
     duplex_dfc: bool
     dfc_count: int
     today: str = ""
@@ -41,7 +40,6 @@ MAT = """\
 
 
 def render(c: NotesContext) -> str:
-    sides = "fronts only" if c.fronts_only else "double-sided"
     dfc_note = ""
     if c.dfc_count > 0:
         dfc_note = (
@@ -49,19 +47,13 @@ def render(c: NotesContext) -> str:
             if c.duplex_dfc
             else f" | double-faced cards: {c.dfc_count} (both faces as separate cards)"
         )
-    if c.fronts_only:
-        step2 = "Fronts only (default) — print single-sided. Rerun with --backs for double-sided."
-    else:
-        step2 = (
-            "Double-sided = manual duplex, **long-edge flip**. Check front/back alignment "
-            "against a light before laminating a whole batch."
-        )
+    step2 = "Fronts only — print single-sided."
     if c.dfc_count > 0 and c.duplex_dfc:
         step2 += (
             f"\n   - **{c.name}-duplex.pdf** holds the {c.dfc_count} double-sided card image(s): print that file "
             "with manual duplex\n     (**long-edge flip**), then laminate and cut it like any other sheet."
         )
-    elif c.dfc_count > 0 and c.fronts_only:
+    elif c.dfc_count > 0:
         step2 += (
             f"\n   - {c.dfc_count} double-faced card(s): both faces are in the main PDF as separate single-sided"
             "\n     cards (--split-faces). Rerun without it for one physical double-sided card."
@@ -69,7 +61,7 @@ def render(c: NotesContext) -> str:
     lam, paper = PRESETS["laminate"], PRESETS["paper"]
     return f"""# {c.name} — print & cut checklist
 
-Generated: {c.today} | 3x3 on A4 | registration: 3-mark | cards: {c.cards} | sides: {sides}{dfc_note}
+Generated: {c.today} | 3x3 on A4 | registration: 3-mark | cards: {c.cards}{dfc_note}
 
 ## Print (your usual ET-8550 profile)
 {PRINT}

@@ -103,13 +103,11 @@ def test_partition_orders_like_the_engine(tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "FRONT", front)
     monkeypatch.setattr(engine, "DOUBLE_SIDED", ds)
     nm = lambda fs: [f.name for f in fs]  # noqa: E731
-    main, duplex = manifest.partition(fronts_only=True, duplex_dfc=True)
+    main, duplex = manifest.partition(duplex_dfc=True)
     assert nm(main) == ["1A1.png", "3B1.png", "10C1.png", "10000Tok_token1.png"] and nm(duplex) == [
         "2Dfc1.png"
     ]
-    main, duplex = manifest.partition(fronts_only=False, duplex_dfc=True)
-    assert nm(main) == ["1A1.png", "3B1.png", "10C1.png", "10000Tok_token1.png", "2Dfc1.png"] and duplex == []
-    main, duplex = manifest.partition(fronts_only=True, duplex_dfc=False)
+    main, duplex = manifest.partition(duplex_dfc=False)
     assert "2Dfc1-back.png" in nm(main) and duplex == []
     back = next(f for f in main if f.name == "2Dfc1-back.png")
     assert manifest.view_target(back) == ds / "2Dfc1.png" and manifest.view_target(main[0]) == main[0]
@@ -341,7 +339,7 @@ def test_front_marker_prints_a_dfc_as_a_single_sided_card(tmp_path, monkeypatch)
         "Hallowed Fountain // Hallowed Fountain"
     ]
     assert [p.name for p in ds.iterdir()] == ["2Delver1.png"]
-    main, duplex = manifest.partition(fronts_only=True, duplex_dfc=True)
+    main, duplex = manifest.partition(duplex_dfc=True)
     assert [p.name for p in main] == ["1HallowedFountainHallowedFountain1.png"] and [
         p.name for p in duplex
     ] == ["2Delver1.png"]
@@ -366,8 +364,8 @@ def test_redo_and_the_backlog_count_sheets_of_nine(tmp_path, monkeypatch):
 
     built = []
     monkeypatch.setattr(build, "run_build", lambda opts: built.append(opts))
-    r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--backs", "-n"])
-    assert r.exit_code == 0 and "10 card(s) → " in r.output  # double-sided 3x3 sheets
+    r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "-n"])
+    assert r.exit_code == 0 and "10 card(s) → " in r.output
     r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--full-only", "-n"])
     assert r.exit_code == 0 and "9 card(s) → " in r.output and ", 1 stay queued" in r.output
 
@@ -381,5 +379,5 @@ def test_redo_and_the_backlog_count_sheets_of_nine(tmp_path, monkeypatch):
     r = runner.invoke(app, ["backlog", "build", "-o", str(tmp_path), "--name", "b"])
     assert r.exit_code == 0, r.output
     (opts,) = built
-    assert (opts.duplex_dfc, opts.fronts_only) == (True, True)
+    assert opts.duplex_dfc
     assert "1 Delver (SLD) 1" in Path(opts.deck).read_text()

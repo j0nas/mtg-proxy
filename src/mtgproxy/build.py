@@ -20,7 +20,7 @@ from . import engine, freshness, layout, local, manifest, notes, printing, print
 from .backlog import Backlog, Entry
 from .cache import ImageCache
 from .decks import FetchedDeck, fetch_deck, is_deck_url
-from .paths import DEFAULT_BACK, DUPLEX_OFFSET_FILE, NOTES_NAME, SCM, cache_dir, out_root
+from .paths import DUPLEX_OFFSET_FILE, NOTES_NAME, SCM, cache_dir, out_root
 from .sidecar import RunInfo
 from .testcards import write_test_cards
 
@@ -42,7 +42,6 @@ class BuildOptions:
     fmt: str = "mtga"
     out_parent: Path = field(default_factory=out_root)
     board: str = "main"
-    fronts_only: bool = True
     duplex_dfc: bool = True
     fancy_art: bool = True
     alt_names: bool = False  # --alt-names: rank printings with another name on the card (printings.py)
@@ -55,7 +54,6 @@ class BuildOptions:
     fetch_args: list[str] = field(default_factory=list)
     use_cache: bool = True
     dry_run: bool = False
-    back: Path = DEFAULT_BACK
     trims: list[trim.TrimSpec] = field(default_factory=list)
     defer_partial: bool = False  # partial last page of each sheet → BACKLOG.txt instead of the PDF
     front_only: list[str] = field(default_factory=list)  # DFC names to print as a single-sided front
@@ -184,12 +182,7 @@ def stage_images(opts: BuildOptions, deck: ResolvedDeck, cache: ImageCache | Non
     if opts.test_mode:
         engine.clean_images()
         trim.reset_state()
-        for f in engine.images_in(engine.BACK):
-            f.unlink()
-        count = per_page()  # one full sheet
-        # Double-sided test sheet: number each back so you can see which front it
-        # belongs to (verifies back-page ordering, not just the offset).
-        write_test_cards(count, engine.FRONT, engine.BACK, None if opts.fronts_only else engine.DOUBLE_SIDED)
+        write_test_cards(per_page(), engine.FRONT)  # one full sheet
         return
     if opts.skip_fetch:
         log("--skip-fetch: reusing images already in game/front/")
@@ -197,9 +190,6 @@ def stage_images(opts: BuildOptions, deck: ResolvedDeck, cache: ImageCache | Non
     split = local_split(opts, deck)  # before clearing game/, so a bad --images keeps the last images
     engine.clean_images()
     trim.reset_state()
-    if not opts.back.is_file():
-        raise BuildError(f"card back image missing: {opts.back}")
-    engine.set_back(opts.back)
     scryfall = engine.scryfall_module()
     if cache is not None:
         cache.install(scryfall)
@@ -352,7 +342,7 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
     base = PDF_BASE_ARGS
     offset = duplex_offset_args()
     game_pdf = engine.OUTPUT / "game.pdf"
-    main, duplex = manifest.partition(opts.fronts_only, opts.duplex_dfc)
+    main, duplex = manifest.partition(opts.duplex_dfc)
     deferred: list[Path] = []
     if opts.defer_partial:
         n = per_page()
@@ -363,40 +353,7 @@ def build_pdfs(opts: BuildOptions, out: Path, name: str) -> PdfOutputs:
             log(f"--defer-partial: {len(deferred)} card(s) of a partial page go to the backlog instead")
     dfc_count = 0
 
-    if not opts.fronts_only:
-        # --backs: one double-sided PDF; DFCs get their real backs, the rest the card back.
-        if offset:
-            log(f"applying saved duplex offset from {DUPLEX_OFFSET_FILE}")
-        else:
-            log(
-                "NOTE: no saved duplex offset — run the calibration once before double-sided decks (see README)."
-            )
-        if not main:
-            log("NOTE: nothing left to print on this sheet.")
-            return PdfOutputs(None, None, 0, [], [], deferred)
-        with tempfile.TemporaryDirectory() as tmp:
-            front = _view(Path(tmp), "front", main)
-            backs = _view(
-                Path(tmp),
-                "backs",
-                [engine.DOUBLE_SIDED / f.name for f in main if (engine.DOUBLE_SIDED / f.name).is_file()],
-            )
-            engine.create_pdf(
-                [
-                    *base,
-                    *offset,
-                    *BACK_PAGES,
-                    "--front_dir_path",
-                    str(front),
-                    "--double_sided_dir_path",
-                    str(backs),
-                ]
-            )
-        pdf = out / f"{name}.pdf"
-        shutil.copyfile(game_pdf, pdf)
-        return PdfOutputs(pdf, None, 0, main, [], deferred)
-
-    # Fronts only. Symlink views leave game/* untouched (safe for --skip-fetch).
+    # Symlink views leave game/* untouched (safe for --skip-fetch).
     with tempfile.TemporaryDirectory() as tmp:
         view = Path(tmp)
         main_front, dfc_front, no_backs = (
@@ -552,7 +509,6 @@ def run_build(opts: BuildOptions) -> BuildResult:
             notes.NotesContext(
                 name=name,
                 cards=printed,
-                fronts_only=opts.fronts_only,
                 duplex_dfc=opts.duplex_dfc,
                 dfc_count=pdfs.dfc_count,
             )
@@ -561,7 +517,6 @@ def run_build(opts: BuildOptions) -> BuildResult:
     RunInfo(
         name=name,
         cards=printed,
-        fronts_only=opts.fronts_only,
         generated=date.today().isoformat(),
         proof_targets=bool(layout.proof_targets_mm()[0]),
         pdf=pdfs.pdf.name if pdfs.pdf else None,

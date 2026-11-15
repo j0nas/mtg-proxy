@@ -8,11 +8,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SCM = ROOT / "silhouette-card-maker"  # vendored PDF engine (fork j0nas/silhouette-card-maker, local-patches)
 DATA = ROOT / "data"
-ASSETS = ROOT / "assets"
 DECKS = ROOT / "decks"
 CUT_OFFSET_FILE = DATA / "cut_offset.json"
 DUPLEX_OFFSET_FILE = DATA / "offset_data.json"
-DEFAULT_BACK = ASSETS / "back.png"
 GAME = SCM / "game"
 SIDECAR_NAME = "run.json"
 NOTES_NAME = "CUT-NOTES.md"

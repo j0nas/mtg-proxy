@@ -23,7 +23,7 @@ from .cache import ImageCache
 from .decks import DeckError, is_double_sided
 from .layout import NOMINAL_CARDS, LayoutError
 from .manifest import ManifestError
-from .paths import DEFAULT_BACK, NOTES_NAME, SCM, SIDECAR_NAME, cache_dir, out_root
+from .paths import NOTES_NAME, SCM, SIDECAR_NAME, cache_dir, out_root
 from .sidecar import RunInfo, find_run, find_sidecar, runs_parent
 
 app = typer.Typer(
@@ -143,9 +143,6 @@ def make(
         ),
     ] = None,
     board: Annotated[str, typer.Option(help="deck URL board: main | side | considering")] = "main",
-    backs: Annotated[
-        bool, typer.Option("--backs/--fronts-only", help="double-sided cards (default: fronts only)")
-    ] = False,
     basics: Annotated[
         bool, typer.Option("--basics", help="include basic lands (skipped by default)")
     ] = False,
@@ -195,9 +192,6 @@ def make(
     print_: Annotated[
         bool, typer.Option("--print", help="print the PDF on the PC (glossy queue; plain for --test)")
     ] = False,
-    back: Annotated[
-        Path, typer.Option(help="card back image for --backs runs", dir_okay=False)
-    ] = DEFAULT_BACK,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="resolve the decklist and stop (no Scryfall, no PDF)")
     ] = False,
@@ -246,7 +240,6 @@ def make(
         fmt=fmt,
         out_parent=out or out_root(),
         board=board,
-        fronts_only=not backs,
         duplex_dfc=not split_faces,
         fancy_art=not plain,
         alt_names=alt_names,
@@ -259,7 +252,6 @@ def make(
         fetch_args=list(ctx.args),
         use_cache=not no_cache,
         dry_run=dry_run,
-        back=back,
         trims=trim_specs,
         defer_partial=defer_partial,
         images=images.resolve() if images else None,  # absolute: run.json keeps it for rebuilds
@@ -995,9 +987,6 @@ def backlog_drop(refs: Annotated[list[str], typer.Argument()], out: OutOpt = Non
 )
 def backlog_build(
     out: OutOpt = None,
-    backs: Annotated[
-        bool, typer.Option("--backs/--fronts-only", help="double-sided (default: fronts only)")
-    ] = False,
     full_only: Annotated[
         bool, typer.Option("--full-only", help="build full sheets only; the rest stays queued")
     ] = False,
@@ -1021,12 +1010,11 @@ def backlog_build(
     ] = False,
     dry_run: Annotated[bool, typer.Option("-n", "--dry-run", help="show what would be built")] = False,
 ) -> None:
-    build_backlog(out or runs_parent(), backs, full_only, split_faces, front_only, name, print_, dry_run)
+    build_backlog(out or runs_parent(), full_only, split_faces, front_only, name, print_, dry_run)
 
 
 def build_backlog(
     out: Path,
-    backs: bool = False,
     full_only: bool = False,
     split_faces: bool = False,
     front_only: list[str] | None = None,
@@ -1072,7 +1060,6 @@ def build_backlog(
     opts = build.BuildOptions(
         deck=str(deck),
         out_parent=out,
-        fronts_only=not backs,
         duplex_dfc=not split_faces,
         front_only=[c.name for c in cards if c.front],
         include_basics=True,  # every line here is explicit
@@ -1116,13 +1103,6 @@ def print_cmd(
         fail(str(e))
 
 
-@app.command(name="make-back", help="Regenerate the generic proxy card back at assets/back.png.")
-def make_back(out: Annotated[Path, typer.Option("--out", dir_okay=False)] = DEFAULT_BACK) -> None:
-    from .back import PPI, H, W, write_back
-
-    typer.echo(f"wrote {write_back(out)} ({W}x{H}px @ {PPI} PPI)")
-
-
 @app.command(help="Check that the vendored engine and data files are in place.")
 def doctor() -> None:
     from .paths import CUT_OFFSET_FILE, DUPLEX_OFFSET_FILE
@@ -1147,7 +1127,6 @@ def doctor() -> None:
             DUPLEX_OFFSET_FILE.is_file(),
             "mtg-proxy offset -x .. -y .. (README §3)",
         ),
-        ("card back (assets/back.png)", DEFAULT_BACK.is_file(), "mtg-proxy make-back"),
         ("PC ssh key", printing.KEY.is_file(), "needed only for --print (~/.ssh/pomelomadness_ed25519)"),
     ]
     bad = 0

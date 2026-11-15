@@ -240,15 +240,13 @@ def fake_engine(tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "scryfall_module", lambda: scry)
     monkeypatch.setattr(engine, "fetch_cards", fetch_cards)
     monkeypatch.setattr(engine, "read_deck_lines", moxfield_lines)
-    back = tmp_path / "back.png"
-    back.write_bytes(b"back")
-    return SimpleNamespace(front=front, ds=ds, looked_up=looked_up, decks=fetched_decks, back=back)
+    return SimpleNamespace(front=front, ds=ds, looked_up=looked_up, decks=fetched_decks)
 
 
 def _stage(tmp_path, fake, images, deck_text=DECK, **kw) -> Path:
     deck = tmp_path / "aminatou.txt"
     deck.write_text(deck_text)
-    opts = BuildOptions(deck=str(deck), fmt="moxfield", images=images, back=fake.back, use_cache=False, **kw)
+    opts = BuildOptions(deck=str(deck), fmt="moxfield", images=images, use_cache=False, **kw)
     build.stage_images(opts, ResolvedDeck("aminatou", deck, "moxfield"), None)
     return deck
 
@@ -265,7 +263,7 @@ def test_stage_images_interleaves_local_and_fetched_cards(tmp_path, images, fake
     ]  # fmt: skip
     # Local images are one face: a local DFC name prints with the fronts, the fetched DFC goes duplex.
     assert [p.name for p in fake_engine.ds.iterdir()] == ["5DelverofSecretsInsectileAberration1.png"]
-    main, duplex = manifest.partition(fronts_only=True, duplex_dfc=True)
+    main, duplex = manifest.partition(duplex_dfc=True)
     assert "3FelltheProfaneFellMire1.jpg" in [p.name for p in main]
     assert [p.name for p in duplex] == ["5DelverofSecretsInsectileAberration1.png"]
     # The manifest knows where each card came from.
@@ -323,11 +321,11 @@ def test_images_are_recorded_and_rebuild_passes_them_back(tmp_path, monkeypatch)
         return manifest.Recorder()
 
     monkeypatch.setattr(build, "stage_and_index", fake_stage)
-    monkeypatch.setattr(manifest, "partition", lambda fronts_only, duplex_dfc: ([], []))
+    monkeypatch.setattr(manifest, "partition", lambda duplex_dfc: ([], []))
     monkeypatch.setattr(manifest, "cards_per_page", lambda: 9)
     info = SimpleNamespace(
         decklist=str(deck), options={"images": "/cards", "include_basics": True},
-        fronts_only=True, cards=0, deferred=0, pdf=None, duplex_pdf=None,
+        cards=0, deferred=0, pdf=None, duplex_pdf=None,
     )  # fmt: skip
     manifest.rebuild(tmp_path, info)
     assert seen["opts"].images == Path("/cards") and seen["opts"].include_basics

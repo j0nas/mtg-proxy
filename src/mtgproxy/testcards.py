@@ -6,8 +6,7 @@ The placeholders are cut-accuracy gauges, not art:
 - gray tick lines at 0.5 mm and 1.5 mm insets on each side midpoint to read
   cut offset in 0.5 mm steps
 - gray quarter-arcs marking the theoretical 3 mm corner cut radius
-- center crosshair on front AND back: hold a cut card against the light to
-  check front/back duplex alignment
+- center crosshair
 - "TOP" marker to spot rotation/orientation mistakes
 """
 
@@ -86,20 +85,10 @@ def make_card(title: str, subtitle: str) -> Image.Image:
     return img
 
 
-def write_test_cards(
-    count: int, front_dir: Path, back_dir: Path, double_sided_dir: Path | None = None
-) -> None:
-    """N gauge fronts + 1 shared back; with ``double_sided_dir`` also N numbered backs."""
+def write_test_cards(count: int, front_dir: Path) -> None:
+    """N gauge fronts."""
     front_dir.mkdir(parents=True, exist_ok=True)
-    back_dir.mkdir(parents=True, exist_ok=True)
     for i in range(1, count + 1):
         make_card(f"TEST CARD {i}", f"front · {i} of {count}").save(
             front_dir / f"test_{i:02d}.png", dpi=(PPI, PPI)
         )
-    make_card("TEST BACK", "duplex alignment check").save(back_dir / "test_back.png", dpi=(PPI, PPI))
-    if double_sided_dir is not None:
-        double_sided_dir.mkdir(parents=True, exist_ok=True)
-        for i in range(1, count + 1):
-            make_card(f"BACK {i}", f"back of TEST CARD {i}").save(
-                double_sided_dir / f"test_{i:02d}.png", dpi=(PPI, PPI)
-            )

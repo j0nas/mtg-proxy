@@ -39,8 +39,7 @@ src/mtgproxy/          engine.py (in-process engine), build.py (pipeline), decks
                        local.py (--images),
                        layout.py (the sheet layout, cut SVG), cutting.py (mtg-proxy cut), cameo/ (the Cameo driver)
 data/cut_offset.json   the machine's cut offset in mm, applied to every cut
-data/offset_data.json  printer duplex offset, applied to every double-sided PDF
-assets/back.png        default card back for --backs; replace with your own
+data/offset_data.json  printer duplex offset, applied to the duplex PDF
 silhouette-card-maker/ the vendored engine clone, gitignored, made by setup.sh
 ```
 
@@ -102,7 +101,6 @@ mtg-proxy make decks/mydeck.txt -f moxfield        # also mtgo, archidekt, decks
 mtg-proxy make https://moxfield.com/decks/<id>     # straight from Moxfield
 mtg-proxy make https://archidekt.com/decks/<id>    # or Archidekt
 mtg-proxy make <deck-url> --board considering      # main | side | considering
-mtg-proxy make decks/mydeck.txt --backs            # double-sided; default is fronts only
 mtg-proxy make decks/mydeck.txt --basics           # include basic lands; skipped by default
 mtg-proxy make decks/mydeck.txt --images cards/    # your own card images where you have them
 mtg-proxy make decks/mydeck.txt -t 2               # 2 of each distinct token at the end
@@ -158,7 +156,7 @@ mtg-proxy make decks/aminatou.txt -f moxfield --images cards/ --dry-run   # how 
 - Every deck line with an image prints from it, as many copies as the line asks for, and is never
   looked up. The rest is fetched as usual. The sheet keeps the decklist's order.
 - An image is one face: a double-faced name prints as a single-sided card, never on the duplex
-  sheet, and gets the plain back with `--backs`.
+  sheet.
 - Basics follow `--basics` like fetched ones: skipped unless you ask for them.
 - Images should be the whole card at 63 × 88 mm, full bleed, at any resolution. The engine scales
   them to the card and builds the bleed from their edge, as it does for scans. `--trim all` leaves
@@ -207,16 +205,18 @@ upright (rotated a quarter turn, then portrait at 100 %) and put it on the mat
 portrait with the square at the top-left. The square sits 0.6 mm from the top-left card's print,
 beside its corner.
 
-`--backs` prints the whole deck double-sided, and double-faced cards go to `<deck>-duplex.pdf`
-(`--split-faces` puts both faces on the main sheet instead). Both sides print manual duplex with a
-long-edge flip, and the saved duplex offset moves the back pages. On the engine's output each back sits behind its front, upright when the card is turned
+Every sheet is fronts only. Double-faced cards go to `<deck>-duplex.pdf` (`--split-faces` puts both
+faces on the main sheet instead), which prints manual duplex with a long-edge flip; the saved duplex
+offset moves its back pages. There is no generic card back: a back behind every card printed twelve
+sheets of nothing but backs on 2026-11-15 (`docs/lessons.md`). On the engine's output each back sits
+behind its front, upright when the card is turned
 over side to side (checked at 300 ppi, and by the tests at 50 ppi). The back pages carry no
 registration marks (the engine fork's `--no_back_marks`): nothing scans them, and turned over the
 long edge a back's square lands right behind the front's top-right L, where on double-sided glossy
 it showed through enough to make every TB123 misread that L (2026-10-26). The first 3x3 sheet
 printed double-sided (2026-10-26) had its backs slightly off with the offset measured on the
-landscape calibration sheet; check against a light before laminating a batch
-(`mtg-proxy make --test --backs` numbers each back), and remeasure the offset if it is off.
+landscape calibration sheet; check against a light before laminating a batch, and remeasure the
+offset if it is off.
 
 ## Reprints and leftovers
 
@@ -260,14 +260,14 @@ and read where each cut tick 0 lands against its printed 0 line.
 
 ## Duplex offset
 
-Once, for `--backs` decks and duplex sheets:
+Once, for duplex sheets:
 
 1. Print `silhouette-card-maker/calibration/a4-calibration.pdf` like a card sheet.
 2. Against a light, find the front/back square pair that lines up and read its `(x, y)`.
    Units are 300 PPI pixels, ~0.085 mm.
 3. `mtg-proxy offset -x <x> -y <y>` (`-a <deg>` for rotation).
 
-Stored in `data/offset_data.json`, tracked, applied to every double-sided PDF: the engine shifts
+Stored in `data/offset_data.json`, tracked, applied to the duplex PDF: the engine shifts
 the back pages in the landscape page's own pixels.
 
 ## Cutting

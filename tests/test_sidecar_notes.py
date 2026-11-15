@@ -13,7 +13,6 @@ def _info(**kw) -> RunInfo:
     base = dict(
         name="deck",
         cards=8,
-        fronts_only=True,
         generated="2026-09-17",
     )
     base.update(kw)
@@ -27,6 +26,7 @@ def test_sidecar_roundtrip_and_forward_compat(tmp_path):
     raw["some_future_field"] = 1
     raw["template"] = "a4+y1mm.studio3"  # older runs: Studio template fields, now ignored
     raw["registration"] = "4"  # older runs: 4-mark sheets, which cut refuses
+    raw["fronts_only"] = False  # runs from before 2026-11-15: the card-back option, now gone
     raw |= {"paper": "a4", "card_size": "standard", "layout": "3x3"}  # older runs: now one sheet, ignored
     p.write_text(json.dumps(raw))
     back = RunInfo.read(p)
@@ -36,7 +36,7 @@ def test_sidecar_roundtrip_and_forward_compat(tmp_path):
 
 
 def test_notes_for_a_3x3_sheet():
-    ctx = notes.NotesContext("t", 9, True, True, 0, today="2026-10-24")
+    ctx = notes.NotesContext("t", 9, True, 0, today="2026-10-24")
     text = notes.render(ctx)
     assert "| 3x3 on A4 | registration: 3-mark | cards: 9" in text
     assert (
@@ -47,10 +47,10 @@ def test_notes_for_a_3x3_sheet():
     assert "**Actual size / 100%** scale, borderless **OFF**" in text
     assert "**portrait, the black square top-left**" in text and "masking tape" in text
     assert "It reads run.json here." in text and "--layout" not in text
-    assert "Rerun with --backs for double-sided." in text
-    split = notes.render(notes.NotesContext("t", 9, True, False, 2))
+    assert "Fronts only — print single-sided." in text and "--backs" not in text
+    split = notes.render(notes.NotesContext("t", 9, False, 2))
     assert "Rerun without it for one physical double-sided card." in split
-    duplex = notes.render(notes.NotesContext("t", 9, True, True, 2))
+    duplex = notes.render(notes.NotesContext("t", 9, True, 2))
     assert "**t-duplex.pdf** holds the 2 double-sided card image(s)" in duplex and "**portrait A4**" in duplex
 
 
@@ -65,20 +65,15 @@ def test_find_sidecar(tmp_path, monkeypatch):
 
 def test_notes_render_covers_the_run():
     ctx = notes.NotesContext(
-        name="orah", cards=12, fronts_only=True, duplex_dfc=True, dfc_count=2, today="2026-09-17",
+        name="orah", cards=12, duplex_dfc=True, dfc_count=2, today="2026-09-17",
     )  # fmt: skip
     text = notes.render(ctx)
     assert "# orah — print & cut checklist" in text
-    assert (
-        "registration: 3-mark | cards: 12 | sides: fronts only | double-faced cards: 2 (separate duplex PDF)"
-        in text
-    )
+    assert "registration: 3-mark | cards: 12 | double-faced cards: 2 (separate duplex PDF)" in text
     assert "**orah-duplex.pdf** holds the 2 double-sided card image(s)" in text
     assert "**Force 20 · Speed 25 · Depth 5 · Passes 3**" in text
     assert "`--preset paper` (Force 10 · Speed 5 · Depth 1 · Passes 1)" in text
     assert "Studio" not in text and "studio3" not in text
-    duplex = notes.render(notes.NotesContext("d", 9, False, True, 0))
-    assert "manual duplex, **long-edge flip**" in duplex
 
 
 def test_latest_notes(tmp_path):
