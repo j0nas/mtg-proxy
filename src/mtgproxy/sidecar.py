@@ -39,6 +39,10 @@ class RunInfo:
     # Empty in run.json files from before 2026-11-01.
     code: dict = field(default_factory=dict)
     marks: dict = field(default_factory=dict)
+    # The paper the sheet is for, a printing.QUEUES key: "glossy", "plain" (the test sheet) or "holo"
+    # (foil, make --foil). Print sends it to that queue and cut takes its preset from it
+    # (cutting.preset_for). None in run.json files from before 2026-11-15 (build.paper_for).
+    paper: str | None = None
 
     def write(self, out_dir: Path) -> Path:
         p = out_dir / SIDECAR_NAME

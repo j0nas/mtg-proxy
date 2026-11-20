@@ -3,7 +3,7 @@
 Every sheet prints from the Windows PC (`print-sheet.sh`, `make-proxies --print`). The presets
 below live there as the defaults of the PC's print queues: `Glossy photo paper proxies` for proxy
 sheets, `ET-8550 Series(Network)` for plain-paper test sheets, `Premium glossy paper` for Epson
-Premium Glossy 220 gsm. The job only names the queue and sends the page at 100 %, so the queue's
+Premium Glossy 220 gsm, `Holographic sticker proxies` for foil sheets on holographic sticker paper. The job only names the queue and sends the page at 100 %, so the queue's
 defaults decide paper type, quality and feeder.
 The plain queue (`ET-8550 Series(Network)`) defaults to A4 since 2026-10-26 (Standard quality, plain paper).
 
@@ -40,7 +40,11 @@ ignored. Patching bytes by hand leaves the old paper's derived settings behind. 
 edited DEVMODE to DocumentProperties makes the driver update its private media, but it resets
 quality to Standard, so copy the quality bytes back, run DocumentProperties once more, and write
 the result with SetPrinter level 8. `premium-glossy-queue.ps1` does this for the
-`Premium glossy paper` queue. `Set-PrintConfiguration` drops the Epson fields.
+`Premium glossy paper` queue, and `holo-sticker-queue.ps1` creates the `Holographic sticker proxies`
+queue (2026-11-15): the glossy queue's defaults with Epson Ultra Glossy, the paper type of the
+"Holographic A4 Proxy" preset. On Ultra Glossy the driver tops out at High with PageResolution
+BestQuality. The printer's own Thick Paper setting and longer drying time are set on its panel for
+holo sheets; the queue doesn't carry them. `Set-PrintConfiguration` drops the Epson fields.
 
 The driver's media ids (DeviceCapabilities DC_MEDIATYPES): Plain paper 1, Epson Premium Glossy
 325, Photo Paper Glossy 396, Epson Ultra Glossy 352, Epson Premium Semigloss 275, Epson Matte

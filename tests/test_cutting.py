@@ -94,6 +94,42 @@ def test_the_paper_preset_and_explicit_flags_override_it(monkeypatch, tmp_path):
     assert (o.force, o.speed, o.depth, o.passes) == (10, 5, 1, 2)
 
 
+def test_a_foil_run_kiss_cuts_with_the_foil_preset_and_proofs_at_that_same_blade(monkeypatch, tmp_path):
+    write_run(tmp_path, "foily", paper="holo")
+    monkeypatch.chdir(tmp_path)
+    o = cut_options(monkeypatch, "--proof")
+    assert (o.force, o.speed, o.depth, o.passes) == (7, 13, 2, 1)
+    assert o.proof_blade == (7, 13, 2)  # the proof is the test of the kiss cut's depth
+    assert o.paper_at == cutting.FOIL_AT == (2.5, 0.0)  # clear of the sensor's reach on the left
+    o = cut_options(monkeypatch, "--proof", "--depth", "3")
+    assert (o.depth, o.proof_blade) == (3, (7, 13, 3))
+    o = cut_options(monkeypatch, "--proof", "--proof-blade", "10,5,1")
+    assert o.proof_blade == (10, 5, 1)
+    o = cut_options(monkeypatch, "--proof", "--preset", "laminate")  # a given preset wins
+    assert (o.force, o.passes, o.proof_blade, o.paper_at) == (20, 3, None, cutting.LAMINATED_AT)
+
+
+def test_a_foil_proof_traces_the_square_alone_so_it_peels_off_whole(monkeypatch, tmp_path):
+    from mtgproxy.cameo import proof
+
+    write_run(tmp_path, "foily", paper="holo")
+    monkeypatch.chdir(tmp_path)
+    assert not cut_options(monkeypatch, "--proof").proof_cross
+    assert cut_options(monkeypatch, "--proof", "--proof-cross").proof_cross
+    assert cut_options(monkeypatch, "--proof", "--preset", "laminate").proof_cross
+    square = proof.Target(120, 11.75, cross=False)
+    assert square.cuts() == (square.outline(),)
+    assert len(proof.Target(120, 11.75).cuts()) == 3
+
+
+def test_a_glossy_run_and_one_from_before_runs_recorded_paper_cut_as_laminate(monkeypatch, tmp_path):
+    for paper in ("glossy", None):
+        write_run(tmp_path, "deck", paper=paper)
+        monkeypatch.chdir(tmp_path)
+        o = cut_options(monkeypatch)
+        assert (o.force, o.speed, o.depth, o.passes, o.proof_blade) == (20, 25, 5, 3, None)
+
+
 def test_paper_at_is_right_then_down_or_one_number_for_both(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     assert cut_options(monkeypatch, "--paper-at", "3,2").paper_at == (3.0, 2.0)
@@ -268,7 +304,7 @@ def test_a_retry_on_the_same_sheet_takes_the_next_target_and_the_next_sheet_its_
 
 
 # --- the menu a bare cut-proxies shows at a terminal ---------------------------
-def write_run(where, name, registration="3", proof_targets=True):
+def write_run(where, name, registration="3", proof_targets=True, paper=None):
     from mtgproxy.sidecar import RunInfo
 
     where.mkdir(parents=True, exist_ok=True)
@@ -278,6 +314,7 @@ def write_run(where, name, registration="3", proof_targets=True):
         generated="2026-10-01",
         registration=registration,
         proof_targets=proof_targets,
+        paper=paper,
     )
     return info.write(where)
 

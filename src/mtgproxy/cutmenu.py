@@ -2,7 +2,7 @@
 
 Enter on the first question cuts the default: this folder's run.json, else the newest run
 below it, or a plain A4 sheet (standard cards, the default layout) when there is none, with the
-laminate preset. "Choose…" asks
+sheet's preset (foil for a foil run, else laminate). "Choose…" asks
 which run, which preset and what to do (cut, proof first, dry run, probe). The connection is
 never asked: Bluetooth LE unless ``--usb`` is given.
 
@@ -21,7 +21,7 @@ from pathlib import Path
 import questionary
 from questionary import Choice
 
-from .cutting import PRESETS
+from .cutting import PRESETS, preset_for
 from .paths import SIDECAR_NAME
 from .sidecar import RunInfo
 
@@ -37,7 +37,7 @@ MODES = {
 @dataclass
 class Picked:
     run: Path | None  # run.json to cut; None = the plain sheet
-    preset: str = "laminate"
+    preset: str | None = None  # None = the sheet's (cutting.preset_for)
     mode: str = "cut"  # a key of MODES
 
 
@@ -48,13 +48,21 @@ def runs_below(where: Path) -> list[Path]:
     return [p for p in [here, *below] if p.is_file() and describe(p)]
 
 
+def sheet_preset(sidecar: Path | None) -> str:
+    """The preset a sheet cuts with when none is chosen: its run.json's paper's (cutting.preset_for)."""
+    try:
+        return preset_for(RunInfo.read(sidecar).paper if sidecar else None)
+    except (OSError, ValueError, TypeError):
+        return preset_for(None)
+
+
 def describe(sidecar: Path) -> str | None:
     """One line for the menu; None when run.json can't be read."""
     try:
         i = RunInfo.read(sidecar)
     except (OSError, ValueError, TypeError):
         return None
-    return f"{i.name}: {i.cards} cards"
+    return f"{i.name}: {i.cards} cards" + (" (foil)" if i.paper == "holo" else "")
 
 
 def ask(where: Path, via: str, run: Path | None = None) -> Picked | None:
@@ -69,7 +77,7 @@ def ask(where: Path, via: str, run: Path | None = None) -> Picked | None:
     first = _select(
         "Cut:",
         [
-            Choice(f"Cut {sheet} · laminate · {via}", "default"),
+            Choice(f"Cut {sheet} · {sheet_preset(default.run)} · {via}", "default"),
             Choice("Choose run, preset, mode…", "choose"),
             Choice("Quit", "quit"),
         ],
@@ -83,11 +91,12 @@ def ask(where: Path, via: str, run: Path | None = None) -> Picked | None:
     plain = Choice(PLAIN, "")
     sheets = [*sheets, plain] if default.run else [plain, *sheets]
     run = _select("Sheet:", sheets)
-    preset = _select(
+    own = sheet_preset(Path(run) if run else None)
+    preset = _select(  # the sheet's own preset first, so Enter keeps it
         "Preset:",
         [
             Choice(f"{n}: force {p.force} · speed {p.speed} · depth {p.depth} · {p.passes} pass(es)", n)
-            for n, p in PRESETS.items()
+            for n, p in sorted(PRESETS.items(), key=lambda kv: kv[0] != own)
         ],
     )
     mode = _select("Mode:", [Choice(title, key) for key, title in MODES.items()])

@@ -57,7 +57,7 @@ def _pdf(path, pages=1):
     w.write(path)
 
 
-def make_run(parent, name="mydeck", duplex=False, pages=1):
+def make_run(parent, name="mydeck", duplex=False, pages=1, paper=None):
     folder = parent / name
     folder.mkdir(parents=True)
     _pdf(folder / f"{name}.pdf", pages)
@@ -70,6 +70,7 @@ def make_run(parent, name="mydeck", duplex=False, pages=1):
         proof_targets=True,
         pdf=f"{name}.pdf",
         duplex_pdf=f"{name}-duplex.pdf" if duplex else None,
+        paper=paper,
     )
     return info.write(folder)
 
@@ -101,7 +102,7 @@ def built(monkeypatch, proxies_root):
     def run_build(opts):
         seen.append(opts)
         name = build.TEST_SHEET_NAME if opts.test_mode else "newdeck"
-        sidecar = make_run(proxies_root, name, pages=2)
+        sidecar = make_run(proxies_root, name, pages=2, paper=opts.paper)
         return build.BuildResult(name, sidecar.parent, sidecar.parent / f"{name}.pdf", None, 0, 9)
 
     monkeypatch.setattr(build, "run_build", run_build)
@@ -138,7 +139,7 @@ def test_make_flows_into_print_and_cut_with_the_run_carried_along(
     )
     assert printed == [("newdeck.pdf", "glossy")]
     assert len(cuts) == 1
-    assert cuts[0]["run"] == proxies_root / "newdeck" / "run.json" and cuts[0]["preset"] == "laminate"
+    assert cuts[0]["run"] == proxies_root / "newdeck" / "run.json" and cuts[0]["preset"] is None
     assert "Print it now?" in asked.messages() and "Cut it now?" in asked.messages()
     # the cut menu's first question offers this run, not another
     cut_q = next(t for k, m, t in asked if m == "Cut:")
@@ -190,6 +191,22 @@ def test_the_test_sheet_asks_for_no_deck_and_prints_on_plain(monkeypatch, built,
     assert built[0].test_mode and built[0].deck is None
     assert "text" not in [k for k, _, _ in asked]
     assert printed == [("test-sheet.pdf", "plain")]
+
+
+def test_the_foil_box_builds_a_foil_run_that_prints_on_the_holo_queue_and_cuts_as_foil(
+    monkeypatch, built, printed, cuts, proxies_root
+):
+    asked = script(monkeypatch, "make", ["foil"], "decks/x.txt", True, True, True, "default", "quit")
+    start()
+    opts = built[0]
+    assert opts.foil and not opts.duplex_dfc and opts.paper == "holo"  # each face its own sticker
+    assert (
+        "Print newdeck.pdf (2 pages) on the holo queue ('Holographic sticker proxies')?" in asked.messages()
+    )
+    assert printed == [("newdeck.pdf", "holo")]
+    cut_q = next(t for k, m, t in asked if m == "Cut:")
+    assert cut_q[0].startswith("Cut newdeck: 9 cards (foil) · foil ·")
+    assert cuts[0]["preset"] is None  # cut_flow takes the sheet's, foil
 
 
 def test_a_build_that_fails_says_so_and_returns_to_the_menu(monkeypatch, capsys):

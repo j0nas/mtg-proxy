@@ -85,3 +85,10 @@ def test_latest_notes(tmp_path):
     (tmp_path / "new").mkdir()
     (tmp_path / "new" / NOTES_NAME).write_text("new")
     assert notes.latest_notes(tmp_path) == tmp_path / "new" / NOTES_NAME
+
+
+def test_foil_notes_skip_the_laminate_and_give_the_foil_blade():
+    text = notes.render(notes.NotesContext("f", 9, False, 1, today="2026-11-15", foil=True))
+    assert "holographic sticker paper" in text and "Laminate" not in text
+    assert "Force 7 · Speed 13 · Depth 2 · Passes 1" in text and "Thick Paper" in text
+    assert "each face is its own sticker" in text

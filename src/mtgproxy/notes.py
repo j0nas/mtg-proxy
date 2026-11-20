@@ -20,6 +20,7 @@ class NotesContext:
     duplex_dfc: bool
     dfc_count: int
     today: str = ""
+    foil: bool = False  # holographic sticker paper (make --foil): no laminate, a kiss cut, then a common
 
     def __post_init__(self) -> None:
         self.today = self.today or date.today().isoformat()
@@ -39,7 +40,44 @@ MAT = """\
    the edge)."""
 
 
+def render_foil(c: NotesContext) -> str:
+    foil = PRESETS["foil"]
+    faces = (
+        f"\n   {c.dfc_count} double-faced card(s): each face is its own sticker, one for each side of the common."
+        if c.dfc_count
+        else ""
+    )
+    return f"""# {c.name} — foil print & cut checklist
+
+Generated: {c.today} | 3x3 on A4 | registration: 3-mark | cards: {c.cards} | holographic sticker paper
+
+## Print
+{PRINT}
+2. One sheet of holographic sticker paper in the rear feeder, with the printer's **Thick Paper**
+   setting on and its drying time set to **Longer**. `mtg-proxy print --paper holo` (or the
+   wizard) sends it to the `Holographic sticker proxies` queue: Epson Ultra Glossy, High.{faces}
+3. Let the ink dry fully before touching the film. No laminating.
+
+## Cut (Cameo 5 Alpha)
+`cd` into this folder and run `mtg-proxy cut`: run.json says foil, so it kiss-cuts with the foil preset.
+1. Sheet on the mat **portrait, the black square top-left**, its top edge on the grid's top line and
+   its corner about **2.5 mm right** of the grid's corner: further left, the sensor can't reach the
+   paper beside the left marks and the run stops.
+2. **Force {foil.force} · Speed {foil.speed} · Depth {foil.depth} · Passes {foil.passes}**, through the film and
+   not the backing. On the first sheet choose "proof cut first" in the menu: it traces a printed
+   square's edge at this same blade. To look at it, lift the lid if you can; if you unload the mat
+   to peel the square, the run stops there (the sheet no longer lies where its marks were read),
+   and a rerun without the proof registers it again. Square peels off cleanly, backing whole: `y`.
+   Film torn or not cut through: `q`, then `--force 8` or more.
+
+## Finish
+Peel each card and line it up with a bulk common's edges before pressing it down.
+"""
+
+
 def render(c: NotesContext) -> str:
+    if c.foil:
+        return render_foil(c)
     dfc_note = ""
     if c.dfc_count > 0:
         dfc_note = (

@@ -2,8 +2,8 @@
 
 Every sheet has 3-mark registration (the square top-left, L marks top-right and bottom-left),
 scanned with TB123. The mark frame comes from the same layouts.json that placed the marks in the
-PDF, and the blade settings come from a preset (laminate or plain paper), each overridable by a
-plain flag.
+PDF, and the blade settings come from a preset (laminate, plain paper or foil), the sheet's by default
+(``preset_for``), each overridable by a plain flag.
 """
 
 from __future__ import annotations
@@ -27,6 +27,12 @@ class Preset:
     speed: int
     depth: int
     passes: int
+    # The proof cut on a printed target uses this preset's own blade (one pass) instead of
+    # cameo.proof.BLADE's light score: a kiss cut's proof is the test of its depth.
+    proof_at_job_blade: bool = False
+    # The proof cut crosses its square with an X (cameo.proof.Target.cuts); a kiss cut's proof leaves
+    # it out, so the square peels off whole and shows the edge the cards will have.
+    proof_cross: bool = True
 
 
 PRESETS = {
@@ -35,7 +41,26 @@ PRESETS = {
     "laminate": Preset(force=20, speed=25, depth=5, passes=3),
     # Plain copier paper, cut cleanly through (calibration sheets and deck-box outlines, 2026-09-28).
     "paper": Preset(force=10, speed=5, depth=1, passes=1),
+    # Foil: holographic sticker paper, kiss-cut through the holo film and adhesive and not the backing,
+    # so each card peels off to go on a bulk common. Started from Silhouette Studio's "Sticker Paper,
+    # Holographic" for the Cameo 5 Alpha with the AutoBlade (force 14, speed 13, blade_depth 0.2 = depth
+    # 2, 1 pass; Jonas's user materials on the PC). The first foil sheet (foil-staples, 2026-11-15) cut
+    # cleanly at 14 but flaked a little ink along the cards' edges, and proof squares on its margin
+    # still cut through the film at force 10 and at 7, the edge clean at 7, though that square needed
+    # a slight tug to come free: 7 is near the least that cuts. Proof cuts trace a square (no X) at
+    # this same blade, so a sheet's proof shows whether the film peels and leaves the backing whole.
+    "foil": Preset(force=7, speed=13, depth=2, passes=1, proof_at_job_blade=True, proof_cross=False),
 }
+
+# The sheet's paper (run.json) -> its preset when --preset isn't given.
+PRESET_FOR_PAPER = {"holo": "foil"}
+
+
+def preset_for(paper: str | None) -> str:
+    """The blade a sheet printed on ``paper`` cuts with: foil for holographic sticker paper,
+    laminate for everything else (glossy sheets, and the test sheet, both laminated)."""
+    return PRESET_FOR_PAPER.get(paper or "", "laminate")
+
 
 # Where a laminated proxy sheet's paper corner lies on the loaded mat, (right, down) mm from the
 # grid's corner, unless --paper-at says: the middle of where the cut logs found them. On 2026-10-28,
@@ -46,6 +71,12 @@ PRESETS = {
 # 2026-10-26) lay at the grid's corner, 5 mm off this: the hunt finds those. Plain paper
 # (--preset paper) lies on the grid's corner. The deck box passes its own (formeriet job.ts).
 LAMINATED_AT = (5.0, -1.75)
+# Where an unlaminated foil sheet is laid: 2.5 mm right of the grid's corner. On the corner itself the
+# 3x3's left marks, 3.5 mm in, leave the blank-paper readings outside them at the sensor's reach
+# (reading.HEAD_LEFT_LIMIT, 1.7 mm in on the mat): on 2026-11-15 the first foil sheet, tacked down
+# on the corner, stopped there on two of six loads, the mat going in up to 0.74 mm further left on
+# a reload.
+FOIL_AT = (2.5, 0.0)
 
 # The blade for an SVG's scored lines (cameo.geometry.SCORE): one pass before the cut, meant to mark
 # a laminated sheet's top film along each fold and leave the sheet whole. A guess, untested on the
@@ -90,6 +121,7 @@ class CutOptions:
     proof_target_size: float | None = None
     proof_from: int = 0
     proof_blade: tuple[int, int, int] | None = None  # (force, speed, depth); None = cameo.proof.BLADE
+    proof_cross: bool = True  # an X across each proof square as well as its edge
     scan_starts: list[tuple[float, float]] | None = None  # (top, left) mm; None = the driver's defaults
     paper_at: tuple[float, float] = (
         0.0,
@@ -221,7 +253,7 @@ def sheet_targets(o: CutOptions, geom: layout.Geometry) -> tuple:
         centres, size = geom.proof_targets, o.proof_target_size or geom.proof_target_mm or proof.SIZE
     else:
         centres, size = (), proof.SIZE
-    return proof.targets(centres, size)[o.proof_from :]
+    return proof.targets(centres, size, o.proof_cross)[o.proof_from :]
 
 
 def no_targets(o: CutOptions, geom: layout.Geometry) -> str:
@@ -441,12 +473,13 @@ def wait_for_next_sheet(o: CutOptions, interrupted) -> bool:
 
 PROOF_HELP = """\
 cut-proxies: the proof cut is down: the blade has traced the edge of the small black square named
-above, one of the proof targets printed with the marks, and crossed it with an X corner to corner.
-Lift the lid and look at it (tilt it toward a light: the X shows as light lines across the black).
-Registered right, the cut runs along the edge of the black all round and the X's arms end in the
-square's corners. Registered off, white shows between the black and the cut on one side, the cut
-runs inside the black on the other, and the X crosses off the square's middle: the width of the
-white is how far off, its side which way.
+above, one of the proof targets printed with the marks, and unless --no-proof-cross (the foil
+preset's default) crossed it with an X corner to corner. Lift the lid and look at it (tilt it
+toward a light: an X shows as light lines across the black). Registered right, the cut runs along
+the edge of the black all round and an X's arms end in the square's corners. Registered off, white
+shows between the black and the cut on one side and the cut runs inside the black on the other:
+the width of the white is how far off, its side which way. A kiss cut's square peels off: look at
+its edge and the backing under it.
     y  the cut on the square's edge all round: cut the job
     r  white between the black and the cut: scan the marks again (the next round cuts the next square)
     q  stop: nothing more is cut, the head goes home"""

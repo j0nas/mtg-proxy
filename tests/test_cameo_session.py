@@ -740,3 +740,20 @@ def test_going_home_on_a_paused_machine_gives_up_instead_of_waiting_for_ever(mon
     s.touched = True
     driver.wrap_up(s, t, session.SessionLog(None, echo=said.append))
     assert any("switch it off and on" in m for m in said)
+
+
+def test_bluetooth_switched_off_says_so_in_plain_words(monkeypatch):
+    """2026-11-15: with the Mac's Bluetooth off, a cut ended in a bleak traceback."""
+    import bleak
+    from bleak.exc import BleakBluetoothNotAvailableError, BleakBluetoothNotAvailableReason
+
+    from mtgproxy.cameo.transport import BleTransport, TransportError
+
+    async def off(*a, **k):
+        raise BleakBluetoothNotAvailableError(
+            "Bluetooth device is turned off", BleakBluetoothNotAvailableReason.POWERED_OFF
+        )
+
+    monkeypatch.setattr(bleak.BleakScanner, "find_device_by_filter", off)
+    with pytest.raises(TransportError, match=r"Bluetooth is unavailable.*blueutil -p 1.*--usb"):
+        BleTransport.connect("CAMEO 5 ALPHA", lambda *a, **k: None, timeout=1)

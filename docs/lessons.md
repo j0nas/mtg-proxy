@@ -69,6 +69,42 @@ problem. Measure first; then build for what was measured.
 is safe (the process has already loaded it), so the fix that makes the next failure cost seconds
 goes in first, and a run that is going to fail is stopped and restarted on it.
 
+## 2026-11-15: the first foil sheet
+
+The first sheet on holographic sticker paper (`foil-staples`), kiss-cut with the new `foil` preset.
+All nine cards cut on the first full run, but on the way:
+
+- **The proof's `y` would have cut through a stale fit.** Jonas unloaded the mat to peel the proof
+  square, reloaded it and said go. The prompt would have taken `y` and cut the cards through the fit
+  read before the reload, and the reload had put the mat in 0.74 mm further left. First thought: none;
+  it was caught only because the reload was mentioned. The class: the operator's answer is trusted
+  without checking that the machine's state it rests on still holds. Changed: the proof wait polls the
+  status every second and once more after the answer, and a mat that went out turns `y` and `r` into a
+  stop that says to rerun (`driver.prove`, test in `test_cameo_proof.py`).
+- **Two loads in six stopped before cutting with "the sensor can't reach 1.28 mm in on the mat".**
+  First thought: Jonas had loaded the mat too far left. Partly, but the class is the default
+  placement: an unlaminated sheet laid on the grid's corner puts the 3x3's left marks, 3.5 mm in, so
+  that the blank paper read 2 mm outside them sits at the sensor's reach (1.7 mm in on the mat), and
+  the mat goes in a few tenths of a millimetre differently each time. Laminated sheets lie about 5 mm
+  right, in their pouch, and never came near it. The 17.5 mm head limit stays: past it the head may
+  hit the frame and lose its place. Changed: a foil sheet is expected 2.5 mm right of the grid's
+  corner (`cutting.FOIL_AT`), and the cut notes say to lay it there.
+- **A bleak traceback when the Mac's Bluetooth was off.** Now a plain message that says to switch it on
+  (`blueutil -p 1`) or use `--usb`.
+- **Ink flaked a little along the cards' edges** at Silhouette Studio's holographic sticker setting,
+  force 14, speed 13, depth 2. Proof squares on the margin, outline only (the X split them into
+  triangles that showed nothing), still cut through the film at force 10 and at 7, the edge cleanest
+  at 7. The preset is now force 7. Not yet known whether that frees whole cards as easily as a 3 mm
+  square, which needed a slight tug.
+- **The marks read 203.1-203.5 mm apart across**, against 203 printed and 203.01-203.02 on the
+  laminated test sheet. Within the fit's 1.5 %, and the cards came out right. Not explained yet: the
+  paper may print a little wider, or the bare holo film may show the legs' edges differently.
+
+The lesson: an artifact's contract (here, the fit of a loaded sheet) holds only while the state it was
+measured in holds, so a step that waits on a person has to check that state again before it acts. And
+a new medium brings its own placement, not only its own blade: check where its marks fall against the
+machine's reach before the first sheet.
+
 ## 2026-11-15: a wizard box printed twelve sheets of card backs
 
 Seen: the kotis deck (106 cards, no double-faced ones) built from the wizard printed 24 pages on

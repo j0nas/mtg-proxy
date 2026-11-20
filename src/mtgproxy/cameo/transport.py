@@ -140,7 +140,15 @@ class BleTransport:
                 seen[dev.address] = n
             return bool(n) and (n == want or want in n)
 
-        dev = await BleakScanner.find_device_by_filter(match, timeout=timeout)
+        from bleak.exc import BleakBluetoothNotAvailableError
+
+        try:
+            dev = await BleakScanner.find_device_by_filter(match, timeout=timeout)
+        except BleakBluetoothNotAvailableError as e:  # 2026-11-15: a traceback, with the Mac's Bluetooth off
+            raise TransportError(
+                f"this computer's Bluetooth is unavailable ({e}): switch it on (on a Mac, `blueutil -p 1`) "
+                "or cut over the cable with --usb"
+            ) from e
         if dev is None:
             raise TransportError(f"no Bluetooth LE device named like {name!r} (is the Cameo on and free?)")
         self.log("ble_found", name=dev.name, address=dev.address)

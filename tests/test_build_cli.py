@@ -369,3 +369,37 @@ def test_there_is_no_card_back_option():
 def test_cli_trim_parsing():
     r = runner.invoke(app, ["make", "x.txt", "--trim", "Temple Garden:9", "--dry-run"])
     assert r.exit_code == 1 and "between 0 and 3" in r.output
+
+
+@pytest.mark.parametrize(
+    ("opts", "why"),
+    [
+        (dict(test_mode=True, duplex_dfc=False), "--foil cannot be combined with --test"),
+        (dict(deck="x.txt", defer_partial=True, duplex_dfc=False), "the backlog prints on glossy"),
+        (dict(deck="x.txt"), "a foil sheet is single-sided"),
+    ],
+)
+def test_a_foil_build_refuses_what_a_sticker_sheet_cant_be(opts, why):
+    with pytest.raises(build.BuildError, match=why):
+        build.run_build(BuildOptions(foil=True, **opts))
+
+
+def test_a_runs_paper_comes_from_run_json_and_older_runs_by_name():
+    from mtgproxy.sidecar import RunInfo
+
+    def info(name, paper=None):
+        return RunInfo(name, cards=9, generated="2026-11-15", paper=paper)
+
+    assert build.paper_for(info("deck", "holo")) == "holo"
+    assert build.paper_for(info("deck")) == "glossy"
+    assert build.paper_for(info(build.TEST_SHEET_NAME)) == "plain"
+    assert BuildOptions(foil=True).paper == "holo" and BuildOptions(test_mode=True).paper == "plain"
+    assert BuildOptions().paper == "glossy"
+
+
+def test_redo_refuses_a_foil_run_since_the_backlog_prints_on_glossy(tmp_path):
+    from mtgproxy.sidecar import RunInfo
+
+    RunInfo("foily", cards=9, generated="2026-11-15", paper="holo").write(tmp_path)
+    r = runner.invoke(app, ["redo", "Sol Ring", "--run", str(tmp_path)])
+    assert r.exit_code == 1 and "foily is a foil sheet" in r.output

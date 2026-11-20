@@ -24,7 +24,7 @@ mtg-proxy backlog   show the queue, `backlog build` prints it as one sheet, `bac
 mtg-proxy offset    store the printer's duplex offset once
 mtg-proxy notes     show the newest CUT-NOTES.md in ~/Desktop/proxies
 mtg-proxy cache     Scryfall image cache stats / --clear (~/.cache/mtg-proxy)
-mtg-proxy print     print a PDF on the PC's Epson queues (--paper plain|glossy|premium, --dry-run)
+mtg-proxy print     print a PDF on the PC's Epson queues (--paper plain|glossy|premium|holo, --dry-run)
 mtg-proxy doctor    check engine and data files
 ```
 
@@ -86,6 +86,7 @@ and clips the page.
 ```sh
 mtg-proxy print deck/deck.pdf                       # glossy queue
 mtg-proxy print deck/deck.pdf --paper premium       # Premium glossy paper (220 gsm)
+mtg-proxy print deck/deck.pdf --paper holo          # holographic sticker paper, for foils
 mtg-proxy print deck/deck.pdf --paper plain --dry-run   # copy to the PC, show the command, stop
 ```
 
@@ -218,6 +219,39 @@ printed double-sided (2026-10-26) had its backs slightly off with the offset mea
 landscape calibration sheet; check against a light before laminating a batch, and remeasure the
 offset if it is off.
 
+### Foils
+
+`mtg-proxy make <deck> --foil` (or the wizard's "foil" box) builds a sheet for holographic sticker
+paper. Each card is printed on the holo film, kiss-cut, peeled off and stuck on a bulk common.
+The run's `run.json` records `"paper": "holo"`, and the steps after the build follow it: printing
+goes to the PC's `Holographic sticker proxies` queue (Epson Ultra Glossy, High;
+`docs/printer-presets/`), and `mtg-proxy cut` takes the `foil` preset. Set the printer's own Thick
+Paper setting and its longer drying time on its panel before printing. A double-faced card's faces
+print as two stickers, one for each side of the common. `--foil` refuses `--defer-partial` and
+`redo` refuses a foil run, because the backlog prints on glossy: put foil reprints in a decklist of
+their own.
+
+The foil preset started from Silhouette Studio's "Sticker Paper, Holographic" for the Cameo 5 Alpha
+with the AutoBlade, from the user materials Studio saved on the PC: force 14, speed 13, blade depth
+0.2 mm (depth 2 here), one pass. The first foil sheet (2026-11-15) cut cleanly at that, but a little
+ink flaked along the cards' edges. Proof squares on its margin still cut through the film at force
+10 and 7, with the cleanest edge at 7, though that square needed a slight tug to come free, so 7 is
+near the least that cuts: if a full sheet's cards don't release, give `--force 8`. Its proof cuts use the job's own blade, so on the first sheet
+"proof cut first" tests it: the proof traces the target's edge without the X, so the square peels
+off whole, and its edge and the backing under it show what the cards will get.
+The debug sensor registers on the bare holo film as it does on laminate: on the first sheet every
+load found all three marks in about 13 s and every check passed. It read the marks 203.1-203.5 mm
+apart across against 203 printed, where the laminated test sheet reads 203.01-203.02; the cuts came
+out right, and the cause isn't known.
+
+Lay a foil sheet with its top edge on the grid's top line and its corner about 2.5 mm right of the
+grid's corner, where the run expects it (`cutting.FOIL_AT`). On the corner itself the 3x3's left
+marks put the blank paper read beside them at the edge of the sensor's reach, and depending on how
+the mat goes in, the run stops before cutting ("the sensor can't reach … Put the paper further
+right"). The pouch keeps laminated sheets clear of this. A mat unloaded while a proof cut waits
+(to peel the square) stops the run there: the sheet no longer lies where its marks were read, and a
+rerun registers it again.
+
 ## Reprints and leftovers
 
 A deck rarely ends clean: a miscut or two, a card that laminated badly, and a last page that
@@ -279,7 +313,7 @@ printed.
 
 Run bare at a terminal, `mtg-proxy cut` asks first. Enter cuts the default: this folder's
 `run.json`, else the newest run in `~/Desktop/proxies`, or a plain 3x3 sheet when there is none,
-with the laminate preset over Bluetooth LE. "Choose…" picks
+with the sheet's preset (`foil` for a foil run, else `laminate`) over Bluetooth LE. "Choose…" picks
 another run, the preset, and
 cut, proof first, dry run or probe. `--usb` and `--ble-name` keep the menu; any other flag, or a
 pipe, skips it and cuts as told.
@@ -310,8 +344,10 @@ Settings, AutoBlade only (the Kraft blade can't turn the 3 mm corners):
 |---|---|---|---|---|
 | `laminate` (default): 130–135 gsm glossy in 80 µm pouches | 20 | 25 | 5 | 3 |
 | `paper`: plain copier paper, cut through | 10 | 5 | 1 | 1 |
+| `foil`: holographic sticker paper, kiss-cut (see Foils) | 7 | 13 | 2 | 1 |
 
-Explicit flags override the preset.
+A run's `run.json` picks the preset when `--preset` isn't given: `foil` for a `--foil` run,
+`laminate` for everything else. Explicit flags override the preset.
 
 An `--svg` can mark lines to score: a path stroked `#00ff00` (its own stroke or its group's, in
 any spelling of the colour, `#0f0` or `lime` too) is cut in one pass with a light blade, meant to

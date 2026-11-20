@@ -27,6 +27,7 @@ QUEUES = {
     "plain": "ET-8550 Series(Network)",
     "glossy": "Glossy photo paper proxies",
     "premium": "Premium glossy paper",
+    "holo": "Holographic sticker proxies",
 }
 # paper name -> (short side, long side) in mm
 PAPERS = {"A4": (210.0, 297.0), "A3": (297.0, 420.0), "letter": (215.9, 279.4)}
@@ -145,7 +146,7 @@ def print_pdf(
 ) -> Result:
     """Copy ``pdf`` to the PC and print it on the ``kind`` queue; raises PrintError."""
     if kind not in QUEUES:
-        raise PrintError(f"unknown paper '{kind}' (plain, glossy, premium)")
+        raise PrintError(f"unknown paper '{kind}' (plain, glossy, premium, holo)")
     if not pdf.is_file():
         raise PrintError(f"{pdf} not found")
     queue = QUEUES[kind]

@@ -105,6 +105,7 @@ def test_dry_run_copies_but_never_prints(tmp_path):
         ("plain", "ET-8550 Series(Network)"),
         ("glossy", "Glossy photo paper proxies"),
         ("premium", "Premium glossy paper"),
+        ("holo", "Holographic sticker proxies"),
     ],
 )
 def test_queue_mapping_and_print_command(tmp_path, kind, queue):

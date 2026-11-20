@@ -74,6 +74,7 @@ class Target:
     y: float
     size: float = SIZE
     number: int = 1
+    cross: bool = True  # the X across the square; without it the square comes away whole, for a peel test
 
     def outline(self) -> Polyline:
         """The square's edge, closed, clockwise from its top-left corner."""
@@ -86,7 +87,10 @@ class Target:
         then top-right to bottom-left (neither starting where the edge does, so no stroke begins with
         the edge's own first move). A groove along the edge of the black is hard to see; across the
         black it shows as a light line (2026-10-26), and where the X crosses against the square's
-        middle is a second check: registered right, its arms end in the square's corners."""
+        middle is a second check: registered right, its arms end in the square's corners. Without
+        ``cross``, only the edge: a kiss cut's square then peels off in one piece (2026-11-15, foil)."""
+        if not self.cross:
+            return (self.outline(),)
         h = self.size / 2
         x0, y0, x1, y1 = self.x - h, self.y - h, self.x + h, self.y + h
         return (self.outline(), Polyline(((x1, y1), (x0, y0))), Polyline(((x1, y0), (x0, y1))))
@@ -95,9 +99,11 @@ class Target:
         return f"target {self.number} of {of} ({self.x:g}, {self.y:g} mm)"
 
 
-def targets(centres: Iterable[tuple[float, float]], size: float = SIZE) -> tuple[Target, ...]:
+def targets(
+    centres: Iterable[tuple[float, float]], size: float = SIZE, cross: bool = True
+) -> tuple[Target, ...]:
     """A sheet's targets from their centres, numbered in the order given."""
-    return tuple(Target(x, y, size, n) for n, (x, y) in enumerate(centres, 1))
+    return tuple(Target(x, y, size, n, cross) for n, (x, y) in enumerate(centres, 1))
 
 
 def _cross(o: Point, a: Point, b: Point) -> float:

@@ -27,9 +27,10 @@ from .testcards import write_test_cards
 TEST_SHEET_NAME = "test-sheet"
 
 
-def paper_for(run_name: str) -> str:
-    """The print queue for a run: plain paper for the ink-light test sheet, glossy for real sheets."""
-    return "plain" if run_name == TEST_SHEET_NAME else "glossy"
+def paper_for(info: RunInfo) -> str:
+    """The print queue for a run: what its run.json says; for runs from before it said, plain paper
+    for the ink-light test sheet and glossy for real sheets."""
+    return info.paper or ("plain" if info.name == TEST_SHEET_NAME else "glossy")
 
 
 class BuildError(Exception):
@@ -58,6 +59,12 @@ class BuildOptions:
     defer_partial: bool = False  # partial last page of each sheet → BACKLOG.txt instead of the PDF
     front_only: list[str] = field(default_factory=list)  # DFC names to print as a single-sided front
     images: Path | None = None  # --images: your own card images, printed instead of fetching (local.py)
+    foil: bool = False  # --foil: for holographic sticker paper (the holo queue, the foil cut preset)
+
+    @property
+    def paper(self) -> str:
+        """The printing.QUEUES key this run's sheets are for, recorded in run.json."""
+        return "plain" if self.test_mode else "holo" if self.foil else "glossy"
 
     def recorded(self) -> dict:
         """What manifest.rebuild needs to re-derive the sheets of this run later."""
@@ -421,6 +428,14 @@ def run_build(opts: BuildOptions) -> BuildResult:
         raise BuildError("--tokens-only cannot be combined with --test")
     if opts.images and opts.test_mode:
         raise BuildError("--images cannot be combined with --test")
+    if opts.foil and opts.test_mode:
+        raise BuildError("--foil cannot be combined with --test")
+    # The backlog prints on glossy, and holographic sticker paper takes one side: a foil card belongs
+    # on a foil sheet, both faces of a double-faced one as their own stickers.
+    if opts.foil and opts.defer_partial:
+        raise BuildError("--foil cannot be combined with --defer-partial: the backlog prints on glossy")
+    if opts.foil and opts.duplex_dfc:
+        raise BuildError("a foil sheet is single-sided: give --split-faces with --foil")
     engine.ensure_engine()
 
     deck = resolve_deck(opts)
@@ -511,6 +526,7 @@ def run_build(opts: BuildOptions) -> BuildResult:
                 cards=printed,
                 duplex_dfc=opts.duplex_dfc,
                 dfc_count=pdfs.dfc_count,
+                foil=opts.foil,
             )
         )
     )
@@ -532,6 +548,7 @@ def run_build(opts: BuildOptions) -> BuildResult:
         sheets={k: v.as_dict() for k, v in sheets.items()},
         code=freshness.versions(),
         marks=layout.printed_marks(),
+        paper=opts.paper,
     ).write(out)
 
     result = BuildResult(name, out, pdfs.pdf, pdfs.duplex_pdf, pdfs.dfc_count, printed)
@@ -545,7 +562,7 @@ def run_build(opts: BuildOptions) -> BuildResult:
     # sent — manual duplex on photo paper is a hands-on job.
     if opts.print_mode and pdfs.pdf:
         try:
-            printing.print_pdf(pdfs.pdf, paper_for(name), say=log)
+            printing.print_pdf(pdfs.pdf, opts.paper, say=log)
         except printing.PrintError as e:
             warn(f"warning: print failed: {e}. Print {pdfs.pdf} with: mtg-proxy print {pdfs.pdf}")
         if pdfs.duplex_pdf:

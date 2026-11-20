@@ -219,3 +219,19 @@ def test_no_answer_on_the_terminal_means_stop():
     t = machine()
     with pytest.raises(session.CutError, match="stopped at the proof cut"):
         driver.cut(job(), t, log(), starts(), closed)
+
+
+@pytest.mark.parametrize("reply", ["y", "r"])
+def test_a_mat_that_went_out_while_the_proof_waited_cuts_nothing_more(reply):
+    """2026-11-15: the foil sheet was unloaded to peel its proof square and went back in 0.74 mm off;
+    y would have cut the job through the old fit, and r rescans without the reload's origin."""
+    t = machine()
+
+    def unload_and_reload(round_, rescan):  # out, and back in by the time they answer
+        t.answers[b"\x1b\x05"] = [b"2\x03", b"0\x03"]
+        return reply
+
+    with pytest.raises(session.CutError, match="the mat went out while the proof cut waited"):
+        driver.cut(job(), t, log(), starts(), unload_and_reload)
+    out = t.sent.decode("latin1")
+    assert T1 in out and JOB not in out and out.count("TB123,") == 1

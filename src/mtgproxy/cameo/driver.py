@@ -1034,8 +1034,17 @@ def prove(
     s.send(protocol.move(*f.machine(f.inset + f.width / 2, f.top)))
     s.wait_ready(60)
     log("proof", round=round_, target=target.number, x=target.x, y=target.y, size=target.size)
-    answer = ask(s, confirm, round_ - 1, rescan)
-    log("proof_answer", round=round_, answer=answer)
+    answer, went_out = ask(s, confirm, round_ - 1, rescan)
+    log("proof_answer", round=round_, answer=answer, mat_went_out=went_out)
+    if went_out and answer in ("y", "r"):
+        # The fit belongs to the mat as it lay: reloaded, the sheet sits elsewhere, and y would cut the
+        # job where it was. On 2026-11-15 the foil sheet was unloaded to peel its proof square and
+        # reloaded 0.74 mm off, and y was nearly answered.
+        raise CutError(
+            "the mat went out while the proof cut waited, so the sheet no longer lies where the marks were "
+            f"read: nothing else was cut. Rerun to register it again (proof targets cut so far: {target.number}; "
+            f"--proof-from {target.number} for another proof, or no --proof when this one looked right)"
+        )
     if answer == "y":
         return True
     if answer == "r" and rescan:
@@ -1044,10 +1053,13 @@ def prove(
     raise CutError("stopped at the proof cut: nothing else was cut")
 
 
-def ask(s: Session, confirm: Confirm, attempt: int, rescan: bool, poll_s: float = 10.0) -> str:
-    """The operator's answer; meanwhile a status poll every ``poll_s`` s, so the machine hears
-    from us while they look. No answer (stdin closed) means stop."""
+def ask(s: Session, confirm: Confirm, attempt: int, rescan: bool, poll_s: float = 1.0) -> tuple[str, bool]:
+    """The operator's answer, and whether the mat went out meanwhile. A status poll every ``poll_s``
+    s keeps the machine hearing from us while they look and catches an unload (status "unloaded")
+    even when the mat is back in by the time they answer; the status is read once more after the
+    answer. No answer (stdin closed) means stop."""
     answer: list[str] = []
+    went_out = False
 
     def wait() -> None:
         with contextlib.suppress(Exception):  # EOF on stdin, a closed terminal: treated as q
@@ -1058,8 +1070,9 @@ def ask(s: Session, confirm: Confirm, attempt: int, rescan: bool, poll_s: float 
     while th.is_alive():
         th.join(poll_s)
         if th.is_alive():
-            s.status()
-    return answer[0] if answer else "q"
+            went_out |= s.status() == "unloaded"
+    went_out |= s.status() == "unloaded"
+    return (answer[0] if answer else "q"), went_out
 
 
 def probe(frame: Frame, t: Transport, log: SessionLog, starts: list[tuple[float, float]]) -> dict:

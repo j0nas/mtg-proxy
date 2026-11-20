@@ -75,6 +75,9 @@ def make() -> None:
             choices=[
                 Choice("include basic lands", "basics"),
                 Choice("plain frames (default prefers showcase, extended and full art)", "plain"),
+                Choice(
+                    "foil: holographic sticker paper (holo queue, kiss-cut, faces as own stickers)", "foil"
+                ),
                 Choice("test gauge sheet instead of a deck (no Scryfall)", "test"),
             ],
         )
@@ -93,6 +96,8 @@ def make() -> None:
             fancy_art="plain" not in picked,
             include_basics="basics" in picked,
             test_mode="test" in picked,
+            foil="foil" in picked,
+            duplex_dfc="foil" not in picked,
         )
     )
     if result is not None:
@@ -127,7 +132,7 @@ def print_sheet(run: Path | None = None) -> None:
     pdf = sheets[0][1]
     if len(sheets) > 1:
         pdf = Path(_ask(questionary.select("Which PDF?", choices=[Choice(t, str(p)) for t, p in sheets])))
-    paper = build.paper_for(info.name)
+    paper = build.paper_for(info)
     queue = printing.QUEUES[paper]
     if pdf.name == info.duplex_pdf:
         typer.echo("This is the duplex sheet: print it with manual duplex, long-edge flip.")

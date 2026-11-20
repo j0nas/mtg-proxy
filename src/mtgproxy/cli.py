@@ -68,8 +68,9 @@ def parse_paper_at(value: str) -> tuple[float, float]:
 
 def default_paper_at(preset: str) -> tuple[float, float]:
     """Where the paper is expected without --paper-at: a laminated sheet where the cut logs found
-    them (cutting.LAMINATED_AT), plain paper on the grid's corner."""
-    return cutting.LAMINATED_AT if preset == "laminate" else (0.0, 0.0)
+    them (cutting.LAMINATED_AT), a foil sheet where it should be laid (cutting.FOIL_AT), plain paper
+    on the grid's corner."""
+    return {"laminate": cutting.LAMINATED_AT, "foil": cutting.FOIL_AT}.get(preset, (0.0, 0.0))
 
 
 def parse_target(value: str) -> tuple[float, float]:
@@ -189,8 +190,19 @@ def make(
     test: Annotated[
         bool, typer.Option("--test", help="ink-light placeholder gauge sheet, no Scryfall")
     ] = False,
+    foil: Annotated[
+        bool,
+        typer.Option(
+            "--foil",
+            help="for holographic sticker paper: printed on the holo queue, kiss-cut with the foil preset, "
+            "each double-faced card's faces as their own stickers",
+        ),
+    ] = False,
     print_: Annotated[
-        bool, typer.Option("--print", help="print the PDF on the PC (glossy queue; plain for --test)")
+        bool,
+        typer.Option(
+            "--print", help="print the PDF on the PC (glossy queue; holo for --foil, plain for --test)"
+        ),
     ] = False,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="resolve the decklist and stop (no Scryfall, no PDF)")
@@ -240,7 +252,7 @@ def make(
         fmt=fmt,
         out_parent=out or out_root(),
         board=board,
-        duplex_dfc=not split_faces,
+        duplex_dfc=not (split_faces or foil),
         fancy_art=not plain,
         alt_names=alt_names,
         include_basics=basics,
@@ -255,6 +267,7 @@ def make(
         trims=trim_specs,
         defer_partial=defer_partial,
         images=images.resolve() if images else None,  # absolute: run.json keeps it for rebuilds
+        foil=foil,
     )
     build_and_report(opts)
 
@@ -320,13 +333,15 @@ def cut(
         Path | None, typer.Option("--run", help="run.json, its folder, or a run name in ~/Desktop/proxies")
     ] = None,
     preset: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--preset",
             help="blade settings: laminate (force 20, speed 25, depth 5, 3 passes) | "
-            "paper (force 10, speed 5, depth 1, 1 pass); the flags below override",
+            "paper (force 10, speed 5, depth 1, 1 pass) | foil (force 7, speed 13, depth 2, 1 pass: kiss-cuts "
+            "holographic sticker paper); default: the sheet's, foil for a --foil run, else laminate. "
+            "The flags below override",
         ),
-    ] = "laminate",
+    ] = None,
     force: Annotated[int | None, typer.Option(min=1, max=40)] = None,
     speed: Annotated[int | None, typer.Option(min=1, max=30)] = None,
     depth: Annotated[int | None, typer.Option(min=0, max=10, help="AutoBlade depth")] = None,
@@ -471,7 +486,16 @@ def cut(
         typer.Option(
             "--proof-blade",
             metavar="FORCE,SPEED,DEPTH",
-            help="the proof cut's blade, one pass (default 10,5,2: scores laminate, nowhere near through)",
+            help="the proof cut's blade, one pass (default 10,5,2: scores laminate, nowhere near through; "
+            "the job's own blade with the foil preset)",
+        ),
+    ] = None,
+    proof_cross: Annotated[
+        bool | None,
+        typer.Option(
+            "--proof-cross/--no-proof-cross",
+            help="cross each proof square with an X as well as tracing its edge (default: on, off with the "
+            "foil preset, whose square peels off whole)",
         ),
     ] = None,
     scan_start: Annotated[
@@ -509,7 +533,7 @@ def cut(
     if scan:
         raise typer.Exit(cutting.ble_scan())
     _fresh(allow_stale)
-    if preset not in cutting.PRESETS:
+    if preset is not None and preset not in cutting.PRESETS:
         fail(f"--preset must be one of {', '.join(cutting.PRESETS)}, got {preset!r}")
     plain = False
     if _cut_menu_wanted(ctx):
@@ -538,7 +562,7 @@ def cut(
 def cut_flow(
     run: Path | None = None,
     plain: bool = False,
-    preset: str = "laminate",
+    preset: str | None = None,
     force: int | None = None,
     speed: int | None = None,
     depth: int | None = None,
@@ -567,12 +591,12 @@ def cut_flow(
     proof_target_size: float | None = None,
     proof_from: int = 0,
     proof_blade: str | None = None,
+    proof_cross: bool | None = None,
     scan_start: list[str] | None = None,
     paper_at: str | None = None,
 ) -> None:
     """Cut a sheet and then watch the mat for the next, as `cut` does once its menu is answered. The
     defaults are `cut`'s (tests/test_cutting.py checks they agree). Ends in typer.Exit."""
-    blade = cutting.PRESETS[preset]
     info: RunInfo | None = None
     sidecar = None if plain else find_sidecar(run)
     if sidecar is not None:
@@ -592,10 +616,17 @@ def cut_flow(
         fail(f"no run.json at {run}")
     elif not plain:
         typer.echo("cut-proxies: no run.json in the current directory — using flags/defaults", err=True)
+    if preset is None:
+        preset = cutting.preset_for(info.paper if info else None)
+        if info and info.paper:
+            typer.echo(f"cut-proxies: preset {preset}, for the sheet's {info.paper} paper")
+    blade = cutting.PRESETS[preset]
+    force, speed, depth = (blade.force if force is None else force, blade.speed if speed is None else speed,
+                           blade.depth if depth is None else depth)  # fmt: skip
     o = cutting.CutOptions(
-        force=blade.force if force is None else force,
-        speed=blade.speed if speed is None else speed,
-        depth=blade.depth if depth is None else depth,
+        force=force,
+        speed=speed,
+        depth=depth,
         passes=blade.passes if passes is None else passes,
         pass_by_pass=pass_by_pass,
         scores=not no_scores, score_force=score_force, score_speed=score_speed, score_depth=score_depth,
@@ -607,7 +638,9 @@ def cut_flow(
         probe=probe, sense=sense, diagnose=diagnose, check=not no_check, register=register or ("scan" if no_check else "sensor"), proof=proof, scan_starts=[parse_start(v) for v in scan_start or []] or None,
         proof_targets=[parse_target(v) for v in proof_target] if proof_target else None,
         proof_target_size=proof_target_size, proof_from=proof_from,
-        proof_blade=parse_blade(proof_blade) if proof_blade else None,
+        proof_blade=parse_blade(proof_blade) if proof_blade
+        else (force, speed, depth) if blade.proof_at_job_blade else None,
+        proof_cross=blade.proof_cross if proof_cross is None else proof_cross,
         paper_at=parse_paper_at(paper_at) if paper_at is not None else default_paper_at(preset),
         printed_marks=info.marks if info else None,
     )  # fmt: skip
@@ -872,6 +905,11 @@ def queue_redo(
 ) -> None:
     """What `redo` does (and the wizard): put the cards ``refs`` name onto the backlog."""
     run_dir, info = _load_run(run)
+    if build.paper_for(info) == "holo":
+        fail(
+            f"{info.name} is a foil sheet, and the backlog prints on glossy: put the cards in a decklist "
+            "and make a foil sheet of them (mtg-proxy make --foil)"
+        )
     overrides: dict = {}
     if tokens is not None:
         overrides["token_copies"] = tokens
@@ -1092,7 +1130,9 @@ def _fresh_name(parent: Path, base: str) -> str:
 @app.command(name="print", help="Print a PDF on the Windows PC's Epson queues (never from the Mac).")
 def print_cmd(
     pdf: Annotated[Path, typer.Argument(help="the sheet PDF", dir_okay=False)],
-    paper: Annotated[str, typer.Option("--paper", help="plain | glossy | premium")] = "glossy",
+    paper: Annotated[
+        str, typer.Option("--paper", help="plain | glossy | premium | holo (holographic sticker paper)")
+    ] = "glossy",
     dry_run: Annotated[
         bool, typer.Option("-n", "--dry-run", help="copy to the PC, show the print command, stop")
     ] = False,
